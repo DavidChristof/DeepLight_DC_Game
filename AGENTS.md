@@ -7,7 +7,7 @@
 ## 这是什么项目
 
 2D 顶视角「永夜殖民经营 + 蚀潮防守」原型。**原生 JS ES Modules，Canvas 2D，零构建、零依赖、零 npm、零测试框架。**
-84 个 `.js` ≈ 16.7k 行。当前**能完整玩通**；`W14-A` 战斗轴第 0–8 步、W15 生存/生态轴、W16-E 视觉轴与 W16-D 拓荒者轴 N0–N5b、N6a、N6b-2a、N6b-2b、N6b-2c、N6b-2d、N6b-2e、N7a、N7b、N7 完整 E2E 已完成验收。
+88 个 `.js` ≈ 16.7k 行。当前**能完整玩通**；`W14-A` 战斗轴第 0–8 步、W15 生存/生态轴、W16-E 视觉轴与 W16-D 拓荒者轴 N0–N5b、N6a、N6b-2a、N6b-2b、N6b-2c、N6b-2d、N6b-2e、N7a、N7b、N7 完整 E2E，以及 W17-F0/F1/F2/F3/F4 首局切片、W18-G0/G1/G2/G3 远征/前哨闭环均已完成验收。
 
 ## 跑起来（Windows PowerShell）
 
@@ -25,9 +25,9 @@ ES Modules 不能走 `file://`，必须用这个服务器（它禁用了缓存�
 在浏览器 DevTools 控制台里跑：
 
 ```js
-__check()                   // 期望 {ok:true, ran:63, fails:[]}
+__check()                   // 期望 {ok:true, ran:78, fails:[]}
 __check({roundtrip:true})   // 额外验证「存档→读档」往返
-__srcCheck()                // 异步源码审计，期望 {ok:true, files:73, fails:[]}
+__srcCheck()                // 异步源码审计，期望 {ok:true, files:87, fails:[]}
 ```
 
 并且 **`__check()` 必须在四种局面各跑一次**：主菜单 / 新开一局 / 读档往返后 / `__replay()` 跑过几天后。
@@ -78,6 +78,6 @@ __srcCheck()                // 异步源码审计，期望 {ok:true, files:73, f
 
 ## 下一步该做什么
 
-`HANDOFF.md` §5 的当前工作轴 **W16-D 拓荒者计划** 已完成：N0–N3、N4a、N4b、N4c、N4d、N5a、N5b、N6a、N6b-1、N6b-2a、N6b-2b、N6b-2c、N6b-2d、N6b-2e、N7a、N7b、N7 完整 E2E 均已验收。后续若继续扩展，必须另立小步计划，不能把 N7 验收当作未完成项反复重跑。
+`HANDOFF.md` §5 的当前工作轴为 **W18-G 远征与前哨补给闭环**：G0/G1/G2/G3 已验收并收口；后续扩展另立内容打磨小步。W17-F 与 W16-D 已封存，不能把历史验收当作未完成项反复重跑。
 
 N7 E2E 已修复并验证新局、死亡清理、读档恢复和远端区块竖井归属；完整 10 日三策略与复苏场景均已记录在 `docs/COLONISTS.md`。

@@ -77,6 +77,7 @@ export function snapshot(state) {
     wasDawn: !!state.wasDawn,
     nightLightPressure: state.nightLightPressure || 0,
     nightChallengeMul: state.nightChallengeMul || 1,
+    firstSlice: state.firstSlice ? JSON.parse(JSON.stringify(state.firstSlice)) : null,
     reviveCount: state.reviveCount | 0,
     bossSpawnedThisNight: !!state.bossSpawnedThisNight,
     rescue: state.rescue ? {

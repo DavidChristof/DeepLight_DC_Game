@@ -140,6 +140,8 @@ canvas#game {
 #tide, #waveleft, #nighttheme { border-color: rgba(143,208,255,.35); }
 #waveleft { color: var(--warn); }
 #nighttheme { color: var(--accent); }
+#expedition-status { color: #bfe4ff; border-color: rgba(127,224,255,.55); max-width: 330px; overflow: hidden; text-overflow: ellipsis; }
+#expedition-status.warn { color: #ffcf8a; border-color: rgba(255,207,138,.72); }
 
 .res { white-space: nowrap; }.r-ore { color: #4be0c4; }
 .r-vine { color: #e0b96a; }
@@ -520,7 +522,7 @@ canvas#game {
   #hud-right { gap: 3px; flex-wrap: wrap; justify-content: flex-end; }
   .stat { padding: 1px 4px; }
   .meter-track { width: 38px; }
-  #nighttheme, #waveleft { display: none; }
+  #nighttheme, #waveleft, #expedition-status { display: none; }
 }
 #panel.research-wide { width: min(620px, calc(100vw - 28px)); }
 #panel.station-wide { width: min(540px, calc(100vw - 28px)); top: 88px; bottom: 112px; }
@@ -804,6 +806,12 @@ canvas#game {
   opacity: 1;
   transition: opacity 0.45s linear;
 }
+.outpost-flow { margin: 4px 0 8px; padding: 6px 7px; border: 1px solid rgba(127,224,255,.28); border-radius: var(--r); background: rgba(30,52,70,.22); }
+.outpost-flow .psec { margin: 0 0 5px; padding: 0; border: 0; }
+.outpost-steps { display: flex; flex-wrap: wrap; gap: 4px; }
+.outpost-step { padding: 2px 5px; border: 1px solid rgba(255,207,138,.35); border-radius: 3px; color: #ffcf8a; font-size: 11px; white-space: nowrap; }
+.outpost-step.ok { color: #9ef7a8; border-color: rgba(158,247,168,.45); }
+.outpost-flow .bnote { margin: 5px 0 0; padding: 0; border: 0; }
 #firstnote::before, #firstnote::after { color: rgba(170, 190, 214, 0.42); }
 #firstnote::before { content: '———————— '; }
 #firstnote::after { content: ' ————————'; }

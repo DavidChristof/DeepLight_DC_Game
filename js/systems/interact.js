@@ -16,6 +16,7 @@ import { workOnce, lightFire, fireOn } from './craft.js';
 import { dropRelic } from './relics.js';
 import { heatOf, fireMatOf, fuelName } from '../data/fire.js';
 import { SOOTHE } from '../data/traits.js';
+import { advanceFirstSlice } from './firstSlice.js';
 import { sfx, everyN } from '../core/audio.js';
 import { startPlayerRescue, reviveAtGrave } from '../entities/worker.js';
 
@@ -314,6 +315,7 @@ export function tick(state, action) {
     if (m.nodeAmt[action.i] <= 0) m.nodeAmt[action.i] = nodeFallback(m.tiles[action.i]);
     const stored = deposit(state, action.res, 1, action.x + 0.5, action.y + 0.5);   // 自动进最近的容器
     m.nodeAmt[action.i]--;
+    if (stored > 0 && (action.res === 'ore' || action.res === 'vine')) advanceFirstSlice(state, 'gather');
     const label = action.res === 'ore' ? '+辉髓'
       : action.res === 'vine' ? '+藤木'
         : action.res === 'stone' ? '+石头'

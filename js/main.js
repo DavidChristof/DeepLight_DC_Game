@@ -9,6 +9,7 @@ import { updateTime, phaseInfo, ambientOf, TIDE_START, TIDE_END, DUSK_START, isD
 import { saveGame, loadGame, clearSave, migrateLegacy } from './core/save.js';
 import { settings, loadSettings } from './core/settings.js';
 import { DIFFICULTY } from './data/difficulty.js';
+import { createFirstSlice, firstSliceReport, normalizeFirstSlice } from './data/firstSlice.js';
 import { setupScreens, openScreen, closeScreens, backScreen, screenOpen, screenTop, screenClick, screenChange, screenInput, screenHover, applyArt } from './ui/screens.js';
 import { draw } from './systems/render.js';
 import { BUILD, LIGHT_LEVELS, workOf, CATEGORIES, canAfford, TOWER_LV, towerHp } from './data/buildings.js';
@@ -30,6 +31,8 @@ import { Worker, updateWorkers, recruitWorker, needRefine, startPlayerRescue, re
 import { updateFarm } from './systems/farm.js';
 import { updateBlight, updatePurifiers, blightStats, blightDebug } from './systems/blight.js';
 import { updateEcology } from './systems/ecology.js';
+import { tickFirstSlice } from './systems/firstSlice.js';
+import { expeditionHud, tickExpeditionGuide } from './systems/expedition.js';
 import { updateNightOps, ensureNightOps, inPatrolSector, patrolActive } from './systems/nightops.js';
 import { updateMind, ensureMind, graveStats, soothe, bondLevel } from './systems/mind.js';
 import { updateHazard } from './systems/hazard.js';
@@ -119,6 +122,7 @@ const elPhase = document.getElementById('phase');
 const elTide = document.getElementById('tide');
 const elNightTheme = document.getElementById('nighttheme');
 const elWaveLeft = document.getElementById('waveleft');        // W14-A 第 7 步：还剩几波（威胁预告）
+const expeditionEl = document.getElementById('expedition-status'); // W18-G1：远征状态卡
 const bar = document.getElementById('bar');
 const sidebarEl = document.getElementById('sidebar');
 const elLayer = document.getElementById('layer');
@@ -243,7 +247,11 @@ function newGame(seed, diffKey = 'normal') {
   state.wasDawn = false;
   state.nightLightPressure = 0;
   state.nightChallengeMul = 1;
+  // W17-F0：真实新局默认启用首局切片；标准回放临时关闭，不能让观测地基改写旧曲线。
+  state.firstSlice = createFirstSlice(!state._replayMode, 1, 0);
   state.seen = {};                    // 新开一局：首次提示重新算（读档会在 loadFromData 里覆盖回存档里的）
+  state._expGuideSeen = null;
+  state._expGuideCooldown = 0;
   state._blightAny = false;
   state.skillCd = 0;
   state.skillQueued = 0;
@@ -684,6 +692,9 @@ function loadFromData(s) {
   clearGeneratedBuildings(state);
   state.res = Object.assign({ ore: 0, vine: 0, fuel: 0, data: 0, core: 0, food: 4, night: 0 }, s.res || {});
   state.seen = Object.assign({}, s.seen || {});      // 已经说过的首次提示，读档后不再弹
+  state._expGuideSeen = null;                         // G1 提示是会话态，不随存档迁移
+  state._expGuideCooldown = 0;
+  state.firstSlice = normalizeFirstSlice(s.firstSlice, !state._replayMode, state.day, state.t);
   restoreBuildings(s.buildings || []);
   restoreSurfaceChunks(state, s.chunks, state.chunkX || 0, state.chunkY || 0);
   // 第 5 步 5b：读档后重建“背上的结构体”（存档只存 mounted 标记，不存引用）
@@ -1062,7 +1073,7 @@ function boot() {
   if (qpMenu) qpMenu.addEventListener('click', () => { state.quickPause = false; openScreen('pause'); });
   setupPanelUI({ onSelectBuild: toggleBuild, onToggleDemolish: toggleDemolish, onRecruit: () => tryRecruit(), onToggleHotbar: () => toggleHotbar(state) });     // 面板点击建造行 → 选中建筑；点「快捷建造」标签 → 开关下面那一条
   setupScreens({
-    onStart: (seed, diff) => { newGame(seed, diff); warnMovedKeys(); maybeHint(state, 'firstGame', showFirstNote); },
+    onStart: (seed, diff) => { newGame(seed, diff); warnMovedKeys(); },
     onLoad: (slot) => { const d = loadGame(slot); if (d) { loadFromData(d); warnMovedKeys(); } },
     onSave: (slot) => { if (state.started) saveGame(state, slot); },
     onResume: () => { state.quickPause = false; syncPause(); },
@@ -1506,7 +1517,14 @@ function update(dt) {
   while (acc >= STEP) { acc -= STEP; simStep(STEP); } // 固定步推进
   mouseDuties();
   stepFirstNote(dt);
+  const slicePhaseBefore = state.firstSlice && state.firstSlice.phase;
+  tickFirstSlice(state, showFirstNote);
   checkHints(state, dt, showFirstNote);               // 首次提示（说一次就不再说）
+  // 首次远征提示优先于 G1 的设施提醒；其它帧再显示补给/返程建议。
+  // 放在通用首次提示之后，确保“先在这里建储物箱”不会被全局断粮提示盖掉。
+  if (!(slicePhaseBefore === 'aftermath' && state.firstSlice && state.firstSlice.phase === 'expedition')) {
+    tickExpeditionGuide(state, showFirstNote, dt);
+  }
   updateAmbient(state, dt);                           // 环境音床（缺文件就静音，不影响其它声音）
   const cam = state.camera;                           // 摄像机按帧平滑跟随（+ 中键拖屏的临时偏移）
   const p = state.player;
@@ -1668,6 +1686,19 @@ function drawHud() {
     }
   }
   elKills.textContent = state.kills;
+
+  if (expeditionEl) {
+    const expedition = expeditionHud(state);
+    expeditionEl.classList.toggle('hidden', !expedition);
+    expeditionEl.classList.toggle('warn', !!(expedition && expedition.warn));
+    if (expedition) {
+      expeditionEl.textContent = expedition.text;
+      expeditionEl.title = expedition.title;
+    } else {
+      expeditionEl.textContent = '';
+      expeditionEl.title = '';
+    }
+  }
 
   // Boss 血条（第 7 步：多一个阶段读数 + 血条上 50% 刻度，让“转折点”看得见）
   const bs = state.bossRef;
@@ -2211,6 +2242,7 @@ window.__abilities = () => abilityReport(state);   // W14-A 第 3 步：四种�
 window.__survival = () => survivalReport(state);   // W15-B 第 0 步：生存资源、人员、死亡与节点基线（只读）
 window.__expedition = () => expeditionReport(state); // W15-B 第 0 步：区块远征基线（只读）
 window.__eco = () => ecologyReport(state);             // W15-C E0：生态/群系/前线观测（只读）
+window.__slice = () => firstSliceReport(state);         // W17-F0：首局切片进度（只读；F1 起接入事件）
 window.__crew = () => crewReport(state);                // W16-D N0：拓荒者身份/任务/风险/关系观测（只读）
 window.__tasks = () => taskBoardStats(state);           // W16-D N1：任务板预约与调度观测（只读）
 window.__visual = () => visualReport();                // W16-E V0：视觉规格/对比度观测（只读）
@@ -2241,6 +2273,7 @@ window.__lab = () => labReport(state);         // W14-A 第 2 步：穷举全部
 // 所以曲线反映的是真机制；回放期间强制关掉自动存档（免得 7 天长跑写盘）。
 window.__replay = (opts) => {
   window.__settings.autosave = false;
+  state._replayMode = true;
   const bAt = (tx, ty) => buildingAt(state, tx, ty);
   const freeTile = (tx, ty) => {
     const m = state.map;
@@ -2269,7 +2302,7 @@ window.__replay = (opts) => {
     }
     return null;
   };
-  return runReplay(opts, {
+  try { return runReplay(opts, {
     state: () => state,
     newGame: (seed, diff) => newGame(seed, diff),
     step: (dt) => simStep(dt),
@@ -2295,7 +2328,7 @@ window.__replay = (opts) => {
     seal: () => sealNow(state),
     ringSpot,
     towerSpot,
-  });
+  }); } finally { state._replayMode = false; }
 };
 window.__stress = (nEnemies = 60, seconds = 10, buildings = 40) => {
   const S = state;

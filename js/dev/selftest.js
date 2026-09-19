@@ -63,6 +63,8 @@ import { ECOLOGY, BIOMES, biomeIdAt, frontStageOf } from '../data/ecology.js';
 import { COLONISTS, crewCardOf, roleTaskMul, roleInfluence, assignRole } from '../data/colonists.js';
 import { TASKS, DIRECTIVES, taskFromSave, directiveFromSave } from '../data/tasks.js';
 import { taskBoardStats } from '../systems/taskBoard.js';
+import { FIRST_SLICE, createFirstSlice, normalizeFirstSlice } from '../data/firstSlice.js';
+import { EXPEDITION } from '../data/expedition.js';
 
 // 节点地形与上限都取自 data/nodes.js（唯一数据源，B13 之后不再手写第二份）
 const NODE_TILES = Object.keys(NODE_AMT).map(Number).concat([T.ROCK]);
@@ -1100,6 +1102,34 @@ const RUNTIME_CHECKS = [
     },
   },
   {
+    id: 'slice.state',
+    run() {
+      if (!state.started) return null;
+      const out = [];
+      const slice = normalizeFirstSlice(state.firstSlice, false, state.day, state.t);
+      if (!state.firstSlice || state.firstSlice.version !== FIRST_SLICE.VERSION) out.push(`运行时版本 ${state.firstSlice && state.firstSlice.version} ≠ ${FIRST_SLICE.VERSION}`);
+      if (slice.active && !FIRST_SLICE.PHASES.includes(slice.phase)) out.push(`阶段未知：${slice.phase}`);
+      if (slice.history.length > FIRST_SLICE.MAX_HISTORY) out.push(`历史 ${slice.history.length} > 上限 ${FIRST_SLICE.MAX_HISTORY}`);
+      if (slice.active && slice.phase !== 'wake' && !slice.flags.wake) out.push('已离开 wake 但缺少 wake 记录');
+      if (slice.active && ['light', 'dusk', 'tide', 'aftermath', 'expedition', 'complete'].includes(slice.phase) && !slice.flags.gather) out.push('已进入点灯阶段但缺少 gather 记录');
+      if (slice.active && ['dusk', 'tide', 'aftermath', 'expedition', 'complete'].includes(slice.phase) && !slice.flags.dusk) out.push('已进入黄昏阶段但缺少 dusk 记录');
+      if (slice.active && ['tide', 'aftermath', 'expedition', 'complete'].includes(slice.phase) && !slice.flags.tide) out.push('已进入蚀潮阶段但缺少 tide 记录');
+      if (slice.active && ['aftermath', 'expedition', 'complete'].includes(slice.phase) && !slice.flags.aftermath) out.push('已进入余波阶段但缺少 aftermath 记录');
+      if (slice.active && ['expedition', 'complete'].includes(slice.phase) && !slice.flags.expedition) out.push('已进入远征阶段但缺少 expedition 记录');
+      if (slice.active && slice.phase === 'complete' && !slice.flags.complete) out.push('已完成首局但缺少 complete 记录');
+      if (slice.flags.firstLight && (!slice.flags.gather || !slice.history.some((h) => h.phase === 'light'))) out.push('firstLight 标记与阶段历史不一致');
+      for (const phase of ['dusk', 'tide', 'aftermath', 'expedition', 'complete']) {
+        if (slice.flags[phase] && !slice.history.some((h) => h.phase === phase)) out.push(`${phase} 标记与阶段历史不一致`);
+      }
+      for (const [k, n] of Object.entries(slice.metrics || {})) if (!Number.isFinite(n) || n < 0) out.push(`指标 ${k} 异常：${n}`);
+      if (slice.flags.tide && (slice.metrics.tideChallengeMul || 0) < 1) out.push('tide 已记录但挑战系数小于 1');
+      if (slice.flags.expedition && (!(slice.metrics.expeditionDay > 0) || !(slice.metrics.expeditionCx || slice.metrics.expeditionCy))) out.push('expedition 已记录但缺少离营区块');
+      if (slice.flags.complete && !(slice.metrics.returnDay > 0)) out.push('complete 已记录但缺少回营日期');
+      if (state._replayMode && slice.active) out.push('标准回放不应启用首局切片');
+      return out.length ? bad('slice.state', '首局切片运行时状态异常', out.slice(0, MAX_DETAIL)) : null;
+    },
+  },
+  {
     id: 'outpost.ecology',
     run() {
       if (!state.started) return null;
@@ -1172,6 +1202,39 @@ const RUNTIME_CHECKS = [
 // B. 数据表交叉校验（不需要开局：随时可跑）
 // =====================================================================
 const DATA_CHECKS = [
+  {
+    id: 'slice.spec',
+    run() {
+      const out = [];
+      const probe = createFirstSlice(true, 1, 0);
+      if (probe.version !== FIRST_SLICE.VERSION || probe.phase !== FIRST_SLICE.INITIAL_PHASE || !probe.active) out.push('默认切片未从 wake/active 开始');
+      if (!Array.isArray(FIRST_SLICE.PHASES) || FIRST_SLICE.PHASES.length < 2 || new Set(FIRST_SLICE.PHASES).size !== FIRST_SLICE.PHASES.length) out.push('阶段表为空或有重复');
+      for (const [k, text] of Object.entries(FIRST_SLICE.GUIDE || {})) if (typeof text !== 'string' || !text || text.length > 24 || text.includes('——')) out.push(`引导文案 ${k} 不符合短句规范`);
+      for (const [k, n] of Object.entries(FIRST_SLICE.METRIC_DEFAULTS || {})) if (!Number.isFinite(n) || n < 0) out.push(`默认指标 ${k} 异常`);
+      const dirty = normalizeFirstSlice({ version: 99, phase: 'invalid', active: 1, flags: { ok: true, BAD: true, count: 1 }, history: [{ phase: 'gather', day: 2, t: 3 }, { phase: 'invalid' }], choice: 'x'.repeat(40) }, false, 2, 4);
+      if (dirty.version !== FIRST_SLICE.VERSION || dirty.phase !== FIRST_SLICE.INITIAL_PHASE || dirty.active !== true) out.push('非法切片未正确归一化');
+      if (!dirty.flags.ok || Object.keys(dirty.flags).length !== 1 || dirty.history.length !== 1 || dirty.choice !== null) out.push('切片归一化未过滤非法字段');
+      return out.length ? bad('slice.spec', '首局切片数据契约异常', out.slice(0, MAX_DETAIL)) : null;
+    },
+  },
+  {
+    id: 'expedition.spec',
+    run() {
+      const out = [];
+      if (EXPEDITION.VERSION < 1) out.push(`远征契约版本=${EXPEDITION.VERSION}`);
+      const h = EXPEDITION.HOME_CHUNK;
+      if (!h || h.x !== 0 || h.y !== 0) out.push('远征营地坐标必须固定为原点');
+      const expected = ['current', 'discoveredChunks', 'persistentChunks', 'activeChunks', 'pack', 'kit', 'local', 'outpost', 'returnHint', 'status'];
+      if (JSON.stringify(EXPEDITION.REPORT_SCHEMA) !== JSON.stringify(expected)) out.push('远征报告字段顺序或数量异常');
+      if (!(EXPEDITION.GUIDE_COOLDOWN_SEC >= 5 && EXPEDITION.GUIDE_COOLDOWN_SEC <= 60)) out.push(`远征提示冷却=${EXPEDITION.GUIDE_COOLDOWN_SEC} 不在 5–60s 范围`);
+      for (const k of ['dusk', 'noStore', 'noLight', 'noFood', 'noFuel', 'noRoom', 'lowHp', 'ready']) if (!EXPEDITION.GUIDE || typeof EXPEDITION.GUIDE[k] !== 'string') out.push(`远征提示缺少 ${k}`);
+      for (const [k, text] of Object.entries(EXPEDITION.GUIDE || {})) if (typeof text !== 'string' || !text || text.length > 24 || text.includes('——')) out.push(`远征提示 ${k} 不符合短句规范`);
+      const replay = EXPEDITION.REPLAY || {};
+      if (!(replay.DEPART_T > 0 && replay.DEPART_T < replay.RETURN_T && replay.RETURN_T < 400)) out.push('远征回放日程边界异常');
+      if (!(replay.FOOD_FLOOR >= 0 && replay.FUEL_FLOOR >= 0 && replay.MAX_REMOTE_CHUNKS === 1)) out.push('远征回放补给/区块上限异常');
+      return out.length ? bad('expedition.spec', '远征观测契约异常', out) : null;
+    },
+  },
   {
     id: 'visual.spec',
     run() {
@@ -2241,11 +2304,12 @@ const DATA_CHECKS = [
           buildings: [], workers: [], graves: [], enemies: [], map: state.map, light: state.light,
         };
         const row = curveRow(probe);
-        const need = ['day', 'hp', 'maxHp', 'kills', 'ore', 'vine', 'fuel', 'food', 'lamps', 'lit', 'towers', 'workers', 'blight', 'blightL3'];
+        const need = ['day', 'hp', 'maxHp', 'kills', 'ore', 'vine', 'fuel', 'food', 'lamps', 'lit', 'towers', 'workers', 'blight', 'blightL3', 'lightPressure', 'challengeMul', 'chunkX', 'chunkY'];
         for (const k of need) if (!Number.isFinite(row[k])) out.push(`curveRow().${k} = ${row[k]}（不是有限数）`);
         if (row.blightL3 > row.blight) out.push(`3 级蚀痕 ${row.blightL3} > 总蚀痕 ${row.blight}`);
         if (row.lamps !== 0 || row.towers !== 0 || row.lit !== 0) out.push('curveRow 把空建筑列表数成了有灯/有塔');
         if (row.hp !== 80 || row.ore !== 1 || row.kills !== 5) out.push('curveRow 没如实搬字段（血/资源/击杀）');
+        if (row.lightPressure !== 0 || row.challengeMul !== 1 || row.chunkX !== 0 || row.chunkY !== 0) out.push('curveRow 空世界的光压/挑战/区块默认值异常');
       }
       return out.length ? bad('replay.sane', '回放台/随机源不可信', out.slice(0, MAX_DETAIL)) : null;
     },
@@ -2269,6 +2333,7 @@ const DATA_CHECKS = [
         hp: state.playerHp, hunger: state.playerHunger, injury: state.playerInjury,
         overwork: (state.workers || []).map((w) => w.overwork || 0),
         deathPack: JSON.stringify(state.deathPack || null),
+        firstSlice: JSON.stringify(normalizeFirstSlice(state.firstSlice, false, state.day, state.t)),
       };
       try { window.__reload(snap); } catch (err) { out.push(`读档路径抛异常：${err && err.message}`); }
       const after = {
@@ -2276,6 +2341,7 @@ const DATA_CHECKS = [
         hp: state.playerHp, hunger: state.playerHunger, injury: state.playerInjury,
         overwork: (state.workers || []).map((w) => w.overwork || 0),
         deathPack: JSON.stringify(state.deathPack || null),
+        firstSlice: JSON.stringify(normalizeFirstSlice(state.firstSlice, false, state.day, state.t)),
       };
       if (after.n !== before.n) out.push(`读档往返后建筑数 ${after.n} ≠ ${before.n}`);
       if (after.layer !== before.layer) out.push(`读档往返后层 ${after.layer} ≠ ${before.layer}`);
@@ -2285,6 +2351,7 @@ const DATA_CHECKS = [
       }
       if (after.overwork.join(',') !== before.overwork.join(',')) out.push(`读档往返后透支=${after.overwork} ≠ ${before.overwork}`);
       if (after.deathPack !== before.deathPack) out.push('读档往返后遗落包内容不一致');
+      if (after.firstSlice !== before.firstSlice) out.push('读档往返后首局切片状态不一致');
       return out.length ? bad('save.roundtrip', '读档往返路径有问题（loadFromData/restoreBuildings）', out.slice(0, MAX_DETAIL)) : null;
     },
   },

@@ -20,6 +20,7 @@
 //     不是用来重放一次真人操作。
 //   · 不许写存档：回放期间 `settings.autosave` 由调用方关掉（main.js 的 __replay 里做了）。
 import { BUILD, canAfford } from '../data/buildings.js';
+import { EXPEDITION } from '../data/expedition.js';
 
 // —— 确定性随机源（LCG；数值取自 Numerical Recipes）——
 export function makeRng(seed) {
@@ -31,6 +32,8 @@ export function makeRng(seed) {
 }
 
 // —— 一行曲线（每天跨天时取一次）——
+// W17-F4：把锁夜光压/挑战系数带进回放行，三条首局路径才能解释“为什么更危险”，
+// 而不是只看最后的燃料和击杀；这里只读既有锁定值，不在回放里重算难度。
 export function curveRow(state) {
   const bs = state.buildings || [];
   const lamps = bs.filter((b) => !b.site && BUILD[b.type] && BUILD[b.type].maxFuel && !BUILD[b.type].fireMat);
@@ -55,6 +58,10 @@ export function curveRow(state) {
     blightL3: blightL3Of(state),
     enemies: (state.enemies || []).filter((e) => e.alive).length,
     sealUsed: state.lastSealDay || 0,
+    lightPressure: Math.round((state.nightLightPressure || 0) * 100) / 100,
+    challengeMul: Math.round((state.nightChallengeMul || 1) * 100) / 100,
+    chunkX: state.chunkX | 0,
+    chunkY: state.chunkY | 0,
   };
 }
 
@@ -161,20 +168,65 @@ export const POLICIES = {
   rest(state, api, ctx) {
     POLICIES.home(state, api, ctx);
   },
-  // 远征型：白天把玩家送向边缘，检验跨区块/离营地后的补给压力；夜里仍回到守家逻辑。
+  // 远征型（G3）：只做一次相邻区块往返。
+  // 这是开发回放的有限路线，不限制正式游戏的自由探索：准备 → 相邻区块 →
+  // 短暂落点检查 → 日落/补给阈值返程 → 回营后继续守家。
   expedition(state, api, ctx) {
-    POLICIES.home(state, api, ctx);
-    if (state.t < 260 && ctx.ready('expedition', 45)) {
-      const p = state.player, m = state.map;
-      // 送到出口内侧；`tryCrossSurfaceExit` 会在玩家真正越过 0.6 边界时换区块。
-      // 旧值 m.w-3 只会停在岩壁前，远征统计因此永远看不到新区块。
-      const eastWest = p.x < m.w / 2;
-      // 目标用出口内侧可行走格；`tryCrossSurfaceExit` 会在碰撞边界约 1.5 格处换区块。
-      const tx = eastWest ? m.w - 1 : 1;
-      const ty = Math.round(m.h / 2);
-      api.goto(tx, ty);
-      ctx.bump('expeditionGoto');
+    const cfg = EXPEDITION.REPLAY;
+    const route = ctx.memo.expedition || (ctx.memo.expedition = {
+      phase: 'prepare', origin: { x: 0, y: 0 }, remote: null,
+      visited: [], departDay: 0, returnDay: 0, reason: '', outOfRange: false,
+    });
+    const atHome = (state.chunkX | 0) === 0 && (state.chunkY | 0) === 0;
+    const key = `${state.chunkX | 0},${state.chunkY | 0}`;
+    if (!route.visited.includes(key)) route.visited.push(key);
+    const p = state.player, m = state.map;
+    const exitTarget = () => api.goto(m.w - 1, Math.round(m.h / 2));
+    const returnTarget = () => api.goto(1, Math.round(m.h / 2));
+
+    if (route.phase === 'prepare') {
+      POLICIES.home(state, api, ctx);
+      if (atHome && state.t >= cfg.DEPART_T && ctx.ready('expedition.depart', 45)) {
+        route.phase = 'outbound';
+        route.departDay = state.day | 0;
+        exitTarget();
+        ctx.bump('expeditionDepart');
+      }
+      return;
     }
+    if (route.phase === 'outbound') {
+      if (atHome) { exitTarget(); return; }
+      route.remote ||= { x: state.chunkX | 0, y: state.chunkY | 0 };
+      const dist = Math.abs(route.remote.x) + Math.abs(route.remote.y);
+      if (dist > cfg.MAX_REMOTE_CHUNKS) {
+        route.outOfRange = true;
+        route.reason = '超出相邻区块边界';
+        route.phase = 'return';
+      } else {
+        route.phase = 'explore';
+        route.reason = '抵达相邻区块';
+        ctx.bump('expeditionArrive');
+      }
+    }
+    if (route.phase === 'explore') {
+      route.remote ||= { x: state.chunkX | 0, y: state.chunkY | 0 };
+      const dist = Math.abs((state.chunkX | 0)) + Math.abs((state.chunkY | 0));
+      if (dist > cfg.MAX_REMOTE_CHUNKS || state.t >= cfg.RETURN_T || (state.res.food || 0) <= cfg.FOOD_FLOOR || (state.res.fuel || 0) <= cfg.FUEL_FLOOR || state.playerHp < state.playerMaxHp * 0.55) {
+        route.phase = 'return';
+        route.reason = state.t >= cfg.RETURN_T ? '日落临近' : '补给或生命达到返程阈值';
+        ctx.bump('expeditionReturn');
+      } else if (ctx.ready('expedition.explore', cfg.EXPLORE_INTERVAL_SEC)) {
+        api.goto(Math.round(m.w / 2), Math.round(m.h / 2));
+        ctx.bump('expeditionExplore');
+      }
+    }
+    if (route.phase === 'return') {
+      if (!atHome) { returnTarget(); return; }
+      route.phase = 'done';
+      route.returnDay = state.day | 0;
+      ctx.bump('expeditionComplete');
+    }
+    if (route.phase === 'done') POLICIES.home(state, api, ctx);
   },
   // 对照组：什么都不做（连灯都不点、不建塔、不开火）
   idle() {},
@@ -194,6 +246,7 @@ export function runReplay(opts, api) {
   const cd = new Map();                           // 策略自己的冷却（step 计数）
   const stats = {};                               // 动作计数（回放台的可观测性："为什么没建成"先看这里）
   const ctx = {
+    memo: Object.create(null),
     ready(key, secs) { const at = cd.get(key) || -1e9; if (steps - at < secs * 60) return false; cd.set(key, steps); return true; },
     bump(key) { stats[key] = (stats[key] || 0) + 1; },
   };
@@ -229,6 +282,9 @@ export function runReplay(opts, api) {
     }
     const last = rows[rows.length - 1];
     const minHp = Math.round(minHpEver === Infinity ? last.hp : minHpEver);
+    const lightPressureMax = rows.reduce((n, row) => Math.max(n, row.lightPressure || 0), 0);
+    const challengeMulMax = rows.reduce((n, row) => Math.max(n, row.challengeMul || 1), 1);
+    const chunks = new Set(rows.map((row) => `${row.chunkX},${row.chunkY}`));
     return {
       seed: o.seed, diff: o.diff, policy: typeof o.policy === 'string' ? o.policy : 'custom', days: o.days,
       ranDays: last.day, steps, secs: Math.round(steps * o.dt), ms: Math.round(performance.now() - t0),
@@ -236,6 +292,16 @@ export function runReplay(opts, api) {
       workersStart: rows[0].workers, workersEnd: last.workers, gravesEnd: last.graves,
       blightEnd: last.blight, blightL3End: last.blightL3, litEnd: last.lit, towersEnd: last.towers,
       fuelEnd: last.fuel, foodEnd: last.food, kills: last.kills, sealDay: last.sealUsed,
+      lightPressureMax, challengeMulMax, chunksVisited: Array.from(chunks),
+      expedition: ctx.memo.expedition ? {
+        phase: ctx.memo.expedition.phase,
+        remote: ctx.memo.expedition.remote ? { ...ctx.memo.expedition.remote } : null,
+        visited: ctx.memo.expedition.visited.slice(0, 8),
+        departDay: ctx.memo.expedition.departDay | 0,
+        returnDay: ctx.memo.expedition.returnDay | 0,
+        reason: ctx.memo.expedition.reason || '',
+        outOfRange: !!ctx.memo.expedition.outOfRange,
+      } : null,
       stats, rows,
     };
   } finally {

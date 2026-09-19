@@ -30,6 +30,7 @@ import { sfx } from '../core/audio.js';
 import { keyLabel, boundCode } from '../data/keymap.js';
 import { COLONISTS, crewCardOf, assignRole, recordCrewEvent } from '../data/colonists.js';
 import { allCrewWorkers, findCrewWorker, setDirective } from '../systems/taskBoard.js';
+import { isAway, outpostReadinessOf } from '../systems/expedition.js';
 
 let selectBuild = () => { };
 let toggleHotbar = () => { };
@@ -420,6 +421,7 @@ function renderPack(state) {
   const pack = packContainer(state), stock = pack.ref.stock || {};
   const keys = RES_ORDER.filter((k) => (stock[k] || 0) > 0).concat(TOOL_ORDER.filter((k) => (stock[k] || 0) > 0));
   let html = `<div class="psec">随身背包 · ${usedOf(pack)} / ${pack.cap} 格</div>`;
+  html += outpostFlowHtml(state);
   html += '<div class="bnote">物品会随你跨区块、跨楼层移动；丢下后可在脚边重新拾回</div>';
   if (!keys.length) return html + '<div class="sempty">背包是空的</div>';
   for (const k of keys) {
@@ -431,6 +433,17 @@ function renderPack(state) {
     </div>`;
   }
   return html + '<div class="ptip">丢下不会销毁物品；掉落物放在当前位置，30 秒后消失。</div>';
+}
+
+function outpostFlowHtml(state) {
+  if (!isAway(state)) return '';
+  const r = outpostReadinessOf(state);
+  const steps = r.steps.map((step) => `<span class="outpost-step${step.ok ? ' ok' : ''}" data-live="outpost-step-${step.id}">${step.ok ? '✓' : '待'} ${step.label}</span>`).join('');
+  return `<div class="outpost-flow" data-outpost-flow>
+    <div class="psec">前哨准备 · <b data-live="outpost-count">${r.readyCount}/4</b></div>
+    <div class="outpost-steps">${steps}<span class="outpost-step${r.assigned ? ' ok' : ''}" data-live="outpost-step-crew">${r.assigned ? '✓' : '待'} 派拓荒者</span></div>
+    <div class="bnote" data-live="outpost-note">${r.local.hasStore && r.local.free <= 0 ? '当地储物箱已满 · 先清空' : '先建箱 → 点灯 → 补食物/燃料 → 派人'}</div>
+  </div>`;
 }
 
 // —— 拓荒队调度面板（N2/N6b）：登记意图，跨区移动由区块调度器按时间完成 ——
@@ -471,6 +484,7 @@ function renderCrew(state) {
   const members = allCrewWorkers(state);
   const memorial = (state.memorial || []).slice(-COLONISTS.MAX_MEMORIAL_EVENTS).reverse();
   let html = `<div class="psec">拓荒队调度 · ${members.filter((w) => w.alive !== false).length} 名在册 · 复苏 ${state.reviveCount | 0}/${SURVIVAL.REVIVE.MAX_USES}</div>`;
+  html += outpostFlowHtml(state);
   html += '<div class="bnote">选中的区块会成为前哨目标；拓荒者按时间迁移，不会瞬移。采掘前哨每 12 秒结算一次，产出只能进入当地容器；潮夜会按当地光压留下有限蚀痕前线，并发出有上限的远端告警，不会在远端额外刷怪。最多同时维持 3 个有人区块。</div>';
   if (memorial.length) {
     html += '<div class="psec memorial-head">离去记录</div>';
@@ -1165,6 +1179,7 @@ function refreshLive(state, hostEl) {
   const stB = state.stationRef;
   const stSig = stB ? `${stB.fuel | 0}|${stB.dry || ''}|${(stB.prog || 0).toFixed(1)}` : '';
   const clinicSig = activeId === 'clinic' && stB ? `${stB.medicalWorker && stB.medicalWorker.name || ''}|${(state.medicalQueue || []).filter((w) => w && w.medicalClinic === stB && w.medicalState === 'queued').length}` : '';
+  const outpost = (activeId === 'crew' || activeId === 'pack') && isAway(state) ? outpostReadinessOf(state) : null;
   // 容器面板：行里的数字看的是**容器自己的库存**，而容器↔容器搬运（取1/存1/拖拽/补给站送油）
   // 并不改总账（state.res 是聚合值）——只靠资源签名的话，面板开着时这些数字会停住不动。
   const roll = (o) => { let n = 0; for (const k in o) n += o[k] || 0; return n; };
@@ -1173,7 +1188,8 @@ function refreshLive(state, hostEl) {
     const c = allContainers(state, false).find((x) => x.ref === state.storeRef);
     stgSig = c ? `${roll(c.ref.stock)}|${roll(state.pack.stock)}` : 'x';
   }
-  const sig = `${state.res.ore}|${state.res.vine}|${state.res.fuel}|${state.res.food}|${state.res.data || 0}|${state.res.core || 0}|${state.res.night || 0}|${sites}|${codexKills(state)}|${blooms}|${vents}|${next}|${stSig}|${clinicSig}|${stgSig}`;
+  const outpostSig = outpost ? `${outpost.readyCount}|${outpost.assigned ? 1 : 0}|${outpost.local.hasStore ? 1 : 0}|${outpost.local.hasLight ? 1 : 0}|${outpost.local.food}|${outpost.local.fuel}|${outpost.local.free}` : '';
+  const sig = `${state.res.ore}|${state.res.vine}|${state.res.fuel}|${state.res.food}|${state.res.data || 0}|${state.res.core || 0}|${state.res.night || 0}|${sites}|${codexKills(state)}|${blooms}|${vents}|${next}|${stSig}|${clinicSig}|${stgSig}|${outpostSig}`;
   if (sig === liveSig) return;
   liveSig = sig;
   const set = (el, txt) => { if (el && el.textContent !== txt) el.textContent = txt; };
@@ -1185,6 +1201,23 @@ function refreshLive(state, hostEl) {
     el._k = k;
     el.innerHTML = `${icon(ico, 12)} ${txt}`;
   };
+
+  if (outpost) {
+    set(hostEl.querySelector('[data-live="outpost-count"]'), `${outpost.readyCount}/4`);
+    for (const step of outpost.steps) {
+      const el = hostEl.querySelector(`[data-live="outpost-step-${step.id}"]`);
+      if (!el) continue;
+      set(el, `${step.ok ? '✓' : '待'} ${step.label}`);
+      el.classList.toggle('ok', step.ok);
+    }
+    const crewEl = hostEl.querySelector('[data-live="outpost-step-crew"]');
+    if (crewEl) {
+      set(crewEl, `${outpost.assigned ? '✓' : '待'} 派拓荒者`);
+      crewEl.classList.toggle('ok', outpost.assigned);
+    }
+    const note = hostEl.querySelector('[data-live="outpost-note"]');
+    if (note) set(note, outpost.local.hasStore && outpost.local.free <= 0 ? '当地储物箱已满 · 先清空' : '先建箱 → 点灯 → 补食物/燃料 → 派人');
+  }
 
   if (activeId === 'build') {
     for (const row of hostEl.querySelectorAll('.brow[data-type]')) {

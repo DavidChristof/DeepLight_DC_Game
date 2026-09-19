@@ -80,4 +80,9 @@ export const state = {
   diff: null,                // 难度参数（data/difficulty.js）
   nightLightPressure: 0,
   nightChallengeMul: 1,
+  _replayMode: false,       // 开发回放上下文标记，不进存档、不驱动玩法
+  firstSlice: null,      // W17-F：首局软编排进度（纯数据；不驱动玩法数值）
+  _sliceGuide: null,      // F1：待显示的一次性首日提示，不进存档
+  _expGuideSeen: null,    // W18-G1：远征提示去重，会话态，不进存档
+  _expGuideCooldown: 0,   // W18-G1：远征提示冷却，会话态，不进存档
 };

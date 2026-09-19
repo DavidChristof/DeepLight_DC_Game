@@ -7,6 +7,7 @@ import { hasTech } from './research.js';
 import { LAYER_ORDER } from '../data/layers.js';
 import { sfx } from '../core/audio.js';
 import { SURVIVAL } from '../data/survival.js';
+import { advanceFirstSlice } from './firstSlice.js';
 
 export const PLACE_RANGE = 6;                 // 距玩家最大放置距离（tile）
 
@@ -138,6 +139,7 @@ export function completeBuilding(state, b) {
   if (def.block) m.blockLight[i] = 1;
   sfx('built', { x: b.x + 0.5, y: b.y + 0.5 });
   state.floaties.push({ x: b.x + 0.5, y: b.y - 0.3, txt: `${def.name} 建成`, color: '#9ef7d8', t: 0, life: 1.2 });
+  if (b.type === 'lamp' || b.type === 'purifier') advanceFirstSlice(state, 'lit');
   ejectFromTile(state, b.x, b.y);          // 别把人封在墙里
 }
 

@@ -7,14 +7,10 @@
 //   · 只提示"你现在就能做点什么"的事（空燃料、断粮、有人蚀化…）
 //   · 不解释数值、不写公式、不堆破折号（照 docs/COPY.md 的文案规范）
 //   · 状态型判定（资源为 0、有人在蚀化）比"事件型"更好写也更稳 —— 不需要在 8 个模块里埋钩子
-import { isTide, isDawn } from '../core/time.js';
 
 export const HINTS = {
-  firstGame: '左键 前往 · 右键 对光标处做事 · 鼠标指哪就采哪（按住 E） · H 看全键位',
   fuelEmpty: '燃料空了 · 采辉髓到熔炉炼油，藤木也能直接引火',
   noFood: '食物空了 · 幽菌田要光照才长，也可以派人夜采',
-  firstTide: '蚀潮来了 · 塔必须在光照里才能开火，先把灯点起来',
-  firstDawn: '黎明 · 残留蚀兽正在消解，夜辉草还没凋谢，可以抢收',
   firstBlight: '没光太久的地会长出蚀痕 · 点灯或光爆能净化，3 级夜里会渗怪',
   firstHollow: '有拓荒者蚀化了 · 按住 E 安抚她，或让净光柱照她',
   firstBloom: '夜辉草只在夜里长 · N 面板可以派「夜采」',
@@ -47,9 +43,6 @@ export function maybeHint(state, key, show) {
 // 说明：blight 用 state._blightAny（由 systems/blight.js 第一次累积时点亮）而不是每帧扫地图
 export function checkHints(state, dt, show) {
   if (!state.started || !show) return;
-  const night = isTide(state);
-  if (night) maybeHint(state, 'firstTide', show);
-  if (isDawn(state)) maybeHint(state, 'firstDawn', show);
   if ((state.res.fuel || 0) <= 0) maybeHint(state, 'fuelEmpty', show);
   if ((state.res.food || 0) <= 0 && (state.workers || []).length) maybeHint(state, 'noFood', show);
   if (state._blightAny) maybeHint(state, 'firstBlight', show);

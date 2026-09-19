@@ -12,6 +12,9 @@
 
 import { PULSE, TOWER, WAVES, BOSS, TYPES, TYPE_ORDER, TYPE_NAME, armorMul, LIGHT_FEAR_BURN, ABILITY, tideOf } from '../data/combat.js';
 import { BUILD } from '../data/buildings.js';
+import { EXPEDITION } from '../data/expedition.js';
+import { CAMP_CAP, PACK_CAP } from '../data/storage.js';
+import { CARRY } from '../data/combat.js';
 import { ENEMIES, KINDS } from '../data/enemies.js';
 import { nightPlan, signatureOf, mainKindOf, nightHud, pickKind } from '../data/night.js';
 import { UNLOCK_BONUS, weakTextOf } from '../data/codex.js';
@@ -79,9 +82,64 @@ export function survivalReport(state) {
 export function expeditionReport(state) {
   const map = state.map;
   const chunks = state.chunkStore ? Object.values(state.chunkStore) : [];
-  return { current: { x: state.chunkX || 0, y: state.chunkY || 0, biome: biomeOf(state.chunkX || 0, state.chunkY || 0).id, layer: state.layerId || 'surface', width: map ? map.w : 0, height: map ? map.h : 0 },
+  const cx = state.chunkX || 0, cy = state.chunkY || 0;
+  const layerId = state.layerId || 'surface';
+  const currentChunk = layerId === 'surface'
+    ? ((state.chunkStore && state.chunkStore[`${cx},${cy}`]) || (state.layers && state.layers.surface) || null)
+    : ((state.layers && state.layers[layerId]) || null);
+  const stockOf = (ref) => (ref && ref.stock && typeof ref.stock === 'object') ? ref.stock : {};
+  const sumStock = (stock) => Object.values(stock).reduce((sum, n) => sum + (Number.isFinite(n) ? Math.max(0, n) : 0), 0);
+  const localContainers = [];
+  for (const b of currentChunk && currentChunk.beacons || []) {
+    if (b && (b.hp == null || b.hp > 0)) localContainers.push({ kind: 'camp', ref: b, cap: CAMP_CAP });
+  }
+  for (const b of currentChunk && currentChunk.buildings || []) {
+    const def = b && BUILD[b.type];
+    if (def && def.store && !b.site) localContainers.push({ kind: 'store', ref: b, cap: def.store });
+  }
+  const localStock = {};
+  for (const c of localContainers) for (const [k, n] of Object.entries(stockOf(c.ref))) localStock[k] = (localStock[k] || 0) + Math.max(0, Number(n) || 0);
+  const localUsed = localContainers.reduce((sum, c) => sum + sumStock(stockOf(c.ref)), 0);
+  const localCap = localContainers.reduce((sum, c) => sum + c.cap, 0);
+  const lightSources = [];
+  for (const b of currentChunk && currentChunk.beacons || []) if (b && (b.hp == null || b.hp > 0)) lightSources.push({ kind: 'camp', power: b.power || 0, active: true });
+  for (const b of currentChunk && currentChunk.buildings || []) {
+    const def = b && BUILD[b.type];
+    if (def && def.power > 0 && !def.decoy && !b.site) lightSources.push({ kind: b.type, power: def.power, active: !!(b.fuel > 0) && !b.off });
+  }
+  const litSources = lightSources.filter((s) => s.active);
+  const packStock = stockOf(state.pack);
+  const carriedSlots = state.carried ? CARRY.PACK_SLOTS : 0;
+  const packCap = Math.max(0, (state.pack && Number.isFinite(state.pack.cap) ? state.pack.cap : PACK_CAP) - carriedSlots);
+  const packUsed = sumStock(packStock);
+  const needFor = (cost) => {
+    const need = {}, missing = {};
+    for (const [k, n] of Object.entries(cost || {})) {
+      need[k] = Math.max(0, n | 0);
+      const gap = Math.max(0, need[k] - (packStock[k] || 0));
+      if (gap) missing[k] = gap;
+    }
+    return { need, missing, ready: Object.keys(missing).length === 0 };
+  };
+  const kit = { store: needFor(BUILD.store.cost), lamp: needFor(BUILD.lamp.cost) };
+  const home = EXPEDITION.HOME_CHUNK;
+  const dx = home.x - cx, dy = home.y - cy;
+  const directions = [];
+  if (dx) directions.push(dx > 0 ? '东' : '西');
+  if (dy) directions.push(dy > 0 ? '南' : '北');
+  const outpost = currentChunk && currentChunk.outpost;
+  return { version: EXPEDITION.VERSION,
+    schema: EXPEDITION.REPORT_SCHEMA.slice(),
+    current: { x: cx, y: cy, biome: biomeOf(cx, cy).id, layer: layerId, width: map ? map.w : 0, height: map ? map.h : 0 },
     discoveredChunks: chunks.length, persistentChunks: chunks.filter((c) => c.modified || c.buildings?.length || c.beacons?.length).length || (map ? 1 : 0),
     activeChunks: chunks.filter((c) => c === (state.layers && state.layers.surface)).length,
+    pack: { used: packUsed, cap: packCap, free: Math.max(0, packCap - packUsed), carriedStructure: !!state.carried },
+    kit,
+    local: { containers: localContainers.length, used: localUsed, cap: localCap, free: Math.max(0, localCap - localUsed), stock: localStock,
+      lights: { total: lightSources.length, lit: litSources.length, power: +litSources.reduce((sum, s) => sum + s.power, 0).toFixed(2) },
+      hasFood: (localStock.food || 0) > 0, hasFuel: (localStock.fuel || 0) > 0 },
+    outpost: outpost ? { ticks: outpost.ticks | 0, reason: outpost.lastReason || '', needs: { ...(outpost.lastNeeds || {}) }, yield: { ...(outpost.lastYield || {}) }, alerts: (outpost.alerts || []).length } : null,
+    returnHint: { atHome: cx === home.x && cy === home.y, home: { ...home }, distance: Math.max(Math.abs(dx), Math.abs(dy)), directions },
     status: '按需载入：无人区块休眠，人工光弱边缘刷怪' };
 }
 
