@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>蚀渊拓荒者 Deep-Light · 原型</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/screens.css">
+</head>
+<body>
+  <div id="wrap">
+    <canvas id="game" width="720" height="480"></canvas>
+    <div id="hud">
+      <div id="hud-top">
+        <span id="day">第 1 天</span>
+        <span id="phase">白天</span>
+        <span id="hud-right">
+          <span class="stat meter hp" title="当前生命"><span class="meter-label">生命</span><span class="meter-track"><i id="hp-meter"></i></span><b id="hp">100</b></span>
+          <span class="stat meter r-food" title="饱食度会随时间下降"><span class="meter-label">饱食</span><span class="meter-track"><i id="sat-meter"></i></span><b id="sat">80</b></span>
+          <span class="stat r-kill">蚀灭 <b id="kills">0</b></span>
+          <span class="stat" id="layer">地表</span>
+          <span class="stat" id="nighttheme">今晚 混合夜</span>
+          <span class="stat" id="waveleft">今夜 ≈12 波</span>
+          <span class="stat" id="tide">潮位 1</span>
+        </span>
+      </div>
+      <div id="bar-bg"><div id="bar"></div></div>
+      <div id="bossbar" class="hidden">
+        <span id="bossname">蚀巢核心</span>
+        <div id="bossbar-bg"><div id="bossbar-fill"></div><div id="bossbar-half"></div></div>
+      </div>
+      <div id="help"><b>WASD</b> 移动 · <b>左键</b> 前往/放置 · <b>右键</b> 用 · <b>E</b> 交互 · <b>空格</b> 光爆 · <b>P</b> 暂停 · <b>H</b> 键位表</div>
+      <div id="keyhelp" class="hidden"></div>
+      <div id="buildhint">夜晚蚀潮会涌出蚀兽（噬光虫啃灯·夜枭越墙）—— 在灯照范围内布塔迎战！</div>
+      <div id="firstnote" class="hidden"></div>
+      <div id="quickpause" class="hidden">
+        <div class="qptitle">已暂停</div>
+        <div class="qprow"><button id="qp-resume">继续（P）</button><button id="qp-menu">菜单（Esc）</button></div>
+      </div>
+    </div>
+    <div id="ui">
+      <div id="sidebar"></div>
+      <!-- 底部竖排栈：快捷栏在上、面板栏在下（两者高度都不固定，绝不用 bottom 硬对位） -->
+      <div id="bottomstack">
+        <div id="hotbar" class="hidden"></div>
+        <div id="panelbar"></div>
+      </div>
+      <div id="panel" class="hidden"></div>
+      <div id="banner" class="hidden"></div>
+      <div id="tip" class="hidden"></div>
+      <div id="wtip" class="hidden"></div>
+    </div>
+    <div id="screen" class="hidden"></div>
+  </div>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

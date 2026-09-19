@@ -1,0 +1,19 @@
+# 本地运行与系统杂项
+*.log
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 编辑器与操作系统生成目录
+.vscode/
+.idea/
+
+# 依赖/构建产物（本项目不应提交这些，但防止误放进来）
+node_modules/
+dist/
+build/
+coverage/
+__pycache__/
+*.pyc

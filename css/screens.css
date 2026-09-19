@@ -1,0 +1,438 @@
+/* ===== 全屏界面层（主菜单 / 存档 / 设置 / 信息 / 暂停） ===== */
+#screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  z-index: 20;
+  /* 容器查询：菜单该不该排成两列，看的是**游戏画面这个盒**（3:2 的横屏画布），
+     不是浏览器窗口 —— 窗口竖着时（预览面板常见）画面依然是 3:2，
+     按窗口宽高比判断会把本来放得下的右侧菜单列误判成直排。 */
+  container-type: size;
+  container-name: gamearea;
+}
+#screen.hidden { display: none; }
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 42%, rgba(12, 28, 54, 0.62), rgba(2, 3, 10, 0.93) 78%);
+}
+
+#screen .card {
+  position: relative;
+  width: min(560px, 78%);
+  max-height: 84%;
+  overflow: auto;
+  background: var(--panel-deep);
+  border: 1px solid rgba(150, 190, 255, 0.22);
+  border-radius: var(--r);
+  box-shadow: 0 0 60px rgba(80, 140, 255, 0.12), 0 0 24px #000;
+  padding: 18px 22px 16px;
+  font-size: var(--fs-body);
+  line-height: 1.55;
+  color: var(--ink);
+}
+#screen .card.wide { width: min(700px, 90%); }
+#screen h2 {
+  margin: 0 0 12px;
+  font-size: var(--fs-head);
+  letter-spacing: 3px;
+  color: var(--ink-strong);
+  border-bottom: 1px solid var(--line-soft);
+  padding-bottom: 8px;
+}
+#screen .psec {
+  margin: 10px 0 6px;
+  color: var(--ink-dim);
+  letter-spacing: 1px;
+}
+
+/* 主菜单 */
+/* 标题插画（W13-F）：有 assets/sprites/title_art.png 时才加 .has-art；
+   插画铺在 ::before 里并暗化，标题与按钮仍是 ≥4.5:1 */
+#screen .card.has-art { position: relative; overflow: hidden; background-image: none; background-color: transparent; }
+#screen .card.has-art::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: var(--art);
+  background-size: cover;
+  background-position: center top;
+  image-rendering: pixelated;
+  opacity: 0.6;
+  z-index: 0;
+  pointer-events: none;
+}
+#screen .card.has-art::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(6, 10, 18, 0.5) 0%, rgba(6, 10, 18, 0.86) 60%, rgba(6, 10, 18, 0.96) 100%);
+  z-index: 0;
+  pointer-events: none;
+}
+#screen .card.has-art > * { position: relative; z-index: 1; }
+/* ===== 主菜单（W13-M）：封面式整屏 —— 左侧标题块、右侧菜单列、底部版本与键位 =====
+   插画（assets/sprites/title_art.png，像素画：左边灯塔、右边蚀潮触手）直接铺满整屏：
+   右侧压暗给菜单列、上下压暗给标题与页脚，不靠“加个黑框”把字压出来。 */
+#screen .card.maincard {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: radial-gradient(ellipse at 62% 44%, #0b1626 0%, #05070d 62%, #02030a 100%);   /* 没插画时的兜底 */
+  box-shadow: none;
+  overflow: hidden;
+}
+/* 覆盖“卡片式插画”的两条旧规则：主菜单要满屏、要按方向压暗 */
+/* 背景裁切偏左：插画的灯塔在左边，而游戏画面是 3:2（比插画的 16:9 窄）——
+   默认居中会从两边各切掉一截，把灯塔切掉一半；偏左则只切右边（右侧本来就是压暗的菜单列） */
+#screen .card.maincard.has-art::before { opacity: 1; background-position: 38% center; }
+#screen .card.maincard.has-art::after {
+  background:
+    linear-gradient(90deg, rgba(4, 7, 14, 0.34) 0%, rgba(4, 7, 14, 0.46) 34%, rgba(4, 7, 14, 0.88) 62%, rgba(4, 7, 14, 0.95) 100%),
+    linear-gradient(180deg, rgba(4, 7, 14, 0.62) 0%, rgba(4, 7, 14, 0) 22%, rgba(4, 7, 14, 0) 58%, rgba(4, 7, 14, 0.9) 100%);
+}
+
+.menu {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  /* 这个项目没有全局 border-box 重置：不加这句，height:100% + padding 会比父层高出一截，
+     页脚就被卡片裁掉了（实测横屏溢 43px、竖屏溢 34px） */
+  box-sizing: border-box;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 10px clamp(28px, 4vw, 64px);
+  height: 100%;
+  padding: clamp(18px, 3.2vh, 42px) clamp(22px, 3.4vw, 58px) clamp(14px, 2.4vh, 30px);
+  text-align: left;
+}
+
+/* —— 左：标题块（贴底，让插画在上方留白） —— */
+.mtitle { grid-column: 1; grid-row: 1; align-self: end; min-width: 0; }
+.mtitle .title {
+  margin: 0;
+  font-size: clamp(30px, 4.3vw, 56px);
+  font-weight: 600;
+  letter-spacing: clamp(6px, 1.15vw, 18px);
+  color: #f2f8ff;
+  text-shadow: 0 0 34px rgba(120, 200, 255, 0.5), 0 0 8px rgba(0, 0, 0, 0.9), 0 2px 3px #000;
+  animation: titleGlow 7s ease-in-out infinite;
+}
+@keyframes titleGlow {
+  0%, 100% { text-shadow: 0 0 28px rgba(120, 200, 255, 0.42), 0 0 8px rgba(0, 0, 0, 0.9), 0 2px 3px #000; }
+  50% { text-shadow: 0 0 44px rgba(140, 215, 255, 0.62), 0 0 8px rgba(0, 0, 0, 0.9), 0 2px 3px #000; }
+}
+.mtitle .tsub {
+  margin: clamp(6px, 1vh, 12px) 0 0;
+  font-size: clamp(10px, 0.92vw, 13px);
+  letter-spacing: clamp(3px, 0.7vw, 9px);
+  color: #82c0e0;
+}
+.mtitle .trule {
+  width: min(320px, 34vw);
+  height: 1px;
+  margin: clamp(10px, 1.5vh, 16px) 0 clamp(8px, 1.2vh, 12px);
+  background: linear-gradient(90deg, rgba(150, 225, 255, 0.85), rgba(150, 225, 255, 0.12) 70%, transparent);
+}
+.mtitle .ttag {
+  margin: 0;
+  font-size: clamp(11px, 0.95vw, 12.5px);
+  letter-spacing: 2px;
+  color: #9fb3c8;
+}
+.mtitle .note { margin-top: 10px; }
+
+/* —— 右：菜单列（选中项用一根竖线 + 渐变底 + ▸ 标出来） —— */
+.mside { grid-column: 2; grid-row: 1; align-self: center; width: clamp(232px, 23vw, 310px); }
+.mbtns { display: flex; flex-direction: column; gap: 1px; }
+#screen .card.maincard .mbtn {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 9px 12px 9px 26px;
+  background: linear-gradient(90deg, rgba(20, 34, 54, 0.5), rgba(20, 34, 54, 0.18));
+  border: 0;
+  border-left: 2px solid rgba(150, 190, 255, 0.18);
+  border-radius: 0;
+  color: #b9c8da;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--t), color var(--t), border-color var(--t);
+}
+#screen .card.maincard .mbtn .mbname {
+  position: relative;
+  display: block;
+  font-size: clamp(15px, 1.35vw, 18px);
+  letter-spacing: 4px;
+  white-space: nowrap;
+}
+/* ▸ 占固定槽位（负 margin 把它放进 padding 里）：选中时不会把文字挤动 */
+#screen .card.maincard .mbtn .mbname::before {
+  content: '▸';
+  position: absolute;
+  left: -18px;
+  color: #8fe3ff;
+  opacity: 0;
+  transition: opacity var(--t), transform var(--t);
+  transform: translateX(-4px);
+}
+#screen .card.maincard .mbtn .mbsub {
+  display: block;
+  margin-top: 2px;
+  font-size: 10.5px;
+  letter-spacing: 0.6px;
+  color: #7d8ea3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#screen .card.maincard .mbtn:hover { color: #dfeaf8; border-left-color: rgba(160, 220, 255, 0.45); }
+#screen .card.maincard .mbtn.sel {
+  background: linear-gradient(90deg, rgba(56, 132, 186, 0.42), rgba(56, 132, 186, 0.04));
+  border-left-color: #8fe3ff;
+  color: #ffffff;
+}
+#screen .card.maincard .mbtn.sel .mbname::before { opacity: 1; transform: translateX(0); }
+#screen .card.maincard .mbtn.sel .mbsub { color: #a8c8e2; }
+/* “继续游戏”：唯一那条能一路走到底的路 —— 用青绿区分（色 + 左侧竖线粗细双编码） */
+#screen .card.maincard .mbtn.primary { border-left-color: rgba(140, 255, 214, 0.5); }
+#screen .card.maincard .mbtn.primary .mbname { color: #bdf7e4; }
+#screen .card.maincard .mbtn.primary.sel { border-left-color: #8dffd2; background: linear-gradient(90deg, rgba(38, 140, 122, 0.44), rgba(38, 140, 122, 0.04)); }
+#screen .card.maincard .mbtn.primary.sel .mbname::before { color: #8dffd2; }
+
+/* —— 底：版本号（左）与键位提示（右） —— */
+.mfoot {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 14px;
+  margin: 0;
+  font-size: 10.5px;
+  letter-spacing: 1px;
+  color: var(--ink-dim);
+}
+.mfoot .ver { color: #7b8ba0; letter-spacing: 2px; }
+.mfoot .khint { white-space: nowrap; }
+.mfoot .khint b { color: #d6e6f7; font-weight: 600; letter-spacing: 0.5px; }
+
+/* 画面真的很窄 / 很矮时才直排（标题在上、菜单在下）——判据是画面容器，不是窗口 */
+@container gamearea (max-aspect-ratio: 105/100) {
+  .menu {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: clamp(12px, 2.2vh, 24px) clamp(16px, 3vw, 30px) clamp(8px, 1.6vh, 16px);
+  }
+  .mtitle { grid-column: 1; grid-row: 1; align-self: start; }
+  .mtitle .title { font-size: clamp(23px, 4.6vw, 34px); letter-spacing: clamp(4px, 1vw, 10px); }
+  .mtitle .tsub { margin-top: 4px; letter-spacing: clamp(2px, 0.5vw, 6px); }
+  .mtitle .trule { width: min(200px, 42%); margin: 7px 0 7px; }
+  .mside {
+    grid-column: 1;
+    grid-row: 2;
+    align-self: center;
+    width: min(100%, 430px);        /* 不要拉满一整行：菜单要像菜单 */
+  }
+  #screen .card.maincard .mbtn { padding: 6px 10px 6px 22px; }
+  #screen .card.maincard .mbtn .mbname { font-size: 15.5px; letter-spacing: 3px; }
+  #screen .card.maincard .mbtn .mbname::before { left: -15px; }
+  #screen .card.maincard .mbtn .mbsub { display: none; }            /* 竖向空间紧：只给选中行留副标题 */
+  #screen .card.maincard .mbtn.sel .mbsub { display: block; }
+  .mfoot { grid-row: 3; flex-wrap: wrap; gap: 4px 12px; }
+}
+/* 画面本身就很窄时（侧栏挤得只剩一条），也改成直排 */
+@container gamearea (max-width: 620px) {
+  .menu { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; gap: 8px; }
+  .mtitle { grid-column: 1; grid-row: 1; align-self: start; }
+  .mside { grid-column: 1; grid-row: 2; align-self: center; width: min(100%, 400px); }
+  .mfoot { grid-row: 3; flex-wrap: wrap; gap: 4px 12px; }
+}
+/* 老式居中按钮（其它界面仍在用：暂停菜单等）—— 主菜单已换成上面的左对齐行 */
+.mbtn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 9px 12px;
+  background: rgba(16, 26, 42, 0.9);
+  border: 1px solid rgba(150, 190, 255, 0.22);
+  border-radius: var(--r);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: var(--fs-title);
+  letter-spacing: 2px;
+  cursor: pointer;
+  transition: background var(--t), border-color var(--t);
+}
+.mbtn:hover { background: rgba(40, 70, 110, 0.9); border-color: rgba(160, 220, 255, 0.5); }
+.mbtn .sub { font-size: 10px; letter-spacing: 0; color: var(--ink-dim); }
+.mbtn.primary {
+  background: rgba(30, 80, 90, 0.85);
+  border-color: rgba(160, 255, 210, 0.45);
+}
+.mbtn.primary .sub { color: #9ef7d8; }
+.mbtn.danger { border-color: rgba(255, 120, 140, 0.35); }
+.mbtn.danger:hover { background: rgba(90, 30, 44, 0.9); }
+.note {
+  margin-top: 10px;
+  color: #9ef7d8;
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+/* 通用行 / 按钮 / 输入 */
+.row { display: flex; gap: 8px; align-items: center; }
+.row.end { justify-content: flex-end; margin-top: 14px; }
+.field {
+  flex: 1;
+  background: rgba(10, 16, 26, 0.95);
+  border: 1px solid rgba(150, 190, 255, 0.25);
+  color: #dfe9ff;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+}
+.sbtn {
+  background: rgba(20, 32, 50, 0.95);
+  border: 1px solid rgba(150, 190, 255, 0.25);
+  border-radius: var(--r);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: var(--fs-body);
+  letter-spacing: 1px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: background var(--t);
+}
+.sbtn:hover:not(:disabled) { background: rgba(45, 80, 120, 0.95); }
+.sbtn:disabled { opacity: 0.5; cursor: default; }   /* 禁用控件可放宽对比度（WCAG 1.4.3 例外），但别压到看不见 */
+.sbtn.primary { border-color: rgba(160, 255, 210, 0.45); color: #eafff6; }
+.sbtn.danger { border-color: rgba(255, 120, 140, 0.4); color: #ffd7de; }
+.sbtn.danger:hover { background: rgba(90, 30, 44, 0.9); }
+
+/* 难度卡片 */
+.diffs { display: flex; flex-direction: column; gap: 6px; }
+.diff {
+  padding: 7px 10px;
+  border: 1px solid rgba(150, 190, 255, 0.18);
+  border-radius: var(--r);
+  background: rgba(12, 20, 32, 0.7);
+  cursor: pointer;
+  transition: background var(--t), border-color var(--t);
+}
+.diff:hover { background: rgba(30, 52, 78, 0.8); }
+.diff.on { border-color: rgba(160, 255, 210, 0.55); background: rgba(28, 62, 66, 0.75); }
+.dh { display: flex; gap: 8px; align-items: baseline; color: var(--ink-strong); }
+.dtag { font-size: 10px; color: #9ef7d8; }
+.dd { font-size: var(--fs-aux); color: #a9b8cc; margin-top: 2px; }
+.ds { font-size: 10px; color: var(--ink-dim); margin-top: 2px; }
+
+/* 存档槽 */
+.slots { display: flex; flex-direction: column; gap: 6px; }
+.slot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid rgba(150, 190, 255, 0.18);
+  border-radius: var(--r);
+  background: rgba(12, 20, 32, 0.72);
+}
+.slot.empty { opacity: 0.85; }
+.sinfo { flex: 1; min-width: 0; }
+.sname { color: var(--ink); letter-spacing: 1px; }
+.smeta { font-size: 10px; color: var(--ink-dim); }
+.smeta.dim { color: var(--ink-faint); }
+.sacts { display: flex; gap: 5px; }
+
+/* 设置行 */
+.setrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.setrow > span:first-child { flex: 1; color: var(--ink); }
+.setrow .field { flex: 0 0 auto; min-width: 132px; }
+.setrow .val { color: #9ef7d8; font-size: var(--fs-aux); min-width: 34px; text-align: right; }
+.setrow input[type="checkbox"] { width: 15px; height: 15px; accent-color: #6fe0b0; }
+.setrow input[type="range"] { accent-color: #6fe0b0; }
+
+/* 设置 → 控制：动作 / 当前键 / 说明 */
+.setnote { margin: 8px 0 4px; color: var(--ink-dim); font-size: var(--fs-aux); }
+.setnote code { color: #cfe6ff; background: rgba(255, 255, 255, 0.06); padding: 0 3px; }
+.setnote .dim, .kt .dim { color: var(--ink-faint); }
+.krow {
+  display: grid;
+  grid-template-columns: 1fr 132px 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.krow.on { background: rgba(120, 200, 255, 0.1); }
+.krow .kname { color: var(--ink); }
+.krow .khint { color: var(--ink-faint); font-size: var(--fs-aux); }
+.krow .kkeys { display: flex; align-items: center; gap: 5px; justify-content: flex-end; }
+.kkey {
+  min-width: 96px;
+  padding: 3px 8px;
+  font: inherit;
+  font-size: var(--fs-aux);
+  color: var(--ink-strong);
+  background: rgba(24, 38, 58, 0.95);
+  border: 1px solid rgba(150, 190, 255, 0.28);
+  border-radius: var(--r);
+  cursor: pointer;
+  transition: background var(--t), color var(--t), border-color var(--t);
+}
+.kkey:hover:not(.fixed) { background: rgba(40, 70, 105, 0.95); }
+.kkey.fixed { color: #9aa6b5; background: rgba(18, 24, 34, 0.8); border-color: rgba(150, 190, 255, 0.14); cursor: default; }
+.kkey.changed { color: #ffe9b0; border-color: rgba(255, 220, 150, 0.5); }
+.kkey.capture { color: #0b1220; background: #8fd0ff; border-color: #cfe9ff; }
+.kreset {
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 11px;
+  color: #9ec8ff;
+  background: transparent;
+  border: 1px solid rgba(150, 190, 255, 0.22);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.kreset:hover { background: rgba(60, 110, 170, 0.5); }
+
+/* 信息页 */
+.tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+.itab {
+  padding: 3px 10px;
+  font-size: var(--fs-aux);
+  letter-spacing: 1px;
+  color: #a9b8cc;
+  border: 1px solid rgba(150, 190, 255, 0.18);
+  border-radius: var(--r);
+  cursor: pointer;
+  transition: background var(--t), color var(--t), border-color var(--t);
+}
+.itab:hover { background: rgba(120, 160, 255, 0.14); }
+.itab.on { color: #eaf3ff; border-color: rgba(160, 255, 200, 0.5); background: rgba(150, 220, 180, 0.14); }
+.ibody { max-height: 52vh; overflow: auto; }
+.ul { margin: 0; padding-left: 18px; }
+.ul li { margin-bottom: 5px; }
+.ul b { color: #9ef7d8; }
+.kt { width: 100%; border-collapse: collapse; }
+.kt td { padding: 4px 6px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); vertical-align: top; }
+.kt td:first-child { color: #8fd0ff; white-space: nowrap; width: 130px; }
+.about p { margin: 0 0 8px; }
+.about b { color: #9ef7d8; }

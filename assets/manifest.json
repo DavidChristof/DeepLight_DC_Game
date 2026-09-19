@@ -1,0 +1,4 @@
+{
+  "_note": "素材清单（W13-F）。key → 文件；**文件不存在是正常状态**：游戏自动回退到程序绘制/SVG 图标。规格与豆包提示词见 assets/PROMPTS.md。新增素材时优先改 js/data/sprites.js（权威清单），这里可以按 key 覆盖 src。",
+  "sprites": []
+}
