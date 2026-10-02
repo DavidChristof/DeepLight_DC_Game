@@ -3,7 +3,7 @@
 // 规则（与用户确认）：
 //   · 采集产出【自动进入最近的容器】，容器放不下就进【背包】，两者都满才丢（提示会区分两种情况）
 //   · 不做搬运 AI：容器之间 / 跨层搬运由玩家在容器面板里手动搬（背包也是跨层携带的唯一手段）
-//   · 支付（建造/研究/加油/招募/炼油…）优先扣【最近的容器】，再扣其它层，最后才动背包
+//   · 支付（建造/研究/加油/招募/炼油…）只扣【当前区块/层容器 + 玩家背包】；远端库存必须手动转运
 //
 // 关键约定：`state.res` 是**所有容器 + 背包的聚合值**（派生数据，只读）。
 //   任何写操作都必须走 deposit / withdraw / transfer，写完自动 syncRes。
@@ -81,6 +81,20 @@ export function packContainer(state) {
   // 背上结构体后再少 PACK_SLOTS 格（第 5 步 5b）：这是**派生值**，不进存档，读档不会不一致
   const lost = state.carried ? CARRY.PACK_SLOTS : 0;
   return { kind: 'pack', ref: pk, cap: Math.max(0, (pk.cap || PACK_CAP) - lost), x: p.x, y: p.y, layerId: state.layerId };
+}
+
+// 可支付库存只包括当前活动区块/层的容器与玩家背包。休眠区块和其它层的
+// 仓储属于远端库存，必须先手动转运；state.res 仍保留全局汇总供总库存面板显示。
+export function spendableOf(state) {
+  const out = {};
+  for (const c of allContainers(state, true)) for (const k in (c.ref.stock || {})) out[k] = (out[k] || 0) + (c.ref.stock[k] || 0);
+  for (const k in ((state.pack && state.pack.stock) || {})) out[k] = (out[k] || 0) + (state.pack.stock[k] || 0);
+  return out;
+}
+
+export function canWithdraw(state, cost) {
+  const have = spendableOf(state);
+  return Object.entries(cost || {}).every(([k, n]) => (have[k] || 0) >= (n || 0));
 }
 
 // 本层容器 + 背包总共还能放下 n 个吗？
@@ -239,14 +253,18 @@ function reportFull(state, k, lost, x, y) {
   state.floaties.push({ x: x + 0.5, y: y - 0.2, txt: `放不下 −${lost}`, color: '#ff8f6e', t: 0, life: 1.5 });
 }
 
-// —— 出库：最近容器 → 其它层容器 → 背包。总量不足时整体失败（返回缺的额度）——
+// —— 出库：当前区块容器 → 背包；远端/其它区块仓储不自动参与支付。材料不足时原子失败 ——
 export function withdraw(state, cost, x, y) {
   const px = x == null ? state.player.x : x;
   const py = y == null ? state.player.y : y;
-  for (const k in cost) if ((state.res[k] || 0) < cost[k]) return Object.assign({}, cost);
   const local = allContainers(state, true).sort((a, b) => d2(a, px, py) - d2(b, px, py));
-  const away = allContainers(state, false).filter((c) => c.layerId !== state.layerId).sort((a, b) => d2(a, px, py) - d2(b, px, py));
-  const pools = local.concat(away, [packContainer(state)]);
+  const pack = packContainer(state);
+  // 先完整核算当前区块 + 背包，避免远端库存误作可用物资或失败时部分扣料。
+  for (const k in cost) {
+    const have = local.reduce((n, c) => n + Math.max(0, boxOf(c)[k] || 0), 0) + Math.max(0, boxOf(pack)[k] || 0);
+    if (have < (cost[k] || 0)) return Object.assign({}, cost);
+  }
+  const pools = local.concat([pack]);
   for (const k in cost) {
     let need = cost[k];
     for (const c of pools) {
@@ -278,10 +296,10 @@ export function dropPack(state, k, n = 1) {
   state._warnFreeAt = null;
   return move;
 }
-export const payBuild = (state, type) => withdraw(state, BUILD[type].cost, undefined, undefined);
+export const payBuild = (state, type, costOverride = null) => withdraw(state, costOverride || BUILD[type].cost, undefined, undefined);
 // 按比例扣（玩家阵亡时燃料减半）
 export function withdrawFraction(state, k, frac) {
-  const n = Math.floor((state.res[k] || 0) * frac);
+  const n = Math.floor((spendableOf(state)[k] || 0) * frac);
   if (n > 0) withdraw(state, { [k]: n });
   return n;
 }

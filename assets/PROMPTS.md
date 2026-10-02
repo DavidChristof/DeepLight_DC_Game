@@ -156,3 +156,132 @@
 - 加载器：`js/core/assets.js`（异步、缺文件静默、`onAssetsChanged` 通知界面补图）；
 - 可选覆盖：`assets/manifest.json`（按 key 覆盖 `src`，默认空数组）；
 - 缩放约定：一律 `image-rendering: pixelated` + `imageSmoothingEnabled = false`（最近邻，保持像素锐利）。
+
+---
+
+## 7. W19-V：32px 深色像素奇幻素材批次
+
+> 这一节是 W19-V 的正式素材契约。旧的 W13 信息层素材仍可继续使用；V8 素材放入 `assets/sprites/v8/`，未经浏览器验收不要覆盖旧 key。所有提示词都必须附加：
+> `不要文字，不要水印，不要边框，不要场景背景，不要多主体，不要多帧混合，不要 3D，不要写实照片，不要内置光晕，不要投影阴影`。
+
+### 7.1 模块化人物（优先 V8-1）
+
+| key | 文件 | 尺寸 | 透明区域 | 方向顺序 | 锚点 |
+|---|---|---:|---|---|---|
+| `v8_human_legs` | `v8/human_legs.png` | 128×48 | 只画腿和鞋 | down/left/right/up | 16,44 |
+| `v8_human_face` | `v8/human_face.png` | 128×48 | 只画面部和皮肤 | down/left/right/up | 16,44 |
+| `v8_human_hair` | `v8/human_hair.png` | 128×48 | 只画头发/头饰 | down/left/right/up | 16,44 |
+| `v8_human_torso` | `v8/human_torso.png` | 128×48 | 只画上衣/护甲 | down/left/right/up | 16,44 |
+| `v8_human_gear` | `v8/human_gear.png` | 128×48 | 只画背包/工具/提灯 | down/left/right/up | 16,44 |
+
+公共提示词：
+
+```text
+一张透明背景的 32×48 像素人物图层精灵表，横向四帧，严格顺序 down | left | right | up；深色 32px 像素奇幻风格，低饱和深蓝灰与冷苔青，硬边像素，不要动画残影，不要帧间错位；只绘制指定图层，其余区域完全透明；四帧脚底必须位于第 44 行同一水平线；无内置光源和阴影。
+图层内容：<替换为 legs / face / hair / torso / gear 的具体内容>
+```
+
+### 7.2 营地样板（V8-2）
+
+| key | 文件 | 尺寸 | 生成内容 |
+|---|---|---:|---|
+| `v8_terrain_tundra` | `v8/terrain_tundra.png` | 32×32 | 2×2 逻辑格的苔原地表，只含固有材质色 |
+| `v8_terrain_tundra_moss` / `stones` / `ridges` | `v8/terrain_tundra_*.png` | 32×32 | 苔原苔斑、碎石、低矮纹理三种 albedo 变体；不画光晕 |
+| `v8_terrain_tundra_lichen` | `v8/terrain_tundra_lichen.png` | 32×32 | 苔原冷灰地衣、板岩碎粒 albedo 变体；不画光晕 |
+| `v8_terrain_vineMist` | `v8/terrain_vineMist.png` | 32×32 | 2×2 逻辑格的藤雾林地表：湿润土、藤蔓与碎石，只含固有材质色 |
+| `v8_terrain_vineMist_roots` / `mist` / `leaf` | `v8/terrain_vineMist_*.png` | 32×32 | 藤雾林根系、湿痕、落叶三种 albedo 变体；不画光晕 |
+| `v8_terrain_vineMist_water` | `v8/terrain_vineMist_water.png` | 32×32 | 藤雾林湿地、暗水痕与根须 albedo 变体；不画光晕 |
+| `v8_terrain_shaleRise` | `v8/terrain_shaleRise.png` | 32×32 | 2×2 逻辑格的碎岩台地地表：板岩裂隙、砾石与锈色矿尘，只含固有材质色 |
+| `v8_terrain_shaleRise_strata` / `chips` / `veins` | `v8/terrain_shaleRise_*.png` | 32×32 | 碎岩台地层理、砾片、细脉三种 albedo 变体；不画光晕 |
+| `v8_terrain_shaleRise_iron` | `v8/terrain_shaleRise_iron.png` | 32×32 | 碎岩台地铁尘、板岩碎片 albedo 变体；不画光晕 |
+| `v8_decor_tundra_reeds` | `v8/decor_tundra_reeds.png` | 32×32 | 苔原霜苇与地衣石堆；透明背景，不画光晕 |
+| `v8_decor_vine_roots` | `v8/decor_vine_roots.png` | 32×32 | 藤雾林蕨叶与卷根；透明背景，不画光晕 |
+| `v8_decor_shale_ironchip` | `v8/decor_shale_ironchip.png` | 32×32 | 碎岩台地板岩堆与铁屑；透明背景，不画光晕 |
+| `v8_campfire` | `v8/campfire.png` | 32×32 | 石圈、交叠柴堆和静态火焰轮廓 |
+| `v8_lamp` | `v8/lamp.png` | 32×48 | 灯柱、支架、灯芯；不画外部光晕 |
+| `v8_store` | `v8/store.png` | 32×32 | 木箱、箱盖、锁扣；不画容量条 |
+| `v8_node_rock` | `v8/node_rock.png` | 32×32 | 蓝灰岩壁资源节点；透明背景，不画动态光 |
+| `v8_node_ore` | `v8/node_ore.png` | 32×32 | 青绿色辉髓矿脉；透明背景，不画矿脉脉冲 |
+| `v8_node_vine` | `v8/node_vine.png` | 32×32 | 藤木、卷根和冷苔叶片；透明背景，不画阴影 |
+| `v8_node_relic` | `v8/node_relic.png` | 32×32 | 破碎遗迹碑、黄铜碎片和紫色符印；透明背景，不画符印光晕 |
+| `v8_node_mother` | `v8/node_mother.png` | 32×32 | 金褐母脉晶簇；透明背景，不画动态晶光 |
+| `v8_blight` | `v8/blight.png` | 32×32 | 紫黑蚀痕地块、裂隙与晶刺；透明背景，不画动态脉冲或外部光晕 |
+| `v8_vent` | `v8/vent.png` | 32×32 | 潮穴静态裂口、冷色岩缘与深色中心；透明背景，不画喷发光晕 |
+
+### 7.2b 交互建筑样板（V8-3）
+
+| key | 文件 | 尺寸 | 生成内容 |
+|---|---|---:|---|
+| `v8_bench` | `v8/bench.png` | 32×32 | 木制制造台、夹具、锤子和工具架；不画进度条 |
+| `v8_furnace` | `v8/furnace.png` | 32×32 | 石制手工熔炉、炉口和短烟囱；不画火焰光晕 |
+| `v8_smelter` | `v8/smelter.png` | 32×32 | 自动熔炉、铜烟囱、料斗与齿轮；不画动态烟火 |
+| `v8_clinic` | `v8/clinic.png` | 32×32 | 野外医疗帐、床位、药箱和十字标记；不画治疗进度 |
+| `v8_analyzer` | `v8/analyzer.png` | 32×32 | 遗物解析台、紫色晶透镜、黄铜支架；不画解析光晕 |
+| `v8_bunk` | `v8/bunk.png` | 32×32 | 木制铺位、床垫、枕头和支架；不画睡眠状态 |
+| `v8_purifier` | `v8/purifier.png` | 32×48 | 净光柱、晶体、底座和燃料槽；不画光晕或净化波 |
+| `v8_towerGlow` | `v8/towerGlow.png` | 32×32 | 辉光塔、冷色晶体发射器和炮座；不画光束或弹道 |
+| `v8_prism` | `v8/prism.png` | 32×32 | 三角光路棱镜和金属支架；不画光路 |
+| `v8_wall` | `v8/wall.png` | 32×16 | 木墙、木桩与横梁；不画耐久条 |
+| `v8_stoneWall` | `v8/stoneWall.png` | 32×16 | 石墙、砌块与灰缝；不画耐久条 |
+| `v8_gate` | `v8/gate.png` | 32×16 | 木制栅门、铁栅与门闩；不画开合动画 |
+| `v8_farm` | `v8/farm.png` | 32×32 | 木框农田、土壤、幼苗与灌溉槽；不画生长进度 |
+| `v8_shaft` | `v8/shaft.png` | 32×32 | 石砌竖井、卷扬机和深井入口；不画下潜动画 |
+| `v8_towerShock` | `v8/towerShock.png` | 32×32 | 震击塔、铜导体与紫晶核心；不画闪电或光晕 |
+| `v8_towerChain` | `v8/towerChain.png` | 32×32 | 连锁塔、铜环与琥珀晶体；不画链式闪电或光晕 |
+| `v8_decoy` | `v8/decoy.png` | 32×32 | 未点燃的诱饵灯、金属笼和蓝灰布签；不画假光晕 |
+| `v8_cache` | `v8/cache.png` | 32×32 | 远征补给缓存、加固木箱、燃料罐与绳把；不画燃料状态 |
+| `v8_barricade` | `v8/barricade.png` | 32×16 | 木制路障、交叉木桩与横梁；透明背景，不画光晕、耐久条或施工状态 |
+
+### 7.2c 群系装饰样板（V8-5）
+
+| key | 文件 | 尺寸 | 生成内容 |
+|---|---|---:|---|
+| `v8_decor_tundra` | `v8/decor_tundra.png` | 32×32 | 苔原碎石与冷苔；透明背景，不画阴影或光晕 |
+| `v8_decor_tundra_cairn` | `v8/decor_tundra_cairn.png` | 32×32 | 苔原冷石堆与冷苔斑；透明背景，不画阴影或光晕 |
+| `v8_decor_tundra_ice` | `v8/decor_tundra_ice.png` | 32×32 | 苔原冰晶簇与冷苔；透明背景，不画阴影或光晕 |
+| `v8_decor_vine` | `v8/decor_vine.png` | 32×32 | 藤雾林卷藤、叶片与菌苔；透明背景，不画雾层光晕 |
+| `v8_decor_vine_fern` | `v8/decor_vine_fern.png` | 32×32 | 藤雾林湿蕨与小菌簇；透明背景，不画雾层光晕 |
+| `v8_decor_vine_mushroom` | `v8/decor_vine_mushroom.png` | 32×32 | 藤雾林菌根与紫色小菌；透明背景，不画雾层光晕 |
+| `v8_decor_shale` | `v8/decor_shale.png` | 32×32 | 碎岩台地两块页岩与细矿脉；透明背景，不画资源节点状态 |
+| `v8_decor_shale_slab` | `v8/decor_shale_slab.png` | 32×32 | 碎岩台地断裂板岩与锈色细缝；透明背景，不画资源节点状态 |
+| `v8_decor_shale_pebbles` | `v8/decor_shale_pebbles.png` | 32×32 | 碎岩台地砾石与锈色碎片；透明背景，不画资源节点状态 |
+
+地表提示词：
+
+```text
+单张无缝 32×32 顶视角像素地表块，深色奇幻苔原，深蓝灰土层、冷苔青斑点、少量碎石和一条细裂纹；只画固有 albedo，不要光晕、阴影、火光、资源节点、物体、边框或拼接线；硬边像素，限制 12 色，透明背景仅限块外。
+```
+
+### 7.3 蚀兽独立图像（V8-4）
+
+| key 前缀 | 尺寸 | 轮廓重点 |
+|---|---:|---|
+| `v8_enemy_bud` / `charger` | 48×48 | 尖芽轮廓 / 前倾冲锋姿态 |
+| `v8_enemy_shell` / `bomber` / `warden` | 48×48 | 硬壳剪影，分别突出引信 / 护盾核心 |
+| `v8_enemy_moth` / `spitter` | 48×48 | 翼面破洞，分别突出吞光口器 / 吐蚀器官 |
+| `v8_enemy_owl` / `blind` | 48×48 | 夜枭双眼 / 盲蚀兽无眼骨板 |
+| `v8_enemy_core` | 48×48 | 蚀巢核心，体量感和紫色裂纹 |
+
+公共提示词：
+
+```text
+单一主体、透明背景、48×48 像素蚀兽战斗精灵，深色 32px 像素奇幻风格，低光下轮廓必须清晰，主体居中，四周留安全边距；只画固有材质和识别标记，不要攻击特效、地面、光晕、血条、文字或阴影；受击闪白、攻击前摇、Boss 环由游戏代码绘制。
+主体：<替换为对应蚀兽>
+```
+
+### 7.4 群系材质追加（V8-5）
+
+首批只补两套独立于苔原的地表块：
+
+```text
+藤雾林：32×32 无缝顶视角像素地表块，湿润深绿土壤、细藤根、破碎苔斑和极少量薄雾纹理；不画树、不画资源、不画光晕。
+碎岩台地：32×32 无缝顶视角像素地表块，干燥蓝灰岩土、分层裂缝、少量暖褐碎石；不画矿脉、不画建筑、不画光晕。
+```
+
+### 7.5 交付检查
+
+1. 文件路径必须位于 `assets/sprites/v8/`，文件名与 key 一致。
+2. 人物五层必须是 128×48，四帧脚底统一为 `(16,44)`；单图建筑/蚀兽必须使用登记表中的 `frameW/frameH/anchor`。
+3. 用最近邻查看透明边缘，不能出现半透明白边、背景色或内置辉光。
+4. 放入目录后先看 `__assets()` / `__visual().v8.humanLayers`，再切换 `v8-preview` 验收；缺图必须能回退。
+5. 通过主菜单、新局、夜间、区块切换和存档往返后，才把素材从 `v8-preview` 样板提升为默认 `v8` 显示；浏览器未验收前保持可回退的预览主题。

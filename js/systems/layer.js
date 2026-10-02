@@ -38,6 +38,7 @@ export function bindLayer(state, id) {
   state.buildings = L.buildings;
   state.beacons = L.beacons;
   state.enemies = L.enemies;
+  state.bossRef = (state.enemies || []).find((e) => e && e.alive && e.def && e.def.boss) || null;
   if (car && state.buildings.indexOf(car) < 0) state.buildings.push(car);
 }
 

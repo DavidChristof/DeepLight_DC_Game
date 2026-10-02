@@ -83,9 +83,11 @@ function findPathInner(map, sx, sy, tx, ty) {
     for (let d = 0; d < 4; d++) {
       const nx = cx + DX[d], ny = cy + DY[d];
       if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-      if (!map.isWalk(nx, ny)) continue;
       const ni = ny * w + nx;
       if (gen[ni] === g) continue;
+      // 已访问格必然可走；先查戳，避免 BFS 每条反向边重复读取地形/占格。
+      // 发现顺序与 prev 完全不变，不能用更快但不同的路线改变回放结果。
+      if (!map.isWalk(nx, ny)) continue;
       gen[ni] = g; prev[ni] = cur;
       if (ni === goal) { head = tail; break; }    // 提前结束
       q[tail++] = ni;

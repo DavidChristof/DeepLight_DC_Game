@@ -5,7 +5,7 @@ import { SURVIVAL } from '../data/survival.js';
 import { ROCK_SECS, RECIPE_OF } from '../data/tools.js';
 import { nodeFallback } from '../data/nodes.js';
 import { advanceBuild, buildingAt, toggleGate } from './building.js';
-import { deposit, withdrawOne } from './storage.js';
+import { deposit, withdrawOne, canWithdraw } from './storage.js';
 import { allContainers } from './storage.js';
 import { useShaft } from './layer.js';
 import { nightbloomAt, harvestNightbloom } from './nightops.js';
@@ -19,11 +19,15 @@ import { SOOTHE } from '../data/traits.js';
 import { advanceFirstSlice } from './firstSlice.js';
 import { sfx, everyN } from '../core/audio.js';
 import { startPlayerRescue, reviveAtGrave } from '../entities/worker.js';
+import { beginStandardTrial } from './resonance.js';
 
-export const SPEED = { mine: 0.16, refine: 0.35, refuel: 0.2, shaft: 0.3, harvest: 0.25, bloom: 0.35, soothe: SOOTHE.cd, revive: 1, build: PLAYER_WORK_SECS, container: 0.35, station: 0.35, payload: 0.35 };
+export const SPEED = { mine: 0.16, refine: 0.35, refuel: 0.2, shaft: 0.3, harvest: 0.25, bloom: 0.35, soothe: SOOTHE.cd, revive: 1, build: PLAYER_WORK_SECS, container: 0.35, station: 0.35, payload: 0.35, resonance: 0.6 };
 // 兜底：万一以后新加了 kind 忘了登记 SPEED，也别把 E 键一起搞死
 export const speedOf = (kind) => (Number.isFinite(SPEED[kind]) ? SPEED[kind] : 0.3);
 const NODE_RES = { [T.ORE]: 'ore', [T.VINE]: 'vine', [T.RELIC]: 'data', [T.MOTHER]: 'core', [T.ROCK]: 'stone' };
+const deathPackInChunk = (state, pack) => pack && pack.layerId === state.layerId
+  && (pack.chunkX == null || (pack.chunkX | 0) === (state.chunkX | 0))
+  && (pack.chunkY == null || (pack.chunkY | 0) === (state.chunkY | 0));
 
 // 一次 E 结算后要等多久（挖矿受研究/工具影响；石头比矿石慢）
 export function actionCooldown(state, a) {
@@ -59,7 +63,7 @@ export function resolveInteract(state, prefer) {
   const near = (cx, cy) =>
     Math.max(Math.abs(cx + 0.5 - p.x), Math.abs(cy + 0.5 - p.y)) <= E_REACH;
   const dp = state.deathPack;
-  if (dp && dp.layerId === state.layerId && Math.hypot(dp.x - p.x, dp.y - p.y) <= 1.4) return { kind: 'deathPack', pack: dp };
+  if (deathPackInChunk(state, dp) && Math.hypot(dp.x - p.x, dp.y - p.y) <= 1.4) return { kind: 'deathPack', pack: dp };
 
   // 墓碑交互排在采集之前：未研究时也要明确告诉玩家“这里能做什么”，
   // 不能让按 E 在墓碑旁误变成挖矿。复苏的资源/次数校验在 tick 内统一处理。
@@ -87,6 +91,13 @@ export function resolveInteract(state, prefer) {
   for (const w of state.workers || []) {
     if (!w.hollow || w.layerId !== state.layerId) continue;
     if (Math.hypot(w.x - p.x, w.y - p.y) <= SOOTHE.radius) return { kind: 'soothe', w };
+  }
+
+  // 首站信标是明确的任务交互：按 E 预约标准净光仪式，不让旁边的矿点抢走输入；但不能抢走蚀化安抚。
+  for (const b of state.buildings) {
+    if (b.type !== 'resonanceBeacon' || b.site || !near(b.x, b.y)) continue;
+    const d = Math.hypot(b.x + 0.5 - p.x, b.y + 0.5 - p.y);
+    if (d <= E_REACH) return { kind: 'resonance', b };
   }
 
   // 配方站（熔炉 / 制造台 / 解析台 / 自动熔炉）：站到机器旁边本身就是明确意图。
@@ -159,7 +170,7 @@ export function resolveInteract(state, prefer) {
       const def = BUILD[b.type];
       if (!def || !def.maxFuel || b.site) continue;
       if (b.type !== 'lamp' && b.type !== 'purifier' && b.type !== 'cache' && b.type !== 'decoy') continue;
-      if (!((b.fuel || 0) < def.maxFuel) || !(state.res.fuel > 0) || !near(b.x, b.y)) continue;
+      if (!((b.fuel || 0) < def.maxFuel) || !canWithdraw(state, { fuel: 1 }) || !near(b.x, b.y)) continue;
       const d = Math.hypot(b.x + 0.5 - p.x, b.y + 0.5 - p.y);
       if (d < nd) { nd = d; need = b; }
     }
@@ -200,7 +211,7 @@ export function resolveInteractAt(state, tx, ty, reach = REACH) {
 
   // 遗落包：死亡点的背包只能在原层、原地回收，避免借死跨层传送物资。
   const dp = state.deathPack;
-  if (dp && dp.layerId === state.layerId && Math.floor(dp.x) === tx && Math.floor(dp.y) === ty) return { kind: 'deathPack', pack: dp };
+  if (deathPackInChunk(state, dp) && Math.floor(dp.x) === tx && Math.floor(dp.y) === ty) return { kind: 'deathPack', pack: dp };
 
   for (const g of state.graves || []) {
     if ((g.layerId || 'surface') !== state.layerId || g.x !== tx || g.y !== ty) continue;
@@ -216,6 +227,7 @@ export function resolveInteractAt(state, tx, ty, reach = REACH) {
   const b = buildingAt(state, tx, ty);
   if (b && !b.site) {
     const def = BUILD[b.type] || {};
+    if (b.type === 'resonanceBeacon') return { kind: 'resonance', b };
     if (def.gate) return { kind: 'gate', b };
     if (heldTool(state) === 'repair' && Number.isFinite(b.hp) && b.hp < (towerHp(def, b.level || 1) || def.hp || 0)) return { kind: 'repair', b };
     if (def.station) return { kind: 'station', b };
@@ -224,7 +236,7 @@ export function resolveInteractAt(state, tx, ty, reach = REACH) {
     if (def.growSec && (b.growth || 0) >= 1) return { kind: 'harvest', b };
     if (b.type === 'shaft') return { kind: 'shaft', b };
     // 加油只对「烧燃料的灯」有效；炉子烧的是火种（fireMat），加进去的燃料是错的
-    if (def.maxFuel && !def.fireMat && (b.fuel || 0) < def.maxFuel && (state.res.fuel || 0) > 0) return { kind: 'refuel', b };
+    if (def.maxFuel && !def.fireMat && (b.fuel || 0) < def.maxFuel && canWithdraw(state, { fuel: 1 })) return { kind: 'refuel', b };
   }
   if (b && b.site) return { kind: 'build', b };
 
@@ -263,6 +275,12 @@ export function tick(state, action) {
   if (action.kind === 'rest') {
     state.playerRestT = SURVIVAL.REST.DURATION;
     state.floaties.push({ x: state.player.x, y: state.player.y - 0.5, txt: '开始休整', color: '#d7b58a', t: 0, life: 1 });
+    return;
+  }
+  if (action.kind === 'resonance') {
+    const err = beginStandardTrial(state, action.b && action.b.resonanceSiteId);
+    if (err) addFx(state, action.b.x, action.b.y, err, '#ff9d5c');
+    else sfx('ok', { x: action.b.x + 0.5, y: action.b.y + 0.5 });
     return;
   }
   if (action.kind === 'deathPack') {
@@ -371,7 +389,7 @@ export function tick(state, action) {
     const room = def && def.maxFuel ? def.maxFuel - (action.b.fuel || 0) : 1;
     if (room <= 0) return;                    // 已满：不浪费燃料
     sfx('fuel', { x: action.b.x + 0.5, y: action.b.y + 0.5 });
-    withdrawOne(state, 'fuel', 1, action.b.x + 0.5, action.b.y + 0.5);
+    if (withdrawOne(state, 'fuel', 1, action.b.x + 0.5, action.b.y + 0.5) !== null) return;
     action.b.fuel = (action.b.fuel || 0) + 1;
     addFx(state, action.b.x, action.b.y, '+燃料', '#aee9ff');
   } else if (action.kind === 'harvest') {

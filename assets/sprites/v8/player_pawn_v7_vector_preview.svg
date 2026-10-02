@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- W19-V preview: hand-redrawn pixel SVG, 4 frames, 24x40 each. Not wired into runtime. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="576" height="240" viewBox="0 0 96 40" shape-rendering="crispEdges" role="img" aria-label="Deep-Light pixel explorer four direction preview">
+  <title>Deep-Light explorer v7 vector preview</title>
+
+  <!-- down: front view -->
+  <g id="down">
+    <!-- hair outline and hair mass -->
+    <path fill="#0b0f17" d="M6 1h12v1h3v3h2v5h-2v3H5v-1H3V5h3z"/>
+    <path fill="#3a2930" d="M7 2h10v1h3v3h1v4h-2v2H6V9H4V6h3z"/>
+    <path fill="#53383a" d="M8 2h7v2h4v3h-2v2H9V7H6V5h2z"/>
+    <path fill="#241c28" d="M6 7h5v3h-2v2H6zM17 4h3v5h-2v2h-2V8h2z"/>
+    <!-- face -->
+    <path fill="#0b0f17" d="M7 6h11v1h2v6h-2v3H8v-1H6V8h1z"/>
+    <path fill="#f0b49b" d="M8 7h9v1h2v4h-2v3H9v-1H7V9h1z"/>
+    <path fill="#ffd0ae" d="M9 8h7v1h3v2h-2v2H9z"/>
+    <path fill="#20202b" d="M10 10h2v2h-2zM16 10h2v2h-2z"/>
+    <!-- neck scarf -->
+    <path fill="#191824" d="M9 14h8v3H9z"/>
+    <path fill="#b77a2e" d="M10 14h6v2h-5z"/>
+    <path fill="#e0a13a" d="M11 15h5v1h-4z"/>
+    <!-- cloak outline, body and front opening -->
+    <path fill="#0b0f17" d="M6 16h12v1h3v3h1v15h-2v3H4v-2H2V20h2v-3h2z"/>
+    <path fill="#202c43" d="M7 17h10v2h3v15h-2v2H5v-2H3V21h2v-3h2z"/>
+    <path fill="#364766" d="M7 18h4v16H6v1H4V22h2v-3h1zM15 18h3v2h2v13h-2v2h-4V20h1z"/>
+    <path fill="#4b5c78" d="M7 20h2v8H7zM17 21h2v8h-2z"/>
+    <path fill="#111a2a" d="M11 17h3v18h-3z"/>
+    <path fill="#704f3e" d="M12 19h1v14h-1z"/>
+    <path fill="#0b0f17" d="M5 35h14v2H5z"/>
+    <path fill="#29364f" d="M7 35h10v1H7z"/>
+  </g>
+
+  <!-- left: slight forward lean while moving -->
+  <g id="left" transform="translate(24 0)">
+    <path fill="#0b0f17" d="M6 1h10v1h3v2h2v5h-2v3h-3v2H6v-1H4V5h2z"/>
+    <path fill="#3a2930" d="M7 2h8v1h3v2h2v4h-2v2h-3v2H7v-1H5V6h2z"/>
+    <path fill="#53383a" d="M8 2h7v3h3v3h-2v2h-3V8H8z"/>
+    <path fill="#241c28" d="M5 7h4v3H7v2H5zM16 4h3v5h-2v2h-2V8h2z"/>
+    <!-- profile face points left -->
+    <path fill="#0b0f17" d="M7 6h9v1h2v5h-2v3H8v-1H6v-2H4v-2h2V8h1z"/>
+    <path fill="#f0b49b" d="M8 7h7v1h2v4h-2v2H9v-1H7v-2H5v-1h2V9h1z"/>
+    <path fill="#ffd0ae" d="M9 8h6v1h2v2h-2v2H9v-2H7v-1h2z"/>
+    <path fill="#20202b" d="M8 10h2v2H8z"/>
+    <path fill="#b77a2e" d="M9 14h7v2h-6z"/>
+    <path fill="#e0a13a" d="M10 15h5v1h-4z"/>
+    <!-- leaning cloak: lower hem drifts one pixel left -->
+    <path fill="#0b0f17" d="M7 16h10v1h3v3h1v14h-2v3H3v-2H1V20h2v-3h4z"/>
+    <path fill="#202c43" d="M8 17h8v2h3v14h-2v2H4v-2H2V21h2v-3h4z"/>
+    <path fill="#364766" d="M8 18h4v15H6v1H4V22h2v-3h2zM15 19h3v2h2v12h-2v2h-4V21h1z"/>
+    <path fill="#4b5c78" d="M7 21h2v8H7zM17 22h2v7h-2z"/>
+    <path fill="#111a2a" d="M12 17h3v18h-3z"/>
+    <path fill="#704f3e" d="M13 19h1v14h-1z"/>
+    <path fill="#0b0f17" d="M4 35h15v2H4z"/>
+    <path fill="#29364f" d="M6 35h10v1H6z"/>
+  </g>
+
+  <!-- right: mirrored leaning profile -->
+  <g id="right" transform="translate(96 0) scale(-1 1)">
+    <use href="#left"/>
+  </g>
+
+  <!-- up: back view -->
+  <g id="up" transform="translate(72 0)">
+    <path fill="#0b0f17" d="M6 1h12v1h3v3h1v6h-2v3H5v-2H3V5h3z"/>
+    <path fill="#3a2930" d="M7 2h10v1h3v3h1v4h-2v3H6v-2H4V6h3z"/>
+    <path fill="#53383a" d="M8 2h8v2h4v4h-2v3H7V8H5V5h3z"/>
+    <path fill="#241c28" d="M6 8h4v3H8v2H6zM16 5h4v5h-2v2h-2V8h2z"/>
+    <!-- scarf visible from behind -->
+    <path fill="#191824" d="M8 14h9v3H8z"/>
+    <path fill="#b77a2e" d="M9 14h7v2h-6z"/>
+    <path fill="#e0a13a" d="M10 15h5v1h-4z"/>
+    <!-- back cloak -->
+    <path fill="#0b0f17" d="M6 16h12v1h3v3h1v15h-2v3H4v-2H2V20h2v-3h2z"/>
+    <path fill="#202c43" d="M7 17h10v2h3v15h-2v2H5v-2H3V21h2v-3h2z"/>
+    <path fill="#364766" d="M7 19h4v14H6v2H4V22h2v-3h1zM15 19h3v2h2v13h-2v1h-4V21h1z"/>
+    <path fill="#4b5c78" d="M7 21h2v8H7zM17 21h2v8h-2z"/>
+    <path fill="#111a2a" d="M11 18h3v17h-3z"/>
+    <path fill="#29364f" d="M5 35h14v1H5z"/>
+    <path fill="#0b0f17" d="M5 36h14v1H5z"/>
+  </g>
+</svg>

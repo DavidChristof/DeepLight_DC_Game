@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>W20-R R4-C 隔离回归</title>
+<body style="background:#101923;color:#e5edf5;font:14px Consolas,monospace">
+<h1>W20-R R4-C browser regression</h1>
+<pre id="out">准备隔离浏览器存档…</pre>
+<script>
+const keys = ['deep-light-saves-v2', 'deep-light-settings-v1', 'deep-light-ui-v1'];
+const backup = Object.fromEntries(keys.map((key) => [key, localStorage.getItem(key)]));
+const out = document.getElementById('out');
+const emit = (name, value) => { out.textContent += `\n${name}: ${JSON.stringify(value)}`; };
+const restore = () => {
+  for (const key of keys) {
+    const value = backup[key];
+    value == null ? localStorage.removeItem(key) : localStorage.setItem(key, value);
+  }
+  return Object.fromEntries(keys.map((key) => [key, localStorage.getItem(key) === backup[key]]));
+};
+window.addEventListener('beforeunload', restore);
+try {
+  const settings = backup['deep-light-settings-v1'] ? JSON.parse(backup['deep-light-settings-v1']) : {};
+  localStorage.setItem('deep-light-settings-v1', JSON.stringify({ ...settings, autosave: false }));
+} catch (_) { localStorage.setItem('deep-light-settings-v1', JSON.stringify({ autosave: false })); }
+const frame = document.createElement('iframe');
+frame.style = 'width:720px;height:520px;border:1px solid #607080';
+frame.addEventListener('load', async () => {
+  const game = frame.contentWindow;
+  const states = [];
+  try {
+    game.__settings.autosave = false;
+    states.push({ state: 'menu', check: game.__check({ includeKnown: true }) });
+    game.__newGame(4242, 'normal');
+    game.__settings.autosave = false;
+    states.push({ state: 'new-game', check: game.__check({ includeKnown: true }) });
+    states.push({ state: 'save-load-roundtrip', check: game.__check({ includeKnown: true, roundtrip: true }) });
+    const replay = game.__replay({ seed: 4242, diff: 'normal', days: 3, policy: 'home' });
+    game.__watch(true, 20);
+    game.__steps(1200);
+    const watch = { classes: game.__testLogRaw().length, summary: game.__testLog() };
+    game.__watch(false);
+    states.push({ state: 'three-day-replay', replay: { ranDays: replay.ranDays, steps: replay.steps, deaths: replay.deaths, kills: replay.kills },
+      check: game.__check({ includeKnown: true }), watch });
+    const source = await game.__srcCheck();
+    const restored = restore();
+    const result = { autosaveDisabled: game.__settings.autosave === false, states, source, restored };
+    result.ok = states.every((row) => row.check && row.check.ok && row.check.fails.length === 0)
+      && source && source.ok && source.fails.length === 0
+      && states.at(-1).watch && states.at(-1).watch.classes === 0
+      && Object.values(restored).every(Boolean);
+    emit('R4-C regression result', result);
+    out.dataset.done = 'true'; out.dataset.result = result.ok ? 'passed' : 'failed';
+  } catch (error) {
+    game.__watch(false);
+    const restored = restore();
+    emit('R4-C regression failed', { error: String(error && error.stack || error), states, restored });
+    out.dataset.done = 'true'; out.dataset.result = 'failed';
+  }
+});
+frame.src = '/';
+document.body.appendChild(frame);
+</script>
+</body>
+</html>

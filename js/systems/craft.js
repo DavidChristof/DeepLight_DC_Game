@@ -7,7 +7,7 @@ import { RECIPE_OF, recipesOf, canMake } from '../data/tools.js';
 import { BUILD } from '../data/buildings.js';
 import { FUELS, FUEL_ORDER, fuelDef, fuelName, fireMatOf, fireOn } from '../data/fire.js';
 import { RES_NAME } from '../data/storage.js';
-import { withdraw, withdrawOne, deposit, hasRoomFor } from './storage.js';
+import { withdraw, withdrawOne, deposit, hasRoomFor, spendableOf } from './storage.js';
 import { sfx } from '../core/audio.js';
 
 export { recipesOf, fireOn };
@@ -33,7 +33,8 @@ export function craftError(state, b, id) {
   if (!r) return '未知配方';
   if (!b || b.site) return '还没建好';
   if (b.craft) return '台子在忙';
-  for (const k in r.cost) if ((state.res[k] || 0) < r.cost[k]) return `${RES_NAME[k]}不足`;
+  const have = spendableOf(state);
+  for (const k in r.cost) if ((have[k] || 0) < r.cost[k]) return `${RES_NAME[k]}不足`;
   return null;
 }
 
@@ -122,7 +123,8 @@ export function workOnce(state, b) {
   if (!fireOn(b)) return '炉子冷着：先放火种（藤木/木炭/燃料都能烧）';
   const r = RECIPE_OF[recipeForStation(b, BUILD[b.type] || {})];
   if (!r || !canMake(r, 'furnace')) return '配方不对';
-  for (const k in r.cost) if ((state.res[k] || 0) < r.cost[k]) return `${RES_NAME[k]}不足`;
+  const have = spendableOf(state);
+  for (const k in r.cost) if ((have[k] || 0) < r.cost[k]) return `${RES_NAME[k]}不足`;
   if (!hasRoomFor(state, r.n || 1)) return '容器满了：成品没处放（先腾地方）';
   if (withdraw(state, r.cost, b.x + 0.5, b.y + 0.5)) return '材料不足';
   const got = deposit(state, r.out, r.n || 1, b.x + 0.5, b.y + 0.5);

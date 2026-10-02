@@ -6,6 +6,9 @@ import { NIGHTBLOOM, VENTS, PATROL } from '../data/nightops.js';
 import { BUILD } from '../data/buildings.js';
 import { deposit } from './storage.js';
 import { roleIs } from '../data/colonists.js';
+import { recordRunCount } from './ending.js';
+import { WAVES } from '../data/combat.js';
+import { ensureNightSpawnBudget, recordNightSpawn, remainingNightSpawnBudget, screenEnemyRoom } from './spawnBudget.js';
 
 // 确定性伪随机（同种子同地图）
 function rnd(seed) {
@@ -87,6 +90,7 @@ export function harvestNightbloom(state, b) {
   b.charges -= 1;
   const gain = NIGHTBLOOM.yield;
   const stored = deposit(state, 'night', gain, b.x + 0.5, b.y + 0.5);   // 走容器账本（满则丢失）
+  if (stored > 0) recordRunCount(state, 'nightHarvests');
   if (stored > 0) state.floaties.push({ x: b.x, y: b.y - 0.4, txt: '+夜髓', color: '#b9a6ff', t: 0, life: 1.0 });
   if (b.charges <= 0) b.alive = false;
   return stored;
@@ -120,19 +124,38 @@ export function inPatrolSector(state, x, y) {
 }
 
 // 潮穴喷发：刷怪 + 掉落母髓（夜里只有这里能白捡母髓，代价是被围）
+function activeChunkHasArtificialLight(state) {
+  if ((state.beacons || []).length) return true;
+  if ((state.buildings || []).some((b) => {
+    const def = b && BUILD[b.type];
+    return def && def.power && b.fuel > 0 && !b.off;
+  })) return true;
+  return !!(state.player && state.player.lamp && state.player.lamp.power > 0);
+}
+
 function eruptVent(state, v) {
   const m = state.map;
   v.burst = 1.4;
   const n = VENTS.spawnMin + Math.floor(Math.random() * (VENTS.spawnMax - VENTS.spawnMin + 1));
+  const enemies = state.layers.surface.enemies;
+  const ledger = ensureNightSpawnBudget(state, enemies, false);
+  const slots = Math.min(n, ledger.remaining, remainingNightSpawnBudget(state), screenEnemyRoom(state, enemies));
+  let spawned = 0;
   for (let k = 0; k < n; k++) {
+    if (spawned >= slots) break;
     const a = Math.random() * Math.PI * 2;
     const r = 2 + Math.random() * 4;
     const x = Math.floor(v.x + Math.cos(a) * r), y = Math.floor(v.y + Math.sin(a) * r);
     if (x < 1 || y < 1 || x >= m.w - 1 || y >= m.h - 1) continue;
     const i = y * m.w + x;
-      if (!m.isWalk(x, y) || (m.occBuild && m.occBuild[i])) continue;
-    state.layers.surface.enemies.push(new Enemy('bud', x + 0.5, y + 0.5));
+    if (!m.isWalk(x, y) || (m.occBuild && m.occBuild[i])) continue;
+    if (state.light && state.light[i] >= WAVES.DARK_MAX) continue;
+    const enemy = new Enemy('bud', x + 0.5, y + 0.5);
+    if (state._replayMode) enemy._r6SpawnSource = 'vent';
+    enemies.push(enemy);
+    spawned++;
   }
+  recordNightSpawn(state, spawned);
   state.pickups = state.pickups || [];
   state.pickups.push({ x: v.x + 0.5, y: v.y + 0.5, kind: VENTS.lootKind, t: 0, life: VENTS.lootLife });
   state.floaties.push({ x: v.x, y: v.y - 0.6, txt: '潮穴喷发！', color: '#ffb0e0', t: 0, life: 1.4 });
@@ -201,7 +224,7 @@ export function updateNightOps(state, dt) {
   if (!tide && !dawn) for (const b of ops.blooms) b.alive = false;
 
   // 潮穴：蚀潮期间周期性喷发
-  if (tide) {
+  if (tide && activeChunkHasArtificialLight(state)) {
     for (const v of ops.vents) {
       v.burst = Math.max(0, v.burst - dt * 0.7);
       v.t -= dt;

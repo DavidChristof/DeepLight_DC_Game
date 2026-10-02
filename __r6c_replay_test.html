@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>W20-R R6-C1 刷怪预算与前哨燃料回归</title>
+<body style="margin:16px;background:#101923;color:#e5edf5;font:13px Consolas,monospace">
+<h1>R6-C1 · 刷怪预算、同屏硬上限与前哨燃料</h1>
+<p id="status" style="color:#cbb981">正在隔离测试并备份正式存档…</p>
+<details open><summary>回放数据</summary><pre id="out" style="max-height:440px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere">准备测试…</pre></details>
+<iframe id="game" title="R6-C 隔离游戏实例" style="width:min(960px,96vw);height:min(640px,80vh);border:1px solid #607080"></iframe>
+<script type="module">
+(() => {
+  const officialKeys = ['deep-light-saves-v2', 'deep-light-settings-v1', 'deep-light-ui-v1'];
+  const recoveryKey = '__deep_light_r6c1_storage_backup_v1';
+  const out = document.getElementById('out'), status = document.getElementById('status'), frame = document.getElementById('game');
+  const pause = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const emit = (name, value) => { out.textContent += `\n${name}: ${JSON.stringify(value, null, 2)}`; };
+  const rawOfficial = () => Object.fromEntries(officialKeys.map((key) => [key, localStorage.getItem(key)]));
+  const restoreOfficial = () => {
+    let backup;
+    try { backup = JSON.parse(localStorage.getItem(recoveryKey) || 'null'); } catch (_) { }
+    if (!backup || !backup.keys) return { restored: false, reason: '缺少恢复备份，请保留页面并检查' };
+    for (const key of officialKeys) {
+      const raw = backup.keys[key];
+      raw == null ? localStorage.removeItem(key) : localStorage.setItem(key, raw);
+    }
+    const unchanged = Object.fromEntries(officialKeys.map((key) => [key, localStorage.getItem(key) === backup.keys[key]]));
+    localStorage.removeItem(recoveryKey);
+    return { restored: true, unchanged };
+  };
+  if (localStorage.getItem(recoveryKey)) emit('recovered stale R6-C backup', restoreOfficial());
+  const storageBefore = rawOfficial();
+  try {
+    localStorage.setItem(recoveryKey, JSON.stringify({ version: 1, createdAt: Date.now(), keys: storageBefore }));
+    const settings = storageBefore['deep-light-settings-v1'] ? JSON.parse(storageBefore['deep-light-settings-v1']) : {};
+    localStorage.setItem('deep-light-settings-v1', JSON.stringify({ ...settings, autosave: false }));
+  } catch (error) { emit('setup failed', String(error && error.stack || error)); return; }
+  window.addEventListener('beforeunload', () => { if (!out.dataset.done) restoreOfficial(); });
+
+  const checked = (label, result) => {
+    emit(label, result);
+    if (!result?.ok || result.fails?.length) throw new Error(`${label} 检查失败：${JSON.stringify(result)}`);
+  };
+  const summary = (r) => ({
+    seed: r.seed, diff: r.diff, policy: r.policy, ranDays: r.ranDays, steps: r.steps,
+    deaths: r.deaths, minHp: r.minHp, minHpDay: r.minHpDay, kills: r.kills,
+    workersEnd: r.workersEnd, gravesEnd: r.gravesEnd, fuelEnd: r.fuelEnd,
+    foodEnd: r.foodEnd, blightEnd: r.blightEnd, lightPressureMax: r.lightPressureMax,
+    challengeMulMax: r.challengeMulMax, chunksVisited: r.chunksVisited,
+    expedition: r.expedition, nights: r.nights,
+  });
+  const signature = (r) => JSON.stringify({
+    deaths: r.deaths, minHp: r.minHp, kills: r.kills, fuelEnd: r.fuelEnd,
+    foodEnd: r.foodEnd, chunksVisited: r.chunksVisited, expedition: r.expedition,
+    nights: r.nights,
+  });
+
+  frame.addEventListener('load', async () => {
+    const game = frame.contentWindow;
+    let final = { ok: false, checks: [], replays: {}, resonancePair: null, outpost: null, source: null, watch: null, storage: null };
+    try {
+      game.__settings.autosave = false;
+      checked('menu __check', game.__check({ includeKnown: true }));
+      const [{ POLICIES }, chunks, storage, taskBoard, resonance, { BUILD }] = await Promise.all([
+        import('/js/dev/replay.js'), import('/js/world/chunks.js'), import('/js/systems/storage.js'),
+        import('/js/systems/taskBoard.js'), import('/js/systems/resonance.js'), import('/js/data/buildings.js'),
+      ]);
+      const runReplay = async (label, opts) => {
+        status.textContent = `回放中：${label}（正式存档 autosave=false）`;
+        await pause();
+        const result = game.__replay({ seed: 4242, ...opts });
+        game.__settings.autosave = false;
+        final.replays[label] = summary(result);
+        emit(`replay ${label}`, final.replays[label]);
+        if (!Array.isArray(result.nights)) throw new Error(`${label} 缺少 R6-C 夜间观测`);
+        if (result.nights.some((n) => !Number.isFinite(n.spawnCap) || !Number.isFinite(n.spawned) || !Number.isFinite(n.peakAlive)
+          || !Number.isFinite(n.spawnBudget) || !Number.isFinite(n.budgetUsed) || !Number.isFinite(n.ventSpawned)))
+          throw new Error(`${label} 夜间观测字段不是有限数`);
+        if (result.nights.some((n) => n.peakAlive > n.spawnCap))
+          throw new Error(`${label} 活敌峰值超过同屏硬上限：${JSON.stringify(result.nights.filter((n) => n.peakAlive > n.spawnCap))}`);
+        if (result.nights.some((n) => n.waveSpawned + n.ventSpawned > n.spawnBudget || n.budgetUsed < n.waveSpawned + n.ventSpawned))
+          throw new Error(`${label} 普通波次与潮穴超出共享夜潮名额：${JSON.stringify(result.nights.filter((n) => n.waveSpawned + n.ventSpawned > n.spawnBudget || n.budgetUsed < n.waveSpawned + n.ventSpawned))}`);
+      if (result.nights.some((n) => n.spawned !== n.waveSpawned + n.nonWaveSpawned
+        || Object.values(n.sourceCounts || {}).reduce((sum, count) => sum + count, 0) !== n.spawned))
+        throw new Error(`${label} 夜间生成来源账目不守恒`);
+        await pause();
+        return result;
+      };
+      game.__newGame(4242, 'normal'); game.__settings.autosave = false;
+      checked('new-game __check', game.__check({ includeKnown: true }));
+
+      const diffRuns = {};
+      for (const diff of ['calm', 'normal', 'harsh']) diffRuns[diff] = await runReplay(`difficulty-${diff}-home-3d`, { diff, days: 3, policy: 'home' });
+      const home5 = await runReplay('normal-home-5d', { diff: 'normal', days: 5, policy: 'home' });
+      const expedition5 = await runReplay('normal-expedition-5d', { diff: 'normal', days: 5, policy: 'expedition' });
+      if (expedition5.expedition?.outOfRange || !expedition5.expedition?.visited?.includes('1,0'))
+        throw new Error(`远征路线未满足单跳验收：${JSON.stringify(expedition5.expedition)}`);
+
+      // 前哨是“已经备好本地箱/灯”的受控起始检查点：迁移、驻留、低频结算均走正式系统；
+      // 不把测试夹具冒充成真实建造/运输流程，也不与空手开局作资源公平比较。
+      let outpostFixture = null;
+      const stagedOutpost = (S, api, ctx) => {
+        if (!ctx.memo.r6cOutpost) {
+          const remote = chunks.ensureSurfaceChunk(S, 1, 0);
+          const m = remote.map, chosen = [];
+          for (let ring = 0; ring < 12 && chosen.length < 2; ring++) {
+            for (let dy = -ring; dy <= ring && chosen.length < 2; dy++) for (let dx = -ring; dx <= ring && chosen.length < 2; dx++) {
+              if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue;
+              const x = (m.w >> 1) + dx, y = (m.h >> 1) + dy, i = y * m.w + x;
+              if (x < 2 || y < 2 || x >= m.w - 2 || y >= m.h - 2 || !m.isWalk(x, y) || m.occBuild?.[i] || m.occWalk?.[i]) continue;
+              chosen.push({ x, y, i });
+            }
+          }
+          if (chosen.length !== 2) throw new Error('前哨夹具找不到两个可用地块');
+          const [storeTile, lampTile] = chosen;
+          const storeBuilding = { type: 'store', x: storeTile.x, y: storeTile.y, site: false, hp: undefined, fuel: 0, level: 1, stock: {} };
+          const lampBuilding = { type: 'lamp', x: lampTile.x, y: lampTile.y, site: false, hp: undefined, fuel: BUILD.lamp.maxFuel, level: 1, burnT: 0, off: false };
+          remote.buildings.push(storeBuilding, lampBuilding);
+          for (const tile of chosen) { m.occBuild[tile.i] = 1; m.occWalk[tile.i] = 1; }
+          const seeded = storage.depositToChunk(S, remote, 'food', 24, storeTile.x + 0.5, storeTile.y + 0.5);
+          if (seeded !== 24) throw new Error(`前哨食物装箱失败：${seeded}`);
+          const worker = (S.workers || []).find((w) => w.alive && !w.hollow && !w.downed);
+          if (!worker) throw new Error('前哨夹具没有可派拓荒者');
+          taskBoard.setDirective(worker, { outpost: { x: 1, y: 0 }, outpostMode: 'gather' });
+          outpostFixture = { target: [1, 0], worker: worker.name, store: storeTile, lamp: lampTile, openingFood: 24, prepaidLampFuel: lampBuilding.fuel };
+          ctx.memo.r6cOutpost = true;
+        }
+        POLICIES.home(S, api, ctx);
+      };
+      const outpostRun = await runReplay('normal-staged-outpost-5d', { diff: 'normal', days: 5, policy: stagedOutpost });
+      const remote = game.__state.chunkStore['1,0'];
+      const outpostReport = chunks.outpostReport(game.__state);
+      const remoteStore = remote && remote.buildings.find((b) => b.type === 'store');
+      final.outpost = {
+        fixture: outpostFixture,
+        travel: outpostReport.assignments,
+        ticks: remote?.outpost?.ticks || 0,
+        lastYield: remote?.outpost?.lastYield || {},
+        lastNeeds: remote?.outpost?.lastNeeds || {},
+        stock: remoteStore?.stock || {},
+        lampFuelEnd: remote?.buildings.find((b) => b.type === 'lamp')?.fuel ?? null,
+        playerChunks: remoteRunChunk(outpostRun),
+        activeChunks: outpostReport.active,
+        remoteBiome: remote?.biome || null,
+      };
+      emit('staged outpost audit', final.outpost);
+      if (!final.outpost.ticks || !outpostReport.assignments.some((a) => a.status === 'stationed'))
+        throw new Error(`前哨没有真实完成迁移与结算：${JSON.stringify(final.outpost)}`);
+      if (!(final.outpost.lampFuelEnd < final.outpost.fixture.prepaidLampFuel))
+        throw new Error(`有人驻守的前哨灯具未消耗燃料：${JSON.stringify(final.outpost)}`);
+      if (!(final.outpost.stock.vine > 0) || (final.outpost.lastNeeds.foodShort || 0) > 0)
+        throw new Error(`前哨补给充足时仍未持续生产：${JSON.stringify(final.outpost)}`);
+
+      // 普通夜/反冲夜使用同 seed、同信标与点燃灯的控制检查点；仪式费用通过正式账本入口支付。
+      const makeTrialPolicy = (startTrial) => {
+        let fixture = null;
+        return {
+          policy(S, api, ctx) {
+            if (!ctx.memo.r6cTrialFixture) {
+              S.milestone.bossDefeated = true;
+              resonance.revealNextResonanceSite(S);
+              const site = S.resonance.sites.first;
+              const occupied = (x, y) => {
+                const i = y * S.map.w + x;
+                return !S.map.isWalk(x, y) || S.map.occBuild?.[i] || S.map.occWalk?.[i]
+                  || (S.buildings || []).some((b) => b.x === x && b.y === y)
+                  || (S.beacons || []).some((b) => b.x === x && b.y === y);
+              };
+              let beaconTile = null, lampTile = null;
+              for (let r = 1; r <= 8 && (!beaconTile || !lampTile); r++) for (const [dx, dy] of [[r, 0], [-r, 0], [0, r], [0, -r], [r, r], [-r, -r], [r, -r], [-r, r]]) {
+                const x = Math.max(2, Math.min(S.map.w - 3, Math.floor(S.player.x) + dx));
+                const y = Math.max(2, Math.min(S.map.h - 3, Math.floor(S.player.y) + dy));
+                if (!beaconTile) {
+                  if (!occupied(x, y)) beaconTile = { x, y };
+                  continue;
+                }
+                if (!lampTile && !occupied(x, y) && Math.hypot(x - beaconTile.x, y - beaconTile.y) <= 5) lampTile = { x, y };
+                if (beaconTile && lampTile) break;
+              }
+              if (!beaconTile || !lampTile || !site) throw new Error('反冲夜夹具无法找到合法信标/灯位');
+              site.chunkX = S.chunkX | 0; site.chunkY = S.chunkY | 0; site.x = beaconTile.x; site.y = beaconTile.y; site.status = 'built';
+              site.trial = { status: 'idle', siteId: 'first', attempts: 0 };
+              S.resonance.activeSiteId = 'first';
+              S.resonance.trial = { status: 'idle', siteId: 'first', attempts: 0 };
+              const beacon = { type: 'resonanceBeacon', x: beaconTile.x, y: beaconTile.y, site: false, hp: 140, level: 1, fuel: 0, resonanceSiteId: 'first' };
+              const lamp = { type: 'lamp', x: lampTile.x, y: lampTile.y, site: false, hp: undefined, fuel: BUILD.lamp.maxFuel, level: 1, burnT: 0, off: false };
+              S.buildings.push(beacon, lamp);
+              for (const { x, y } of [beaconTile, lampTile]) {
+                const i = y * S.map.w + x; S.map.occBuild[i] = 1; S.map.occWalk[i] = 1;
+              }
+              game.__give('fuel', 4); game.__give('night', 1);
+              fixture = { beacon: beaconTile, lamp: lampTile, prepaidLampFuel: lamp.fuel, trialFeeGranted: { fuel: 4, night: 1 } };
+              ctx.memo.r6cTrialFixture = true;
+            }
+            if (startTrial && !ctx.memo.r6cTrialStarted && S.light && S.light[fixture.beacon.y * S.map.w + fixture.beacon.x] >= 1) {
+              const error = resonance.beginStandardTrial(S, 'first');
+              if (error !== null) throw new Error(`反冲夜预约失败：${error}`);
+              ctx.memo.r6cTrialStarted = true;
+            }
+            POLICIES.home(S, api, ctx);
+          },
+          fixture: () => fixture,
+        };
+      };
+      const controlSetup = makeTrialPolicy(false);
+      const trialSetup = makeTrialPolicy(true);
+      const ordinaryNight = await runReplay('normal-night-control-1d', { diff: 'normal', days: 1, policy: controlSetup.policy });
+      const resonanceNight = await runReplay('normal-resonance-night-1d', { diff: 'normal', days: 1, policy: trialSetup.policy });
+      const ordinaryMetric = ordinaryNight.nights[0], trialMetric = resonanceNight.nights[0];
+      if (!ordinaryMetric || !trialMetric || trialMetric.trialStatus !== 'active')
+        throw new Error(`普通夜/反冲夜未形成有效一夜配对：${JSON.stringify({ ordinaryMetric, trialMetric, fixture: trialSetup.fixture() })}`);
+      const compareFields = ['spawnCap', 'forecastIntervals', 'waveSpawned', 'nonWaveSpawned', 'sourceCounts', 'waveKindCounts', 'peakAlive', 'lightPressure', 'challengeMul'];
+      const delta = Object.fromEntries(compareFields.filter((key) => JSON.stringify(ordinaryMetric[key]) !== JSON.stringify(trialMetric[key])
+        ).map((key) => [key, { ordinary: ordinaryMetric[key], resonance: trialMetric[key] }]));
+      final.resonancePair = { ordinary: ordinaryMetric, resonance: trialMetric, delta, fixture: trialSetup.fixture(), sameSeed: 4242 };
+      emit('ordinary vs resonance night', final.resonancePair);
+
+      // 无塔守家跑到第七天，让 Boss 与召唤在真实更新循环里撞上同屏硬上限。
+      const bossPressure = await runReplay('normal-boss-pressure-7d', { diff: 'normal', days: 7, policy: () => {} });
+      const bossNightMetric = bossPressure.nights.find((n) => n.day === 7);
+      final.bossPressure = bossNightMetric || null;
+      emit('boss and summon cap pressure', final.bossPressure);
+      if (!bossNightMetric || bossNightMetric.bossSpawns < 1 || !(bossNightMetric.sourceCounts?.['boss-summon'] > 0))
+        throw new Error(`第七天没有覆盖 Boss 召唤同屏上限：${JSON.stringify(bossNightMetric)}`);
+
+      const deterministicAgain = await runReplay('normal-home-5d-determinism-repeat', { diff: 'normal', days: 5, policy: 'home' });
+      final.deterministic = signature(home5) === signature(deterministicAgain);
+      if (!final.deterministic) throw new Error('同 seed / normal / home 两次回放摘要不一致');
+      emit('deterministic replay equality', final.deterministic);
+
+      await runReplay('normal-home-3d-roundtrip-state', { diff: 'normal', days: 3, policy: 'home' });
+      checked('replay roundtrip __check', game.__check({ includeKnown: true, roundtrip: true }));
+      final.source = await game.__srcCheck(); emit('source audit', final.source);
+      if (!final.source?.ok || final.source.fails?.length) throw new Error(`__srcCheck 失败：${JSON.stringify(final.source)}`);
+      game.__newGame(4242, 'normal'); game.__settings.autosave = false;
+      game.__watch(true, 20); game.__steps(1200); final.watch = game.__testLog(); game.__watch(false);
+      emit('watch 1200 steps', final.watch);
+      const watchLast = Array.isArray(final.watch) ? final.watch[final.watch.length - 1] : String(final.watch);
+      if (watchLast !== '共 0 类') throw new Error(`watch 违例：${JSON.stringify(final.watch)}`);
+      final.checks = { menu: true, newGame: true, replayRoundtrip: true };
+      final.ok = true;
+    } catch (error) {
+      emit('R6-C failed', String(error && error.stack || error));
+    } finally {
+      final.storage = restoreOfficial();
+      emit('official storage restoration', final.storage);
+      out.dataset.done = '1';
+      const allRestored = final.storage?.restored && Object.values(final.storage.unchanged || {}).every(Boolean);
+      final.ok = !!(final.ok && allRestored);
+      status.textContent = final.ok ? 'R6-C1 回归通过 · 三项正式存档已逐字节恢复' : 'R6-C1 未通过或未完成 · 展开数据定位失败点';
+      status.style.color = final.ok ? '#91d7ad' : '#ff9c8c';
+      emit('R6-C final', { ok: final.ok, deterministic: final.deterministic, outpostTicks: final.outpost?.ticks, allRestored });
+    }
+  }, { once: true });
+  frame.src = `/?r6c1=${Date.now()}`;
+  function remoteRunChunk(r) { return r.chunksVisited || []; }
+})();
+</script>
+</body>
+</html>

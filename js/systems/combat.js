@@ -9,6 +9,7 @@ import { playStinger } from '../core/music.js';
 import { unmount } from './carry.js';                                   // 阵亡时就地放下背上的结构体（第 5 步 5b）
 import { PULSE, REWARD, TYPES, armorMul } from '../data/combat.js';
 import { SURVIVAL } from '../data/survival.js';
+import { revealFirstResonanceSite } from './resonance.js';
 
 // 数值统一从 data/combat.js 读（W14-A 第 0 步：战斗数值中央化）——本文件不再写魔数
 const RANGE = PULSE.RANGE;
@@ -49,6 +50,7 @@ function onBossDefeated(state) {
   if (!m.bossDefeated) {
     m.bossDefeated = true;
     m.clearedDay = state.day;
+    revealFirstResonanceSite(state);
     state.playerMaxHp += REWARD.FIRST_HP;                               // 成长奖励
     state.playerHp = state.playerMaxHp;
     state.pulseMul = PULSE.MUL_FIRST_BOSS;
@@ -57,7 +59,7 @@ function onBossDefeated(state) {
     deposit(state, 'data', REWARD.FIRST_DATA, state.player.x, state.player.y);    // 从核心里解析出的知识（否则研究树只靠遗迹碑）
     state.banner = {
       title: '序章 完成',
-      sub: `蚀巢核心崩解（第 ${state.day} 天）——真正的拓荒由此开始`, t: 0, life: 6,
+      sub: `蚀巢核心崩解（第 ${state.day} 天）· 新目标：前往藤雾林建立共鸣信标`, t: 0, life: 6,
     };
   } else {
     const round = Math.floor(state.day / 7) || 1;
@@ -113,7 +115,7 @@ export function handleDeath(state) {
   const held = state.equip && state.equip.held || null;
   const hasPack = Object.values(packStock).some((n) => (n || 0) > 0) || !!held;
   if (hasPack) {
-    state.deathPack = { x: state.player.x, y: state.player.y, layerId: state.layerId, stock: packStock, held, day: state.day };
+      state.deathPack = { x: state.player.x, y: state.player.y, layerId: state.layerId, chunkX: state.chunkX | 0, chunkY: state.chunkY | 0, stock: packStock, held, day: state.day };
   }
   if (state.pack) state.pack.stock = {};
   if (state.equip) state.equip.held = null;

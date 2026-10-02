@@ -1,7 +1,28 @@
 // systems/logistics.js —— W11 后勤：补给站把燃料分给附近的光源
 // 设计意图：深渊里光衰减得更快，你不可能来回跑给每盏灯加油 ——
 // 把燃料囤进补给站，它自己分发；而噬光虫闻得到油味（会来啃补给站）
-import { BUILD } from '../data/buildings.js';
+import { BUILD, LIGHT_LEVELS } from '../data/buildings.js';
+import { burnSecOf } from '../data/fire.js';
+import { lampBurnMul, smeltBurnMul } from './research.js';
+
+// 本地实时运行与前哨 12 秒结算共用同一燃烧公式，避免远端点灯成为免费光源。
+export function burnBuildingFuel(buildings, state, dt) {
+  const elapsed = Math.max(0, Number(dt) || 0);
+  if (!elapsed) return;
+  for (const b of buildings || []) {
+    const def = BUILD[b.type];
+    if (!def || !def.burnSec || !(b.fuel > 0) || b.off) continue;
+    const level = LIGHT_LEVELS[b.level == null ? 1 : b.level] || LIGHT_LEVELS[1];
+    const fireMul = def.fireMat ? smeltBurnMul(state) : 1;
+    const burnSec = burnSecOf(b, def) * lampBurnMul(state) * fireMul / level.burn;
+    b.burnT = (b.burnT || 0) + elapsed;
+    while (b.burnT >= burnSec) {
+      b.burnT -= burnSec;
+      b.fuel--;
+    }
+    if (b.fuel <= 0) b.fuel = 0;
+  }
+}
 
 export function updateLogistics(state, dt) {
   const cs = (state.buildings || []).filter((b) => b.type === 'cache' && b.fuel > 0 && !b.site);

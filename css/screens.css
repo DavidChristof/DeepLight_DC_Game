@@ -257,6 +257,90 @@
   .mside { grid-column: 1; grid-row: 2; align-self: center; width: min(100%, 400px); }
   .mfoot { grid-row: 3; flex-wrap: wrap; gap: 4px 12px; }
 }
+
+/* W20-R R5：终局结算以事实摘要为主，按钮保持继续游戏优先。 */
+#screen .card.endingcard {
+  width: min(900px, 94%);
+  max-height: 94%;
+  padding: clamp(14px, 2.2vw, 24px) clamp(14px, 2.8vw, 30px) 18px;
+  border-color: rgba(189, 169, 120, 0.34);
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(103, 91, 58, 0.2), transparent 48%),
+    linear-gradient(155deg, rgba(17, 23, 30, 0.98), rgba(8, 12, 19, 0.99));
+  box-shadow: 0 0 72px rgba(194, 160, 83, 0.12), 0 0 28px #000;
+}
+.ending-head { text-align: center; padding: 0 8px 12px; }
+.ending-kicker { color: #b5a47d; font-size: 10px; letter-spacing: 3px; }
+.ending-head h1 {
+  margin: 3px 0 0;
+  color: #f2e5bd;
+  font-size: clamp(25px, 4vw, 38px);
+  line-height: 1.2;
+  letter-spacing: 6px;
+  text-shadow: 0 0 28px rgba(219, 187, 112, 0.22);
+}
+.ending-head p { margin: 4px 0 0; color: #aeb4ba; font-size: 12px; }
+.ending-award {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 3px 11px;
+  color: #e9d39a;
+  border: 1px solid rgba(219, 187, 112, 0.3);
+  border-radius: 99px;
+  background: rgba(170, 132, 59, 0.08);
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+.ending-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.ending-section {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(151, 166, 177, 0.13);
+  border-radius: 8px;
+  background: rgba(5, 10, 16, 0.38);
+}
+.ending-section h3 { margin: 0 0 7px; color: #d9c99f; font-size: 12px; letter-spacing: 1px; }
+.ending-roster, .ending-sites { list-style: none; margin: 0; padding: 0; }
+.ending-roster li, .ending-sites li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 25px;
+  border-bottom: 1px solid rgba(151, 166, 177, 0.1);
+  color: #d9e0e5;
+  font-size: 11px;
+}
+.ending-roster li:last-child, .ending-sites li:last-child { border-bottom: 0; }
+.ending-roster b, .ending-sites > li > span { flex: 0 0 auto; color: #9eb9aa; font-size: 10px; font-weight: 500; }
+.ending-sites li { align-items: flex-start; padding: 3px 0; }
+.ending-sites li > div { min-width: 0; }
+.ending-sites li b { display: block; color: #d9e0e5; font-size: 10px; }
+.ending-sites small { display: block; margin-top: 1px; color: #788895; font-size: 9px; line-height: 1.3; }
+.ending-stats { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 8px; font-size: 10px; }
+.ending-stats span { color: #8997a2; }
+.ending-stats b { color: #dce4e9; font-size: 10px; font-weight: 500; text-align: right; }
+.ending-foot { margin-top: 7px; color: #7f8b96; font-size: 9px; line-height: 1.45; }
+.ending-legacy { margin-top: 9px; color: #bda972; text-align: center; font-size: 10px; }
+.ending-actions { margin-top: 12px; gap: 8px; }
+.ending-actions .sbtn { min-width: 126px; }
+.ending-actions .sbtn.primary { border-color: rgba(219, 187, 112, 0.48); color: #f1e3b8; }
+@container gamearea (max-width: 760px) {
+  #screen .card.endingcard { width: 94%; }
+  .ending-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ending-section:last-child { grid-column: 1 / -1; }
+  .ending-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px 8px; }
+  .ending-stats span { align-self: end; }
+  .ending-stats b { text-align: left; }
+}
+@container gamearea (max-width: 480px) {
+  #screen .card.endingcard { width: 96%; max-height: 92%; padding: 12px 12px 14px; }
+  .ending-columns { grid-template-columns: minmax(0, 1fr); gap: 7px; }
+  .ending-section:last-child { grid-column: auto; }
+  .ending-stats { grid-template-columns: minmax(0, 1fr) auto; }
+  .ending-stats b { text-align: right; }
+  .ending-actions .sbtn { min-width: 0; flex: 1; }
+}
 /* 老式居中按钮（其它界面仍在用：暂停菜单等）—— 主菜单已换成上面的左对齐行 */
 .mbtn {
   display: flex;

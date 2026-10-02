@@ -7,7 +7,7 @@ import { BUILD, WORKER_RATE } from '../data/buildings.js';
 import { advanceBuild } from '../systems/building.js';
 import { workOnce, lightFire, addFire, fireOn } from '../systems/craft.js';
 import { fireMatOf, fuelName } from '../data/fire.js';
-import { deposit, withdraw, withdrawOne } from '../systems/storage.js';
+import { deposit, withdraw, withdrawOne, canWithdraw, spendableOf } from '../systems/storage.js';
 import { isTide, isNight, ambientOf } from '../core/time.js';
 import { NIGHTBLOOM, PATROL } from '../data/nightops.js';
 import { hasTech, darkMoraleMul } from '../systems/research.js';
@@ -20,6 +20,7 @@ import { bondLevel, onWorkerDeath } from '../systems/mind.js';
 import { ensureCrewCard, recordCrewEvent, roleIs, roleTaskMul, personalityIs } from '../data/colonists.js';
 import { makeTask, CARE_PRIORITY } from '../data/tasks.js';
 import { beginTask, syncTask, ensureDirective } from '../systems/taskBoard.js';
+import { recordRunCount } from '../systems/ending.js';
 
 const R = 0.34;
 const MINE_TICK = 0.6;          // 每 MINE_TICK 秒产出 1 单位
@@ -125,7 +126,7 @@ function findNode(state, px, py, w) {
 export function recruitWorker(state) {
   const ws = state.workers || [];
   if (ws.length >= RECRUIT_MAX) return `营地最多 ${RECRUIT_MAX} 人`;
-  for (const k in RECRUIT_COST) if ((state.res[k] || 0) < RECRUIT_COST[k]) return '资源不足';
+  if (!canWithdraw(state, RECRUIT_COST)) return '资源不足';
   const m = state.map;
   const bx = state.beacons.length ? state.beacons[0].x : Math.floor(state.player.x);
   const by = state.beacons.length ? state.beacons[0].y : Math.floor(state.player.y);
@@ -140,7 +141,7 @@ export function recruitWorker(state) {
     }
   }
   if (!spot) return '营地周围没有空地';
-  withdraw(state, RECRUIT_COST, bx, by);      // 从最近的容器付账
+  if (withdraw(state, RECRUIT_COST, bx, by)) return '资源不足';  // 当前区块容器 / 背包付账
   const used = ws.map((w) => w.name);
   const letter = RECRUIT_LETTERS.find((L) => !used.includes(`拓荒者 ${L}`)) || `${ws.length + 1}`;
   const nw = new Worker(`拓荒者 ${letter}`, spot.x, spot.y);
@@ -171,6 +172,7 @@ function finishWorkerDeath(state, w) {
   returnWorkerTool(state, w);
   addFx(state, w.x, w.y, `${w.name} 没能撑住…`, '#ff9d9d');
   recordCrewEvent(w, 'death', w.deathCause, state.day || 1);
+  recordRunCount(state, 'workerDeaths');
   onWorkerDeath(state, w);
   if (state.rescue && state.rescue.worker === w) state.rescue = null;
   state._sidebarSig = null;
@@ -409,6 +411,7 @@ function updateRescueSession(state, dt) {
   w.rescueWound = 1;
   w.rescueWoundT = SURVIVAL.RESCUE.INJURY_SECS;
   recordCrewEvent(w, 'rescue', hot ? '热食救回' : '救回来了', state.day || 1);
+  recordRunCount(state, 'rescues');
   const bed = nearestBunk(state, w.x, w.y);
   if (bed) {
     w.rescueState = 'escort';
@@ -506,6 +509,7 @@ export function reviveAtGrave(state, grave) {
   nw.tool = null;
   state.workers.push(nw);
   state.reviveCount = used + 1;
+  recordRunCount(state, 'revivals');
   memorial.revived = true;
   memorial.reviveDay = state.day;
   // 同一格若没有其它未复苏履历，墓碑才会被移除，避免出现“尸体已清但墓碑仍可重复用”。
@@ -589,7 +593,7 @@ export function updateWorkers(state, dt) {
       if (dm < 0 && personalityIs(w, 'darkfear') && lv <= 2.5) dm *= 1.6;   // 怕黑（白天不算黑暗）
       if (tide) dm -= 1.7 * (w.job === 'forage' ? 0.5 : 1);   // 夜采者有任务专注：恐惧减半
       if (w.hunger < SURVIVAL.WORKER.LOW_HUNGER) dm -= 1.6;                     // 饥饿
-      if (state.res.food <= 0) dm -= 0.6;               // 断粮
+      if ((spendableOf(state).food || 0) <= 0) dm -= 0.6; // 当前驻地断粮
       const ord = w.order === 'patrol' ? w.order : (state.order || 'auto');
       if (w.grief > 0) dm -= 0.5;                       // 葬友：心里空了一块
       if (roleIs(w, 'nightwatch') && night) dm = Math.max(dm, 0) + 0.4;   // 守夜人：夜里不减反增
@@ -621,7 +625,7 @@ export function updateWorkers(state, dt) {
     if (w.rescueRestT > 0) w.job = 'rest';                   // 救回后的恢复期：先休整，不能立刻回夜班
     else if (w.hollow) w.job = 'hollow';                     // 蚀化：只朝着光走
     else if (threatClose) { w.job = 'flee'; w.fleeFrom = threatClose; }
-    else if (w.hunger < SURVIVAL.WORKER.EAT_AT && (state.res.food || 0) > 0 && w.morale > 25) w.job = 'eat';
+    else if (w.hunger < SURVIVAL.WORKER.EAT_AT && (spendableOf(state).food || 0) > 0 && w.morale > 25) w.job = 'eat';
     else if (w.grief > 0) w.job = 'mourn';                   // 葬友：三天不工作，守在墓前
     else if (w.wanderT > 0 && w.wanderTo) w.job = 'wander';  // 蚀化前兆：梦游出营
     else if (needRefine(state, w)) w.job = 'refine';         // 燃料见底：主动去熔炉炼油
@@ -874,6 +878,7 @@ export function updateWorkers(state, dt) {
           if (b.alive && b.charges > 0) {
             b.charges -= 1;
             const stored = deposit(state, 'night', 1, b.x, b.y);
+            if (stored > 0) recordRunCount(state, 'nightHarvests');
             if (stored > 0) addFx(state, b.x, b.y, '+夜髓', '#b9a6ff');
             if (b.charges <= 0) { b.alive = false; w.bloom = null; }
           } else w.bloom = null;
@@ -885,15 +890,15 @@ export function updateWorkers(state, dt) {
         if (w.shiftDay !== state.day) w.shiftDay = state.day;
         w.overwork = Math.max(0, (w.overwork || 0) - 1);
       } else if (w.job === 'eat') {
-        if (state.res.food > 0) {
+        const localStock = spendableOf(state);
+        if ((localStock.food || 0) > 0 && withdrawOne(state, 'food', 1, w.x, w.y) === null) {
           const wasHungry = w.hunger < SURVIVAL.WORKER.EAT_AT;
-          withdrawOne(state, 'food', 1, w.x, w.y);
           w.hunger = Math.min(SURVIVAL.WORKER.HUNGER_MAX, w.hunger + SURVIVAL.WORKER.EAT_GAIN);
           if (wasHungry) {
             // 热食：多烧 1 燃料换更多安抚（但留一点油给灯，别把营地点熄了）
-            const hot = (state.res.fuel || 0) >= HOT_MEAL.keepFuel;
+            const hot = (localStock.fuel || 0) >= HOT_MEAL.keepFuel
+              && withdrawOne(state, 'fuel', HOT_MEAL.fuel, w.x, w.y) === null;
             if (hot) {
-              withdrawOne(state, 'fuel', HOT_MEAL.fuel, w.x, w.y);
               w.sanity = Math.min(100, (w.sanity == null ? 100 : w.sanity) + HOT_MEAL.sanityHot);
               w.morale = Math.min(100, w.morale + HOT_MEAL.moraleHot);
             } else {
@@ -1093,7 +1098,8 @@ export function needStoke(state, w) {
     const mine = w.smelter === b;                                    // 我已经接手这台
     if (!mine && (b.fuel || 0) > max * 0.34) continue;               // 还够烧：没接手的先不去
     const mat = fireMatOf(b, def);
-    const stock = (state.res[mat] || 0) + (mat === 'vine' ? 0 : (state.res.vine || 0));  // 没有设定火种还能用藤木引火
+    const have = spendableOf(state);
+    const stock = (have[mat] || 0) + (mat === 'vine' ? 0 : (have.vine || 0));  // 没有设定火种还能用藤木引火
     if (stock < (mine ? 1 : 3)) continue;                            // 仓库里没火种：去了也白搭
     if (mine) return true;                                           // 自己接手的优先，不让别人抢
     const d = Math.hypot(b.x + 0.5 - w.x, b.y + 0.5 - w.y);
@@ -1106,8 +1112,9 @@ export function needStoke(state, w) {
 }
 
 export function needRefine(state, w) {
-  if ((state.res.fuel || 0) >= REFINE.wantFuel) return false;
-  if ((state.res.ore || 0) <= 0) return false;
+  const have = spendableOf(state);
+  if ((have.fuel || 0) >= REFINE.wantFuel) return false;
+  if ((have.ore || 0) <= 0) return false;
   // 熔炉本身没有 hp 字段（不可被砸），所以只判断存在
   const furnaces = (state.buildings || []).filter((b) => b.type === 'furnace' && !b.site && !b.off && (b.recipe || 'fuel') === 'fuel');   // 只挑设成「炼油」的炉
   // 该不该去炼油：燃料见底 + 有矿 + 本层有熔炉 + 同一时间只留一个人炼（其他人去采）
@@ -1116,7 +1123,7 @@ export function needRefine(state, w) {
   for (const f of furnaces) {
     const fd = BUILD[f.type] || {};
     // 没火的炉子得能点得着才去（仓库里连藤木都没有 → 去了也只是站着）
-    if (!(f.fuel > 0) && (state.res[fireMatOf(f, fd)] || 0) <= 0 && (state.res.vine || 0) <= 0) continue;
+    if (!(f.fuel > 0) && (have[fireMatOf(f, fd)] || 0) <= 0 && (have.vine || 0) <= 0) continue;
     const d = Math.hypot(f.x + 0.5 - w.x, f.y + 0.5 - w.y);
     if (d < bestD) { bestD = d; best = f; }
   }

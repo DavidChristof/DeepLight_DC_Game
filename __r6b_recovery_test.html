@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>W20-R R6-B 存档兼容与失败恢复回归</title>
+<body style="margin:16px;background:#101923;color:#e5edf5;font:13px Consolas,monospace">
+<h1>R6-B · 存档兼容与失败恢复</h1>
+<p id="status" style="color:#cbb981">正在备份正式存档并启动隔离实例…</p>
+<details open><summary>回归明细</summary><pre id="out" style="max-height:340px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere">准备测试…</pre></details>
+<iframe id="game" title="R6-B 隔离游戏实例" style="width:min(960px,96vw);height:min(640px,80vh);border:1px solid #607080"></iframe>
+<script type="module">
+(() => {
+  const officialKeys = ['deep-light-saves-v2', 'deep-light-settings-v1', 'deep-light-ui-v1'];
+  const recoveryKey = '__deep_light_r6b_storage_backup_v1';
+  const checkpointKey = '__deep_light_r4a_checkpoints_v1';
+  const out = document.getElementById('out'), status = document.getElementById('status'), frame = document.getElementById('game');
+  const emit = (name, value) => {
+    out.textContent += `\n${name}: ${JSON.stringify(value, null, 2)}`;
+    if (name === 'R6-B browser regression result') {
+      status.textContent = value.ok ? 'R6-B 通过 · 跨区、试炼失败/重试、旧档迁移、黎明消解与生产存读通过 · 正式存档已恢复' : 'R6-B 未通过 · 请展开明细';
+      status.style.color = value.ok ? '#91d7ad' : '#ff9c8c';
+    } else if (name === 'R6-B browser regression failed') {
+      status.textContent = 'R6-B 未通过 · 已尝试恢复正式存档，请展开明细核对';
+      status.style.color = '#ff9c8c';
+    }
+  };
+  const rawOfficial = () => Object.fromEntries(officialKeys.map((key) => [key, localStorage.getItem(key)]));
+  const restoreOfficial = () => {
+    let backup;
+    try { backup = JSON.parse(localStorage.getItem(recoveryKey) || 'null'); } catch (_) { }
+    if (!backup || !backup.keys) return { restored: false, reason: '缺少 R6-B 恢复备份，请保留页面并检查' };
+    for (const key of officialKeys) {
+      const raw = backup.keys[key];
+      raw == null ? localStorage.removeItem(key) : localStorage.setItem(key, raw);
+    }
+    const unchanged = Object.fromEntries(officialKeys.map((key) => [key, localStorage.getItem(key) === backup.keys[key]]));
+    localStorage.removeItem(recoveryKey);
+    return { restored: true, unchanged };
+  };
+  if (localStorage.getItem(recoveryKey)) emit('recovered stale R6-B backup', restoreOfficial());
+  const storageBefore = rawOfficial();
+  try {
+    localStorage.setItem(recoveryKey, JSON.stringify({ version: 1, createdAt: Date.now(), keys: storageBefore }));
+    const settings = storageBefore['deep-light-settings-v1'] ? JSON.parse(storageBefore['deep-light-settings-v1']) : {};
+    localStorage.setItem('deep-light-settings-v1', JSON.stringify({ ...settings, autosave: false }));
+  } catch (error) { emit('setup failed', String(error && error.stack || error)); return; }
+  window.addEventListener('beforeunload', () => { if (!out.dataset.done) restoreOfficial(); });
+
+  frame.addEventListener('load', async () => {
+    const game = frame.contentWindow;
+    const results = { ok: false, checks: [], crossRegion: null, enemyDeath: null, trial: null, legacy: null, ending: null, dawn: null, source: null, watch: null };
+    const clone = (value) => JSON.parse(JSON.stringify(value));
+    try {
+      // 每次载入后立刻关闭设置态，所有写入只用隔离生产槽 s2/s3。
+      game.__settings.autosave = false;
+      const check = (label, opts = {}) => {
+        const result = game.__check({ includeKnown: true, ...opts });
+        results.checks.push({ state: label, result });
+        if (!result?.ok || result.fails?.length) throw new Error(`${label} __check 失败：${JSON.stringify(result)}`);
+        return result;
+      };
+      check('menu');
+      game.__newGame(4242, 'normal'); game.__settings.autosave = false;
+      check('new-game');
+
+      const chunks = await import('/js/world/chunks.js');
+      const { Enemy } = await import('/js/entities/enemy.js');
+      const state = game.__state;
+      state.enemies.length = 0;
+      const originEnemy = game.__spawn('bud', state.player.x + 5, state.player.y + 4);
+      originEnemy.hp = Math.max(1, originEnemy.maxHp * 0.53);
+      const originFingerprint = { kind: originEnemy.ekind, hp: originEnemy.hp, x: originEnemy.x, y: originEnemy.y };
+      state.deathPack = { x: 17, y: 19, layerId: 'surface', chunkX: 0, chunkY: 0, stock: { ore: 2, night: 1 }, held: 'pick', day: 2 };
+      state.player.x = state.map.w - 0.1; state.player.y = state.map.h / 2;
+      if (!chunks.tryCrossSurfaceExit(state) || state.chunkX !== 1 || state.chunkY !== 0) throw new Error('生产出口助手没有从原点切换到 (1,0)');
+      const remote = chunks.ensureSurfaceChunk(state, -1, 0);
+      remote.enemies = [new Enemy('shell', remote.map.w / 2 + 0.5, remote.map.h / 2 + 0.5, 1.23)];
+      remote.enemies[0].hp *= 0.61;
+      const remoteFingerprint = { kind: remote.enemies[0].ekind, hp: remote.enemies[0].hp, x: remote.enemies[0].x, y: remote.enemies[0].y };
+      const activeEnemy = game.__spawn('shell', state.player.x + 3, state.player.y + 2);
+      activeEnemy.hp = Math.max(1, activeEnemy.maxHp * 0.72);
+      const activeFingerprint = { kind: activeEnemy.ekind, hp: activeEnemy.hp, x: activeEnemy.x, y: activeEnemy.y };
+      const crossSaved = game.__saveSlot('s3');
+      const crossLoaded = game.__loadSlot('s3'); game.__settings.autosave = false;
+      const stateAfterCross = game.__state;
+      const dormantOrigin = stateAfterCross.chunkStore['0,0']?.enemies || [];
+      const dormantRemote = stateAfterCross.chunkStore['-1,0']?.enemies || [];
+      const activeAfterCross = stateAfterCross.enemies || [];
+      const has = (list, fp) => list.some((e) => e.ekind === fp.kind && Math.abs(e.hp - fp.hp) < 1e-8 && Math.abs(e.x - fp.x) < 1e-8 && Math.abs(e.y - fp.y) < 1e-8);
+      if (!crossSaved || !crossLoaded || stateAfterCross.chunkX !== 1 || stateAfterCross.chunkY !== 0
+        || !has(dormantOrigin, originFingerprint) || !has(dormantRemote, remoteFingerprint) || !has(activeAfterCross, activeFingerprint)
+        || stateAfterCross.deathPack?.chunkX !== 0 || stateAfterCross.deathPack?.chunkY !== 0
+        || JSON.stringify(stateAfterCross.deathPack?.stock) !== JSON.stringify({ ore: 2, night: 1 }))
+        throw new Error(`跨区存读实体/遗落包归属错误：${JSON.stringify({ chunk: [stateAfterCross.chunkX, stateAfterCross.chunkY], origin: dormantOrigin.length, remote: dormantRemote.length, active: activeAfterCross.length, deathPack: stateAfterCross.deathPack })}`);
+      stateAfterCross.player.x = 0.1; stateAfterCross.player.y = stateAfterCross.map.h / 2;
+      if (!chunks.tryCrossSurfaceExit(stateAfterCross) || stateAfterCross.chunkX !== 0 || stateAfterCross.chunkY !== 0
+        || !has(stateAfterCross.enemies, originFingerprint) || stateAfterCross.deathPack?.chunkX !== 0)
+        throw new Error('回程出口未恢复正确的原区块敌人或死亡包坐标');
+      const returnLanding = { chunk: [stateAfterCross.chunkX, stateAfterCross.chunkY], player: { x: stateAfterCross.player.x, y: stateAfterCross.player.y }, originEnemy: has(stateAfterCross.enemies, originFingerprint), deathPackChunk: [stateAfterCross.deathPack.chunkX, stateAfterCross.deathPack.chunkY] };
+      stateAfterCross.player.x = stateAfterCross.map.w - 0.1; stateAfterCross.player.y = stateAfterCross.map.h / 2;
+      chunks.tryCrossSurfaceExit(stateAfterCross);
+      if (stateAfterCross.chunkX !== 1 || !has(stateAfterCross.enemies, activeFingerprint)) throw new Error('二次往返后新区块战斗实体发生串位');
+      results.crossRegion = { saveLoad: crossLoaded, atSave: [1, 0], originEnemyStored: true, remoteEnemyStored: true, activeEnemyRestored: true, returnLanding, secondReturn: [stateAfterCross.chunkX, stateAfterCross.chunkY], deathPack: { chunkX: stateAfterCross.deathPack.chunkX, chunkY: stateAfterCross.deathPack.chunkY, stock: stateAfterCross.deathPack.stock } };
+      check('cross-region-save-load');
+      const crossRoundtrip = game.__check({ includeKnown: true, roundtrip: true });
+      results.checks.push({ state: 'cross-region-roundtrip', result: crossRoundtrip });
+      if (!crossRoundtrip?.ok || crossRoundtrip.fails?.length) throw new Error(`跨区状态 roundtrip 失败：${JSON.stringify(crossRoundtrip)}`);
+
+      game.__newGame(4242, 'normal'); game.__settings.autosave = false;
+      const resonance = await import('/js/systems/resonance.js');
+      const endingApi = await import('/js/systems/ending.js');
+      const trialState = game.__state;
+      trialState.milestone.bossDefeated = true;
+      resonance.revealNextResonanceSite(trialState);
+      const site = trialState.resonance.sites.first;
+      const moveToChunk = (cx, cy) => {
+        while ((trialState.chunkX | 0) !== cx || (trialState.chunkY | 0) !== cy) {
+          const dx = Math.sign(cx - (trialState.chunkX | 0)), dy = dx ? 0 : Math.sign(cy - (trialState.chunkY | 0));
+          if (dx > 0) trialState.player.x = trialState.map.w - 0.1;
+          else if (dx < 0) trialState.player.x = 0.1;
+          else if (dy > 0) trialState.player.y = trialState.map.h - 0.1;
+          else trialState.player.y = 0.1;
+          if (dx) trialState.player.y = trialState.map.h / 2; else trialState.player.x = trialState.map.w / 2;
+          if (!chunks.tryCrossSurfaceExit(trialState)) throw new Error(`切到目标区块失败：${trialState.chunkX},${trialState.chunkY} → ${cx},${cy}`);
+        }
+      };
+      moveToChunk(site.chunkX, site.chunkY);
+      site.status = 'built';
+      const beacon = { type: 'resonanceBeacon', x: site.x, y: site.y, site: false, hp: 140, fuel: 0, level: 1, resonanceSiteId: 'first' };
+      trialState.buildings.push(beacon);
+      trialState.map.occBuild[site.y * trialState.map.w + site.x] = 1;
+      const lightAtSite = (value) => {
+        trialState.light = new Uint8Array(trialState.map.w * trialState.map.h);
+        trialState.light[site.y * trialState.map.w + site.x] = value;
+      };
+      lightAtSite(1);
+      const giveTrialCost = () => { game.__give('fuel', 4); game.__give('night', 1); };
+      giveTrialCost();
+      const begin1 = resonance.beginStandardTrial(trialState, 'first');
+      if (begin1 !== null || trialState.resonance.trial.status !== 'reserved' || trialState.resonance.trial.attempts !== 1)
+        throw new Error(`首次预约不符合预期：${JSON.stringify({ begin1, trial: trialState.resonance.trial })}`);
+      game.__saveSlot('s3');
+      if (!game.__loadSlot('s3')) throw new Error('首次 reserved 试炼生产槽读档失败'); game.__settings.autosave = false;
+      const afterReserved = clone(game.__state.resonance.trial);
+      if (afterReserved.status !== 'reserved' || afterReserved.attempts !== 1 || afterReserved.targetDay !== 1)
+        throw new Error(`预约状态读档改变：${JSON.stringify(afterReserved)}`);
+      const s = game.__state; s.day = afterReserved.targetDay; s.t = 320;
+      lightAtSite(1);
+      const active1 = resonance.lockStandardTrialAtTide(s);
+      if (!active1 || s.resonance.trial.status !== 'active') throw new Error(`预约未能在潮夜锁定：${JSON.stringify(s.resonance.trial)}`);
+      s.player.x = s.map.w - 0.1; s.player.y = s.map.h / 2;
+      if (!chunks.tryCrossSurfaceExit(s)) throw new Error('试炼进行中未能经生产出口离区');
+      const leftResult = resonance.updateStandardTrial(s);
+      if (!leftResult || s.resonance.trial.status !== 'failed' || s.resonance.trial.failureReason !== '离开信标区块')
+        throw new Error(`离区没有失败并记录原因：${JSON.stringify(s.resonance.trial)}`);
+      game.__saveSlot('s3');
+      if (!game.__loadSlot('s3')) throw new Error('失败试炼生产槽读档失败'); game.__settings.autosave = false;
+      const failed1 = clone(game.__state.resonance.trial);
+      if (failed1.status !== 'failed' || failed1.attempts !== 1 || failed1.failureReason !== '离开信标区块')
+        throw new Error(`首次失败事实在存读后重置：${JSON.stringify(failed1)}`);
+      moveToChunk(site.chunkX, site.chunkY);
+      const retryState = game.__state;
+      retryState.day = 2; retryState.t = 100;
+      lightAtSite(1); giveTrialCost();
+      const begin2 = resonance.beginStandardTrial(retryState, 'first');
+      if (begin2 !== null || retryState.resonance.trial.status !== 'reserved' || retryState.resonance.trial.attempts !== 2
+        || retryState.resonance.trial.targetDay !== 2)
+        throw new Error(`失败后重试未保留尝试次数：${JSON.stringify({ begin2, trial: retryState.resonance.trial })}`);
+      game.__saveSlot('s3');
+      if (!game.__loadSlot('s3')) throw new Error('重试预约生产槽读档失败'); game.__settings.autosave = false;
+      const retryLoaded = game.__state; retryLoaded.day = 2; retryLoaded.t = 320; lightAtSite(1);
+      const active2 = resonance.lockStandardTrialAtTide(retryLoaded);
+      if (!active2 || retryLoaded.resonance.trial.attempts !== 2 || retryLoaded.resonance.trial.activeDay !== 2)
+        throw new Error(`重试没有正确激活或尝试次数被重置：${JSON.stringify(retryLoaded.resonance.trial)}`);
+      game.__saveSlot('s3');
+      if (!game.__loadSlot('s3')) throw new Error('active 试炼生产槽读档失败'); game.__settings.autosave = false;
+      const activeLoaded = game.__state; activeLoaded.day = 2; activeLoaded.t = 330; lightAtSite(0);
+      const darkResult = resonance.updateStandardTrial(activeLoaded);
+      if (!darkResult || activeLoaded.resonance.trial.status !== 'failed' || activeLoaded.resonance.trial.failureReason !== '信标断光')
+        throw new Error(`读档后断光边界失败：${JSON.stringify(activeLoaded.resonance.trial)}`);
+      game.__saveSlot('s3');
+      if (!game.__loadSlot('s3')) throw new Error('断光失败生产槽读档失败'); game.__settings.autosave = false;
+      const failed2 = clone(game.__state.resonance.trial);
+      if (failed2.status !== 'failed' || failed2.attempts !== 2 || failed2.failureReason !== '信标断光') throw new Error(`断光失败读档事实不稳定：${JSON.stringify(failed2)}`);
+      results.trial = { firstReservation: afterReserved, firstFailure: failed1, retryReservation: { status: 'reserved', targetDay: 2, attempts: 2 }, retryActive: { status: 'active', activeDay: 2, attempts: 2 }, secondFailure: failed2, productionSlot: 's3' };
+      check('trial-failure-retry-save-load');
+      const trialRoundtrip = game.__check({ includeKnown: true, roundtrip: true });
+      results.checks.push({ state: 'failed-trial-roundtrip', result: trialRoundtrip });
+      if (!trialRoundtrip?.ok || trialRoundtrip.fails?.length) throw new Error(`失败试炼 roundtrip 失败：${JSON.stringify(trialRoundtrip)}`);
+
+      // 被击杀实体不能因生产保存/读档而复活；死亡对象在快照中被省略。
+      game.__newGame(4242, 'normal'); game.__settings.autosave = false;
+      const deathState = game.__state; deathState.enemies.length = 0;
+      const killed = game.__spawn('bud', deathState.player.x + 6, deathState.player.y + 4);
+      killed.hp = 0; killed.alive = false;
+      const deathSave = game.__saveSlot('s3');
+      if (!deathSave || deathSave.chunks.find((c) => c.x === deathState.chunkX && c.y === deathState.chunkY)?.enemies?.length)
+        throw new Error('已死亡蚀兽仍被生产快照保存');
+      if (!game.__loadSlot('s3')) throw new Error('阵亡实体生产 s3 读档失败'); game.__settings.autosave = false;
+      if (game.__state.enemies.some((e) => e.ekind === 'bud' && e.alive)) throw new Error('读档后被击杀蚀兽复活');
+      results.enemyDeath = { deadEntityOmitted: true, resurrectedAfterLoad: false, productionSlot: 's3' };
+      check('dead-enemy-save-load');
+
+      // 旧版 resonance.trial 单站结构与缺失字段迁移；这里的完成/失败数据由生产快照复制，不注入成功结果。
+      const legacy = clone(game.__checkpoint());
+      const legacyTrial = { ...legacy.resonance.trial, siteId: 'first', status: 'failed', attempts: 2, result: 'failure', failureReason: '离开信标区块' };
+      legacy.resonance = { version: 1, trial: legacyTrial };
+      delete legacy.runStats; delete legacy.ending;
+      if (!game.__restoreCheckpoint(legacy)) throw new Error('旧版单站 resonance 快照无法恢复'); game.__settings.autosave = false;
+      const migrated = game.__state.resonance;
+      if (migrated.trial.status !== 'failed' || migrated.sites.first.trial?.status !== 'failed'
+        || migrated.sites.first.trial?.attempts !== 2 || game.__ending() !== null)
+        throw new Error(`旧站点状态迁移或缺字段语义错误：${JSON.stringify({ trial: migrated.trial, site: migrated.sites.first, ending: game.__ending() })}`);
+      game.__saveSlot('s2');
+      if (!game.__loadSlot('s2')) throw new Error('旧档迁移后生产 s2 读档失败'); game.__settings.autosave = false;
+      if (game.__state.resonance.trial.status !== 'failed' || game.__state.resonance.sites.first.trial?.attempts !== 2)
+        throw new Error('旧档迁移后的失败事实在生产槽往返后丢失');
+      const missing = clone(game.__checkpoint()); delete missing.resonance; delete missing.runStats; delete missing.ending;
+      delete missing.activeEnemies; for (const c of missing.chunks || []) delete c.enemies;
+      if (!game.__restoreCheckpoint(missing)) throw new Error('缺少 R6 字段的旧档快照无法恢复'); game.__settings.autosave = false;
+      if (game.__state.resonance?.trial?.status !== 'idle' || game.__ending() !== null) throw new Error('缺字段旧档被伪造成失败记录或正式结局');
+      results.legacy = { migratedSingleTrial: { status: 'failed', attempts: 2, mirroredToFirstSite: true }, missingFields: ['resonance', 'runStats', 'ending', 'activeEnemies', 'chunk.enemies'], noFabricatedEnding: true, productionSlot: 's2' };
+      check('legacy-missing-fields');
+
+      // 使用前期真实 R4-C 三站检查点，验证结局站点日期在生产保存槽中保持不变。
+      let savedCheckpoint = null;
+      try { savedCheckpoint = JSON.parse(localStorage.getItem(checkpointKey) || 'null'); } catch (_) { }
+      if (savedCheckpoint?.schema === 1 && savedCheckpoint?.seed === 4242 && savedCheckpoint.latest) {
+        const facts = clone(savedCheckpoint.latest);
+        const days = ['first', 'second', 'third'].map((id) => facts.resonance?.sites?.[id]?.completedDay ?? null);
+        if (JSON.stringify(days) !== '[9,11,13]' || ['first', 'second', 'third'].some((id) => facts.resonance?.sites?.[id]?.status !== 'complete')) throw new Error(`存留的三站真实完成事实不符：${JSON.stringify(days)}`);
+        delete facts.ending; facts._endingPending = false;
+        if (!endingApi.settleResonanceEnding(facts)) throw new Error('无法从真实三站完成记录推导既有结局事实');
+        const expectedEnding = clone(facts.ending);
+        if (!game.__restoreCheckpoint(facts)) throw new Error('真实三站结局快照恢复失败'); game.__settings.autosave = false;
+        game.__saveSlot('s2');
+        if (!game.__loadSlot('s2')) throw new Error('真实结局生产 s2 读档失败'); game.__settings.autosave = false;
+        const endingAfterLoad = game.__ending();
+        if (JSON.stringify(endingAfterLoad) !== JSON.stringify(expectedEnding)
+          || JSON.stringify(['first', 'second', 'third'].map((id) => game.__state.resonance.sites[id].completedDay)) !== JSON.stringify(days))
+          throw new Error('完成站点日期或结局快照生产存读后被重置');
+        results.ending = { provenance: '真实 R4-C 完成检查点 [9,11,13] + R5 生产结算函数', exactEndingRoundtrip: true, siteDays: days, outcome: endingAfterLoad.id, slot: 's2' };
+      } else {
+        results.ending = { skipped: true, reason: '本浏览器没有保留可读的 R4-C 真实检查点；沿用 R5 已验收事实' };
+      }
+
+      game.__newGame(4242, 'normal'); game.__settings.autosave = false;
+      const dawn = game.__state; dawn.enemies.length = 0; dawn.day = 7; dawn.t = 379.95; dawn.wasTide = true; dawn.wasDawn = false;
+      dawn.bossSpawnedThisNight = true; dawn.noSpawnT = 100; dawn.spawnT = 100;
+      const bud = game.__spawn('bud', dawn.player.x + 9, dawn.player.y + 8); bud.hp = bud.maxHp * 0.8;
+      const boss = game.__spawn('core', dawn.player.x + 10, dawn.player.y + 9); dawn.bossRef = boss;
+      game.__steps(1, 0.1);
+      const dawnFirst = { t: dawn.t, day: dawn.day, regularCount: dawn.enemies.filter((e) => !e.def?.boss && e.alive).length,
+        hp: dawn.enemies.find((e) => !e.def?.boss)?.hp ?? null, dawnA: dawn.enemies.find((e) => !e.def?.boss)?.dawnA ?? null,
+        bossCount: dawn.enemies.filter((e) => e.def?.boss).length, bossRef: dawn.bossRef, wasDawn: dawn.wasDawn };
+      if (dawnFirst.regularCount !== 1 || !(dawnFirst.hp < bud.maxHp * 0.8) || dawnFirst.bossCount !== 0 || dawnFirst.bossRef !== null || !dawnFirst.wasDawn)
+        throw new Error(`黎明边界没有按规则消解小怪并退场 Boss：${JSON.stringify(dawnFirst)}`);
+      game.__saveSlot('s3');
+      if (!game.__loadSlot('s3')) throw new Error('黎明消解生产槽读档失败'); game.__settings.autosave = false;
+      const dawnLoaded = game.__state;
+      const persistedDawn = { t: dawnLoaded.t, wasDawn: dawnLoaded.wasDawn, enemies: dawnLoaded.enemies.map((e) => ({ kind: e.ekind, hp: e.hp, dawnA: e.dawnA, boss: !!e.def?.boss })), bossRef: dawnLoaded.bossRef, bossFlag: dawnLoaded.bossSpawnedThisNight };
+      if (persistedDawn.enemies.length !== 1 || persistedDawn.enemies[0].boss || Math.abs(persistedDawn.enemies[0].hp - dawnFirst.hp) > 1e-8 || persistedDawn.bossRef !== null)
+        throw new Error(`黎明中途存读重置敌人状态或复活 Boss：${JSON.stringify(persistedDawn)}`);
+      game.__steps(100, 0.1);
+      const dissolved = game.__state.enemies.filter((e) => e.alive && !e.def?.boss).length;
+      if (dissolved !== 0) throw new Error(`黎明消解结束后仍残留 ${dissolved} 只普通敌人`);
+      results.dawn = { edge: dawnFirst, afterLoad: persistedDawn, after10SecondsAliveRegular: dissolved, bossExited: true };
+      check('dawn-boss-exit-save-load');
+
+      const replay = game.__replay({ seed: 4242, diff: 'normal', days: 3, policy: 'home' });
+      game.__watch(true, 20); game.__steps(1200);
+      results.watch = { classes: game.__testLogRaw().length, summary: game.__testLog() }; game.__watch(false);
+      const replayCheck = check('three-day-replay', { includeKnown: true });
+      results.replay = { ranDays: replay.ranDays, steps: replay.steps, deaths: replay.deaths, kills: replay.kills };
+      if (results.watch.classes !== 0) throw new Error(`1200 步观察器报错：${JSON.stringify(results.watch)}`);
+      results.source = await game.__srcCheck();
+      if (!results.source?.ok || results.source.fails?.length) throw new Error(`__srcCheck 失败：${JSON.stringify(results.source)}`);
+      const restored = restoreOfficial(); results.storageRestored = restored; results.autosaveDisabled = game.__settings.autosave === false;
+      results.ok = results.checks.every((row) => row.result?.ok && !row.result.fails?.length)
+        && results.crossRegion?.activeEnemyRestored && results.trial?.firstFailure?.attempts === 1
+        && results.trial?.secondFailure?.attempts === 2 && results.enemyDeath?.resurrectedAfterLoad === false && results.legacy?.noFabricatedEnding
+        && results.dawn?.bossExited && results.dawn.after10SecondsAliveRegular === 0
+        && results.source.ok && results.watch.classes === 0 && restored.restored && Object.values(restored.unchanged).every(Boolean)
+        && results.autosaveDisabled && (results.ending?.exactEndingRoundtrip || results.ending?.skipped);
+      emit('R6-B browser regression result', results);
+      out.dataset.done = 'true'; out.dataset.result = results.ok ? 'passed' : 'failed';
+    } catch (error) {
+      try { game.__watch(false); } catch (_) { }
+      results.error = String(error && error.stack || error);
+      results.storageRestored = restoreOfficial();
+      emit('R6-B browser regression failed', results);
+      out.dataset.done = 'true'; out.dataset.result = 'failed';
+    }
+  }, { once: true });
+  frame.src = '/';
+})();
+</script>
+</body>
+</html>

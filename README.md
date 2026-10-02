@@ -1,84 +1,51 @@
 # 蚀渊拓荒者 Deep-Light
 
-极简画风 × 深度系统的**永夜经营探索防守**原型。
+当前版本：**v0.8.0-alpha.1「余辉共鸣」** · 完整流程开发原型。版本范围与已知限制见 [`CHANGELOG.md`](CHANGELOG.md)。
 
-> 你带领一支拓荒队降临永夜大陆「蚀渊」。这里唯一的能量是地下的**辉髓矿** ——
-> **光 = 燃料 = 生命 = 安全区**。黑暗会周期性涨潮，滋生噬光的**蚀兽**。
-> 你要让殖民地灯塔在一波波蚀潮中活下去，最终挖出这片大陆永夜的原因。
+2D 顶视角永夜殖民经营与蚀潮防守游戏原型。拓荒队依靠有限的辉髓维持灯火，在地表建造和远征，并逐层探索深渊。
 
-**口味定位**：环世界的殖民地经营 × 星露谷的节奏 × 泰拉瑞亚的探索成长 × 明日方舟式对策防守 × Outer Wilds 的「知识即进度」。
-所有支柱都挂在同一条循环上，不做"什么都有一点但都浅"的大杂烩。
-
-> 🤖 **接手 / 继续开发的 AI 请看 [`HANDOFF.md`](HANDOFF.md)** —— 唯一入口，含进度、代码地图、验证纪律、雷区与下一步。
-> Codex / 其他编码代理会自动加载 [`AGENTS.md`](AGENTS.md)（同一套约束的摘要）。
-
----
+**光 = 燃料 = 生命 = 安全区。** 点亮据点可以生产、驻守，也会使黑暗注意到你。
 
 ## 运行
 
-ES Modules 不能走 `file://`，请在项目根目录起本地服务器：
+项目使用原生 JavaScript ES Modules 与 Canvas 2D，无构建步骤和 npm 依赖。在项目根目录运行：
 
 ```powershell
-py -3.12 serve.py 8000     # 自带禁用缓存（避免改了 js 刷新不生效）
+py -3.12 serve.py 8000
 ```
 
-浏览器打开 <http://localhost:8000>。
+然后打开 <http://localhost:8000>。ES Modules 不能直接通过 `file://` 启动。本机的 `python` 命令指向 LilyPond 嵌入式解释器，请使用 `py -3.12`。
 
-> ⚠️ 不要用 `python serve.py` —— 本机 PATH 上的 `python` 指向 LilyPond 自带的嵌入式解释器（没有 `_socket`），服务器起不来。
-> 技术栈：**原生 JS ES Modules · Canvas 2D · 零构建 · 零依赖 · 零 npm**。
+## 开发状态
 
-## 自检（改完代码跑这三条）
+基础循环目前可玩到采集建造、蚀潮防守、深层探索、Boss 与第七天大潮。战斗、生存、生态、拓荒者、首局引导、前哨和视觉样板均有首轮实现。余辉共鸣 W20-R 的三站结局、存档记录与 R6 全局回归已完成。
 
-浏览器控制台：
+**当前阶段、下一步和未验收项只查 [`docs/STATUS.md`](docs/STATUS.md)。** 详细终局阶段门见 [`docs/ENDGAME.md`](docs/ENDGAME.md)。
+
+浏览器控制台的开发自检：
 
 ```js
-__check()                   // 期望 {ok:true, ran:78, fails:[]}
-__check({roundtrip:true})   // 额外验证「存档→读档」往返
-__srcCheck()                // 异步源码审计，期望 {ok:true, files:87, fails:[]}
+__check()                   // 当前预期 80 项，0 失败；四种局面都要跑
+__check({roundtrip:true})   // 存档往返
+__srcCheck()                // 当前预期 91 个源码文件，0 失败
 ```
 
-`__replay({ seed: 4242, diff: 'normal', days: 3, policy: 'home' })` 可跑标准局难度曲线。
-完整纪律见 [`HANDOFF.md`](HANDOFF.md) §3。
+完整验证步骤与存档保护规则见 [`HANDOFF.md`](HANDOFF.md) §3；静态审计通过不能代替尚未执行的浏览器验收。
 
-## 当前状态
+## 文档导航
 
-**能完整玩通**：开局 → 采集建造 → 蚀潮防守 → 深渊下潜（三层）→ Boss → 第 7 天大潮。
-优化工程（W13）全部落地；**战斗扩展（W14-A）第 0–8 步已收口**。生存轴第 0–7 步已完成：按 `Z` 可吃口粮，靠营地火或点燃的炉子可吃热食疗伤；现在可建造铺位并用 `U`/`E` 休整，夜间指令会产生有限透支，死亡会留下可回收遗落包，工事新增石墙、栅门和路障，并可用修缮钳维护受损结构；菌床提供有上限的藤木再生；地表已支持按需载入相邻区块，无人区块休眠、人工光弱边缘刷怪，已发现区块的差异会随存档保存；W15-C 已接入确定性群系、蚀痕前线与生态斑块；W16-E 视觉轴已完成 V0–V6，V7 已接入 17 项角色/蚀兽素材并将面板入口按钮化；W16-D 拓荒者轴 N0–N3 已建立稳定身份卡、任务板投影、O 键调度面板、工作区/前哨/夜班/救援指令和职业/性格行为节点，N4a 已加入倒地窗口与现场救援，N4b 已加入护送到铺位与 45 秒恢复期，N4c 已加入研究解锁的医疗站与有限治疗队列，N4d 已加入名册职业分配与三种照护意图，N5a 已加入死亡履历、墓碑关联和关系记忆，N5b 已加入研究解锁的单次复苏与恢复期代价，N6a 已加入守灯/采掘/静默三种前哨意图与观测，N6b-1 已支持“派往此区块”的计时迁移、可中断撤回和 3 个有人区块上限，N6b-2a 已接入有人远端区块低频采掘与目标容器入库，N6b-2b 已接入前哨食物补给与守灯燃料消耗，N6b-2c 已接入远端光压与蚀痕前线记账（不额外刷怪），N6b-2d 已接入最多 3 条可存档、同类合并的远端生态求援告警（不离屏判死），W17-F0 已建立首局垂直切片的数据契约、存档迁移与 `__slice()` 观测；W17-F1 已接入真实采集与灯柱建成后的 `wake→gather→light` 非阻塞软引导；W17-F2 已接入黄昏/第一潮/余波提示、锁夜光压观测和战后复盘标记；W17-F3 已接入余波后的首次真实相邻区块往返与回营反馈；W17-F4 已完成守家、远征、前哨固定种子试玩矩阵与回放光压观测，见 [`docs/COLONISTS.md`](docs/COLONISTS.md) 与 [`docs/FIRST_SLICE.md`](docs/FIRST_SLICE.md)。
+地表采空的资源和新开凿的岩壁会随存档保存。旧档未记录的岩壁开凿无法补回。
 
-当前拓荒者轴增量：N6b-2e 已接入进入告警区块后复用既有倒地/救援流程；告警兑现一次后不会重复倒地，也不在离屏状态扣血。
-当前拓荒者轴增量：N7a 已接入地图个人首字与职业色板标记；它只读身份卡，不改变 AI、战斗数值或存档结构。
-当前拓荒者轴增量：N7b 已接入每人最多 12 条的个人经历记录；加入、改职业、倒地、救回、死亡与复苏会写入短事件，O 面板显示最近三条，存读保持一致。
-当前拓荒者轴增量：N7 完整 E2E 已收口；招募→职业→前哨→救援/死亡→关系→复苏→存读，以及守家/远征/静默十日回放均已通过，详见 [`docs/COLONISTS.md`](docs/COLONISTS.md)。
-W18-G0/G1/G2/G3 已完成远征/前哨首轮闭环：`__expedition()` 可读背包准备度、当地容器与人工光、前哨阻塞原因和回营方向；远端 HUD、背包与 O 面板共享“储物箱→人工光→食物→燃料→派拓荒者”五步状态卡；开发回放中的远征已限制为一次相邻区块往返，并完成守家、有限远征、现场落箱驻守三条固定种子五日矩阵。正式探索仍不受限制，不改变敌潮预算，不做跨区自动运输。后续进入生态与前哨内容打磨。
-
-## 文档
-
-| 文档 | 内容 |
+| 想了解 | 先看 |
 |---|---|
-| [`HANDOFF.md`](HANDOFF.md) | **接手文档 · 唯一入口**（环境 / 代码地图 / 验证纪律 / 进度 / 可选方向 / 雷区） |
-| [`AGENTS.md`](AGENTS.md) | 给 Codex 等编码代理的自动加载入口（硬约束摘要） |
-| [`GUIDE.md`](GUIDE.md) | **玩法手册**：世界观 / 四层法则 / 资源经济 / 蚀痕 / 防守 / 夜行 / 人 / 建造 / 操作速查 / 研究树 / 上手建议 |
-| [`DESIGN_V2.md`](DESIGN_V2.md) | **设计蓝图**：七条主轴（D1–D8）、设计铁律、四条结局。做新机制前必读 |
-| [`OPTIMIZE_PLAN.md`](OPTIMIZE_PLAN.md) | W13 优化大工程台账（操作 / 文案 / 性能 / 音频 / 素材），**已全部落地**；只查 §0 剩余项 |
-| [`docs/COMBAT.md`](docs/COMBAT.md) | W14-A 战斗轴分步计划与台账（✅ 已收口）—— **也是新计划应照抄的格式范本** |
-| [`docs/SURVIVAL.md`](docs/SURVIVAL.md) | W15-B 生存轴计划：进食/疗伤、休整夜班、死亡、工事、再生、区块远征（第 0–7 步已落地） |
-| [`docs/UI.md`](docs/UI.md) | 界面优化计划：背包、科技树、工作站与信息层级 |
-| [`docs/ECOLOGY.md`](docs/ECOLOGY.md) | W15-C 生态与大地图计划：蚀痕前线、确定性群系、生态斑块与前哨 |
-| [`docs/COLONISTS.md`](docs/COLONISTS.md) | W16-D 拓荒者轴计划：调度、职业人格、救援、死亡与前哨协同 |
-| [`docs/VISUAL_UI.md`](docs/VISUAL_UI.md) | W16-E 视觉与交互重制计划：像素角色、美术、HUD、面板与操作体验（含 `__visual()` 资源观测与 E2E 台账） |
-| [`docs/FIRST_SLICE.md`](docs/FIRST_SLICE.md) | W17-F 首局 30 分钟垂直切片：F0 地基、F1 首日软引导、F2 第一潮与余波、F3 一次性远征、F4 固定试玩矩阵 |
-| [`docs/EXPEDITION_OUTPOST.md`](docs/EXPEDITION_OUTPOST.md) | W18-G 远征与前哨补给闭环：G0 观测地基、G1 返程引导、G2 现场建箱补给、G3 有限往返回放 |
-| [`docs/BUG_HUNT.md`](docs/BUG_HUNT.md) | Bug 台账 + 检测器纪事（B01–B54 / D1–D60）+ 高发 bug 家族 |
-| [`docs/COPY.md`](docs/COPY.md) | 文案规范：三原则 / 禁用清单 / 术语表 / 全量文案（**改文字前必读**） |
-| [`docs/PAYLOAD.md`](docs/PAYLOAD.md) | 载荷（修饰器）子计划（W14-A 第 2 步） |
-| [`assets/PROMPTS.md`](assets/PROMPTS.md) · [`assets/SOUND.md`](assets/SOUND.md) | 待交付素材清单与提示词（图片 / 声音） |
+| 当前进度与下一步 | [`docs/STATUS.md`](docs/STATUS.md) |
+| 版本记录与交付边界 | [`CHANGELOG.md`](CHANGELOG.md)、[`VERSION`](VERSION) |
+| 接手、代码地图、验证纪律 | [`HANDOFF.md`](HANDOFF.md)；编码代理另读 [`AGENTS.md`](AGENTS.md) |
+| 玩法和操作 | [`GUIDE.md`](GUIDE.md) |
+| 设计原则与远期构想 | [`DESIGN_V2.md`](DESIGN_V2.md) |
+| 当前终局计划和阶段门 | [`docs/ENDGAME.md`](docs/ENDGAME.md) |
+| Bug、测试数据与失误记录 | [`docs/BUG_HUNT.md`](docs/BUG_HUNT.md) |
+| 各专题计划与历史 | [`docs/COMBAT.md`](docs/COMBAT.md)、[`docs/SURVIVAL.md`](docs/SURVIVAL.md)、[`docs/ECOLOGY.md`](docs/ECOLOGY.md)、[`docs/COLONISTS.md`](docs/COLONISTS.md)、[`docs/FIRST_SLICE.md`](docs/FIRST_SLICE.md)、[`docs/EXPEDITION_OUTPOST.md`](docs/EXPEDITION_OUTPOST.md)、[`docs/UI.md`](docs/UI.md)、[`docs/VISUAL_UI.md`](docs/VISUAL_UI.md)、[`docs/ART_REBUILD.md`](docs/ART_REBUILD.md) |
+| 玩家可见文案和素材管线 | [`docs/COPY.md`](docs/COPY.md)、[`assets/PROMPTS.md`](assets/PROMPTS.md)、[`assets/SOUND.md`](assets/SOUND.md) |
 
-## 目录
-
-```
-index.html        唯一 HTML    serve.py  本地服务器（禁缓存 + 音频 MIME + 多线程）
-css/              样式
-js/               全部逻辑：core / data / world / entities / systems / ui / dev
-assets/           素材（多数为占位：程序绘制 + WebAudio 合成）
-docs/             计划与台账
-```
+历史工程计划 [`OPTIMIZE_PLAN.md`](OPTIMIZE_PLAN.md) 与载荷子计划 [`docs/PAYLOAD.md`](docs/PAYLOAD.md) 保留供查证，不作为当前任务表。

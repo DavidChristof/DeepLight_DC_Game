@@ -3,6 +3,7 @@ const KEY = 'deep-light-settings-v1';
 
 export const DEFAULTS = {
   scale: 'fit',        // 画布缩放：'fit' 自适应窗口 或 1 / 2 / 3 固定倍率
+  visualTheme: 'v8-preview', // W19-V：legacy / v8-preview / v8；缺素材时逐层回退
   glow: 1,             // 辉光强度倍率 0.4 ~ 1.6
   vignette: true,      // 屏幕暗角
   floaties: true,      // 采集/伤害飘字
@@ -31,6 +32,7 @@ export function loadSettings() {
       settings.keys = Object.assign({}, data.keys || {});    // 嵌套对象必须克隆：不能与 DEFAULTS 共享引用
     }
   } catch (e) { /* 隐私模式等：忽略 */ }
+  if (!['legacy', 'v8-preview', 'v8'].includes(settings.visualTheme)) settings.visualTheme = DEFAULTS.visualTheme;
   if (!settings.keys) settings.keys = {};
   return settings;
 }

@@ -1,6 +1,7 @@
 // data/buildings.js —— 建造物定义（数据驱动，无依赖）
 
 import { STORE_CAP } from './storage.js';
+import { ENDGAME } from './endgame.js';
 
 // 光源亮度档位（R 键循环）：越亮半径越大，但耗油涨得更快
 // 设计意图：光变成预算 —— 视野/防守/农业/士气抢同一池燃料
@@ -112,6 +113,13 @@ export const BUILD = {
     station: 'clinic', medicalSlots: 1,
     locked: 'healing',
     color: '#9fe8d5',
+  },
+  resonanceBeacon: {
+    name: '共鸣信标',
+    cost: ENDGAME.SITE_COSTS.first,
+    hp: 140, solid: true, block: false,
+    resonanceSite: true,
+    color: '#ffe2a1',
   },
   purifier: {    // 净光柱：既是光源，又能定期净化蚀痕（耗油约为灯柱的 2.5 倍）
     name: '净光柱',
@@ -250,7 +258,7 @@ export const PLAYER_WORK_SECS = 0.35;  // 玩家两次 E 结算的间隔（即 �
 export const WORKER_RATE = 1.1;      // 工人每秒贡献的工
 const BUILD_WORK = {
   prism: 5, wall: 6, stoneWall: 12, gate: 9, barricade: 7, store: 6, bench: 10, farm: 8, mycobed: 8, bunk: 6, clinic: 14, decoy: 8, lamp: 8,
-  analyzer: 10,
+  analyzer: 10, resonanceBeacon: 18,
   furnace: 12, smelter: 16, purifier: 14, towerGlow: 16, towerShock: 16, towerChain: 18, prismGun: 20, shaft: 18, cache: 18,
 };
 export const workOf = (type) => BUILD_WORK[type] || 8;
@@ -261,7 +269,7 @@ export const CATEGORIES = [
   { id: 'struct', name: '结构', note: '挡路、可控通行与减速', types: ['wall', 'stoneWall', 'gate', 'barricade'] },
   { id: 'prod', name: '生产', note: '燃料、食物、生物质与工具', types: ['furnace', 'smelter', 'farm', 'mycobed', 'bench', 'analyzer'] },
   { id: 'def', name: '防御', note: '需光照才开火（光路炮需接上光路）', types: ['towerGlow', 'towerShock', 'towerChain', 'prismGun'] },
-  { id: 'logi', name: '后勤', note: '探深的根，得先有地方放料', types: ['shaft', 'store', 'cache', 'bunk', 'clinic'] },
+  { id: 'logi', name: '后勤', note: '探深的根，得先有地方放料', types: ['shaft', 'store', 'cache', 'bunk', 'clinic', 'resonanceBeacon'] },
 ];
 export const CATEGORY_OF = {};
 for (const c of CATEGORIES) for (const t of c.types) CATEGORY_OF[t] = c.id;

@@ -1,13 +1,14 @@
 // ui/panels.js —— 按键面板注册表（集成式 UI）
 // 新增一个面板只需在 PANELS 里加一项：{ id, key, label, render(state) }
 // 打开状态由本模块统一管理，互斥显示；面板点击由 panelClick 统一分发。
-import { BUILD, canAfford, CATEGORIES, workOf, TOWER_LV, TOWER_LV_MAX, towerHp, upgradeCostFor } from '../data/buildings.js';
+import { BUILD, CATEGORIES, workOf, TOWER_LV, TOWER_LV_MAX, towerHp, upgradeCostFor } from '../data/buildings.js';
+import { ENDGAME } from '../data/endgame.js';
 import { RESEARCH, RESEARCH_ORDER, SECTS } from '../data/research.js';
 import { CODEX, weakTextOf } from '../data/codex.js';
 import { hasTech, researchError, unlockTech, costOf, sectOpen, knowSeenId, nearAnalyzer, branchMulOf, slotsOf } from '../systems/research.js';
 import { relicRows } from '../systems/relics.js';
 import { RELIC_SERIES } from '../data/relics.js';
-import { lockedByResearch, upgradeError, upgradeBuilding, costTextOf } from '../systems/building.js';
+import { buildCostOf, lockedByResearch, upgradeError, upgradeBuilding, costTextOf } from '../systems/building.js';
 import { ORDERS, PATROL } from '../data/nightops.js';
 import { RECRUIT_COST, RECRUIT_MAX } from '../data/traits.js';
 import { RES_ORDER, RES_NAME, RES_COLOR, STORE_ORDER, TOOL_ORDER } from '../data/storage.js';
@@ -20,7 +21,7 @@ import { restBeds, restCount } from '../systems/survival.js';
 import { SURVIVAL } from '../data/survival.js';
 import { beamNeighbor } from '../systems/towers.js';   // “接上光路没”——与开火用的是同一个判定（第 6 步）
 import { TYPE_NAME } from '../data/combat.js';
-import { allContainers, packContainer, usedOf, transfer, dropPack } from '../systems/storage.js';
+import { allContainers, packContainer, usedOf, transfer, dropPack, canWithdraw, spendableOf } from '../systems/storage.js';
 import { craftError, startCraft, setRecipe, workOnce, addFire, setFireMat, fireOn, recipeForStation } from '../systems/craft.js';
 import { FUELS, FUEL_ORDER, fuelDef, fireMatOf, heatOf } from '../data/fire.js';
 import { smeltSecs } from '../systems/smelt.js';
@@ -147,6 +148,7 @@ const BUILD_DESC = {
   mycobed: '菌床（可走）· 半暗光照 0.8–2.4 生长 · 成熟得藤木 · 每图最多 4 床',
   bunk: '简易铺位 · 夜里休整恢复生命与心志 · 1 个休整位',
   clinic: '医疗站 · 治疗恢复期伤势 · 1 个治疗位 · 需研究「蚀抗体质」',
+  resonanceBeacon: '前往金色标记处施工；信标不提供额外光照。',
   shaft: '井口（可站上去）· 通往更深一层',
   purifier: '净化周围蚀痕（每 8 秒 −1 级）· 燃耗约为灯柱的 2.5 倍',
   cache: '只能建在深渊 · 存 60 燃料，每 4 秒给 6 格内最缺油的灯加 1（噬光虫会来啃）',
@@ -179,18 +181,21 @@ function renderBuild(state) {
   for (const type of list) {
     const d = BUILD[type];
     if (!d) continue;
+    const cost = buildCostOf(state, type);
     const locked = lockedByResearch(state, type);
-    const ok = !locked && canAfford(state.res, type);
+    const ok = !locked && canWithdraw(state, cost);
+    const completed = type === 'resonanceBeacon' && Object.values(state.resonance?.sites || {}).filter((site) => site.status === 'complete').length >= ENDGAME.BEACON_COUNT;
     const cls = ['brow', ok ? 'ready' : 'poor', state.building === type ? 'active' : ''].join(' ');
     const idx = list.indexOf(type);
     const keyTxt = idx < 9 ? String(idx + 1) : idx === 9 ? '0' : '−';
-    const st = locked ? { ico: 'lock', txt: '未解锁' } : ok ? { ico: 'ok', txt: '可建造' } : { ico: 'no', txt: '资源不足' };
+    const st = completed ? { ico: 'ok', txt: '已完成' } : locked ? { ico: 'lock', txt: '未解锁' } : ok ? { ico: 'ok', txt: '可建造' } : { ico: 'no', txt: '资源不足' };
+    const title = completed ? '三座信标均已完成' : `${d.name} · 花费 ${costText(cost, true).replace(/<[^>]+>/g, ' ')} · 工期 ${workOf(type)} 工`;
     html += `<div class="${cls}" data-type="${type}" data-hay="${escAttr(hayOf(d.name, BUILD_DESC[type], cur.name))}"
-        title="${d.name} · 花费 ${costText(d.cost, true).replace(/<[^>]+>/g, ' ')} · 工期 ${workOf(type)} 工">
+        title="${title}">
       <span class="bkey">${keyTxt}</span>
       <span class="bicon">${buildIcon(type)}</span>
       <span class="bname">${d.name}</span>
-      <span class="bcost">${costText(d.cost)}</span>
+      <span class="bcost" data-live="cost">${costText(cost)}</span>
       <span class="bstate" data-live="state">${icon(st.ico, 12)} ${st.txt}</span>
       <span class="bdesc">${BUILD_DESC[type] || ''}<em class="bwork">工期 ${workOf(type)} 工</em></span>
     </div>`;
@@ -206,7 +211,7 @@ function renderBuild(state) {
   const rc = RECRUIT_COST;
   const ws = (state.workers || []).length;
   const full = ws >= RECRUIT_MAX;
-  const afford = !full && Object.keys(rc).every((k) => (state.res[k] || 0) >= rc[k]);
+  const afford = !full && canWithdraw(state, rc);
   const rcls = ['brow', afford ? 'ready' : 'poor'].join(' ');
   html += `<div class="${rcls}" data-tool="recruit" data-hay="${escAttr(hayOf('引路篝火 招募 招人 新拓荒者 工具'))}" title="点燃引路篝火：消耗 ${costText(rc, true).replace(/<[^>]+>/g, ' ')} 换一位新拓荒者（随机专长，上限 ${RECRUIT_MAX} 人）">
     <span class="bkey">＋</span><span class="bicon">${icon('fire')}</span><span class="bname">引路篝火</span><span class="bcost">${costText(rc)}</span>
@@ -383,11 +388,12 @@ function renderBench(state) {
     <span class="tdesc">${held ? TOOLS[held].desc : '下面选一件握住'}</span>
     ${held ? '<span class="tbtn" data-act="unequip">收好</span>' : ''}</div>`;
   html += '<div class="psec">仓库里的工具（点「装备」拿到手上）</div>';
-  const have = TOOL_ORDER.filter((k) => (state.res[k] || 0) > 0);
+  const available = spendableOf(state);
+  const have = TOOL_ORDER.filter((k) => (available[k] || 0) > 0);
   if (!have.length) html += '<div class="bnote">还没有工具。先做一把石镐，端掉一片岩壁就有石头了</div>';
   for (const k of have) {
     html += `<div class="trow ready">
-      <span class="tname">${RES_NAME[k]} ×${state.res[k] || 0}</span>
+      <span class="tname">${RES_NAME[k]} ×${available[k] || 0}</span>
       <span class="tdesc">${TOOLS[k].desc}</span>
       <span class="tbtn" data-act="equip" data-k="${k}">装备</span></div>`;
   }
@@ -574,12 +580,13 @@ function fireSlot(state, b, def, prefix) {
   const max = def.maxFuel || 6;
   const have = b.fuel | 0;
   const hot = !b.off && have > 0;
+  const stock = spendableOf(state);
   let html = `<div class="psec">火种 · 1 个烧 ${fd.burnSec}s · 火力 ×${fd.heat}</div>`;
   for (const k of FUEL_ORDER) {
     const f = FUELS[k];
     const on = k === mat;
     html += `<div class="trow ${on ? 'cur ready' : ''}" data-fire-pick="${k}">
-      <span class="tname">${on ? '● ' : '○ '}${f.name}<em class="bwork">库存 ${state.res[k] || 0}</em></span>
+      <span class="tname">${on ? '● ' : '○ '}${f.name}<em class="bwork">库存 ${stock[k] || 0}</em></span>
       <span class="tcost">烧 ${f.burnSec}s / 个<em class="bwork">火力 ×${f.heat}</em></span>
       <span class="tdesc">${f.desc}</span></div>`;
   }
@@ -610,7 +617,8 @@ function renderFurnace(state) {
   html += recipePicker(state, 'furnace', cur);
   html += fireSlot(state, b, def, 'f');
   const r = RECIPE_OF[cur] || {};
-  const lack = Object.keys(r.cost || {}).map((k) => `${RES_NAME[k]} ${state.res[k] || 0}`).join(' · ');
+  const have = spendableOf(state);
+  const lack = Object.keys(r.cost || {}).map((k) => `${RES_NAME[k]} ${have[k] || 0}`).join(' · ');
   html += '<div class="psec">开工</div>';
   html += `<div class="trow ${hot ? 'ready' : 'poor'}"><span class="tname">手做</span>
     <span class="tdesc">${hot
@@ -705,7 +713,8 @@ function researchNodeHTML(state, id, showReq = true) {
 
 function renderResearch(state) {
   const cur = state.resSect || 'founder';
-  let html = `<div class="psec" data-live="res">档案 ${state.res.data || 0} · 母髓 ${state.res.core || 0} · 夜髓 ${state.res.night || 0}</div>`;
+  const available = spendableOf(state);
+  let html = `<div class="psec" data-live="res">档案 ${available.data || 0} · 母髓 ${available.core || 0} · 夜髓 ${available.night || 0}</div>`;
   html += '<div class="rsects">';
   for (const s of SECTS) {
     const on = s.id === cur;
@@ -1189,7 +1198,8 @@ function refreshLive(state, hostEl) {
     stgSig = c ? `${roll(c.ref.stock)}|${roll(state.pack.stock)}` : 'x';
   }
   const outpostSig = outpost ? `${outpost.readyCount}|${outpost.assigned ? 1 : 0}|${outpost.local.hasStore ? 1 : 0}|${outpost.local.hasLight ? 1 : 0}|${outpost.local.food}|${outpost.local.fuel}|${outpost.local.free}` : '';
-  const sig = `${state.res.ore}|${state.res.vine}|${state.res.fuel}|${state.res.food}|${state.res.data || 0}|${state.res.core || 0}|${state.res.night || 0}|${sites}|${codexKills(state)}|${blooms}|${vents}|${next}|${stSig}|${clinicSig}|${stgSig}|${outpostSig}`;
+  const resonanceSig = Object.values(state.resonance?.sites || {}).map((site) => `${site.id}:${site.status}`).join('|');
+  const sig = `${state.res.ore}|${state.res.vine}|${state.res.fuel}|${state.res.food}|${state.res.data || 0}|${state.res.core || 0}|${state.res.night || 0}|${sites}|${codexKills(state)}|${blooms}|${vents}|${next}|${stSig}|${clinicSig}|${stgSig}|${outpostSig}|${resonanceSig}`;
   if (sig === liveSig) return;
   liveSig = sig;
   const set = (el, txt) => { if (el && el.textContent !== txt) el.textContent = txt; };
@@ -1223,10 +1233,16 @@ function refreshLive(state, hostEl) {
     for (const row of hostEl.querySelectorAll('.brow[data-type]')) {
       const type = row.dataset.type;
       const locked = lockedByResearch(state, type);
-      const ok = !locked && canAfford(state.res, type);
+      const cost = buildCostOf(state, type);
+      const ok = !locked && canWithdraw(state, cost);
+      const completed = type === 'resonanceBeacon' && Object.values(state.resonance?.sites || {}).filter((site) => site.status === 'complete').length >= ENDGAME.BEACON_COUNT;
       row.classList.toggle('ready', ok);
       row.classList.toggle('poor', !ok);
-      setRich(row.querySelector('.bstate'), locked ? 'lock' : ok ? 'ok' : 'no', locked ? '未解锁' : ok ? '可建造' : '资源不足');
+      setRich(row.querySelector('.bstate'), completed ? 'ok' : locked ? 'lock' : ok ? 'ok' : 'no', completed ? '已完成' : locked ? '未解锁' : ok ? '可建造' : '资源不足');
+      const costEl = row.querySelector('[data-live="cost"]');
+      const costHtml = costText(cost);
+      if (costEl && costEl.innerHTML !== costHtml) costEl.innerHTML = costHtml;
+      row.title = completed ? '三座信标均已完成' : `${BUILD[type]?.name || type} · 花费 ${costText(cost, true).replace(/<[^>]+>/g, ' ')} · 工期 ${workOf(type)} 工`;
     }
     const note = hostEl.querySelector('[data-live="sites"]');
     if (note) {
@@ -1236,13 +1252,14 @@ function refreshLive(state, hostEl) {
     const rc = hostEl.querySelector('[data-live="recruit"]');
     if (rc) {
       const full = (state.workers || []).length >= RECRUIT_MAX;
-      const afford = !full && Object.keys(RECRUIT_COST).every((k) => (state.res[k] || 0) >= RECRUIT_COST[k]);
+      const afford = !full && canWithdraw(state, RECRUIT_COST);
       setRich(rc, full ? 'lock' : 'ok', full ? `已满 ${RECRUIT_MAX} 人` : afford ? `招募（现 ${(state.workers || []).length} 人）` : '资源不足');
       rc.parentElement.classList.toggle('ready', afford);
       rc.parentElement.classList.toggle('poor', !afford);
     }
   } else if (activeId === 'research') {
-    set(hostEl.querySelector('[data-live="res"]'), `档案 ${state.res.data || 0} · 母髓 ${state.res.core || 0} · 夜髓 ${state.res.night || 0}`);
+    const available = spendableOf(state);
+    set(hostEl.querySelector('[data-live="res"]'), `档案 ${available.data || 0} · 母髓 ${available.core || 0} · 夜髓 ${available.night || 0}`);
     for (const node of hostEl.querySelectorAll('.rs[data-id]')) {
       const id = node.dataset.id;
       const r = RESEARCH[id];
@@ -1306,7 +1323,10 @@ function refreshLive(state, hostEl) {
     const b = state.stationRef && (state.buildings || []).find((x) => x === state.stationRef);
     const r = b ? RECIPE_OF[recipeForStation(b, BUILD.furnace)] : null;
     const row = hostEl.querySelector('[data-live="stock"]');
-    if (row && r) row.textContent = Object.keys(r.cost).map((k) => `${RES_NAME[k]} ${state.res[k] || 0}`).join(' · ');
+    if (row && r) {
+      const available = spendableOf(state);
+      row.textContent = Object.keys(r.cost).map((k) => `${RES_NAME[k]} ${available[k] || 0}`).join(' · ');
+    }
     if (b) liveFire(hostEl, b, BUILD.furnace, 'f');
   } else if (activeId === 'bench') {
     const b = state.stationRef && (state.buildings || []).find((x) => x === state.stationRef);

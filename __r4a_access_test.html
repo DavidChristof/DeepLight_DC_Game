@@ -1,0 +1,1503 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>W20-R R4-B 苔原终站验收</title>
+<body style="background:#101923;color:#e5edf5;font:14px Consolas,monospace">
+<h1>W20-R R4-B · 苔原终站子门</h1>
+<pre id="out">启动首站续跑…</pre>
+<button id="resume" hidden>从最近检查点重试</button>
+<script>
+(() => {
+  const keys = ['deep-light-saves-v2', 'deep-light-settings-v1', 'deep-light-ui-v1'];
+  const r6eMode = new URLSearchParams(location.search).has('r6e');
+  const checkpointKey = r6eMode ? '__deep_light_r6e_checkpoints_v1' : '__deep_light_r4a_checkpoints_v1';
+  // R6-E 从真实首站胜利重新走后两站；不篡改已完成快照来制造“新胜局”。
+  if (r6eMode && !localStorage.getItem(checkpointKey)) {
+    const source = JSON.parse(localStorage.getItem('__deep_light_r4a_checkpoints_v1') || 'null');
+    if (source?.r3) localStorage.setItem(checkpointKey, JSON.stringify({schema:1,seed:4242,phase:'r3',completed:[],latest:source.r3,r3:source.r3}));
+  }
+  const storageBefore = Object.fromEntries(keys.map((key) => [key, localStorage.getItem(key)]));
+  window.addEventListener('beforeunload', () => {
+    if (r6eMode) for (const key of keys) storageBefore[key] == null ? localStorage.removeItem(key) : localStorage.setItem(key, storageBefore[key]);
+  });
+  try {
+    const savedSettings = storageBefore['deep-light-settings-v1'] ? JSON.parse(storageBefore['deep-light-settings-v1']) : {};
+    localStorage.setItem('deep-light-settings-v1', JSON.stringify({ ...savedSettings, autosave: false }));
+  } catch (_) {
+    localStorage.setItem('deep-light-settings-v1', JSON.stringify({ autosave: false }));
+  }
+  const out = document.getElementById('out'), resume = document.getElementById('resume');
+  const lines = [];
+  const emit = (name, value) => { lines.push(`${name}: ${JSON.stringify(value)}`); out.textContent = lines.join('\n'); };
+  const readPersistentProgress = () => {
+    try {
+      const data = JSON.parse(localStorage.getItem(checkpointKey) || 'null');
+      return data?.schema === 1 && data.seed === 4242 && data.latest && typeof data.latest === 'object' ? data : null;
+    } catch (_) { return null; }
+  };
+  const restoredProgress = readPersistentProgress();
+  if (restoredProgress) {
+    parent.__r4aAccessCheckpoints = {
+      ...(parent.__r4aAccessCheckpoints || {}),
+      r3: restoredProgress.r3 || null,
+      latest: restoredProgress.latest,
+      phase: restoredProgress.phase,
+    };
+    const restoredCompleted = new Set(restoredProgress.completed || []);
+    // R4-B 加入素材/燃料子门后，老版检查点的 completed 列表缺少中间阶段；
+    // 当前阶段的真实完整快照可安全代表此前的成功阶段，避免重采/重付。
+    if (restoredProgress.phase === 'tundraBeaconBuilt')
+      for (const phase of ['tundraReturn', 'tundraMaterialsReady', 'tundraSupplyReady', 'tundraBeaconBuilt']) restoredCompleted.add(phase);
+    for (const phase of restoredCompleted) parent.__r4aAccessCheckpoints[phase] = restoredProgress.latest;
+  }
+  const seedRng = (win, seed = 9091) => {
+    let n = seed >>> 0;
+    win.Math.random = () => {
+      let t = n += 0x6D2B79F5;
+      t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  };
+  let game = null, originalRandom = null, busy = false;
+  const persistProgress = () => {
+    const checkpoints = parent.__r4aAccessCheckpoints;
+    if (!checkpoints?.latest || !checkpoints.phase) return;
+    const phaseOrder = ['surfaceResearch', 'depth1Research', 'depth2Core', 'campCoreCache', 'shaleArrival', 'shaleStoreSample', 'shaleOre18', 'shaleNight4', 'shaleBeaconBuilt', 'shaleFuelTransport', 'shaleDefenseReady', 'shaleTrialReserved', 'shaleTrialComplete', 'tundraReturn', 'tundraMaterialsReady', 'tundraSupplyReady', 'tundraBeaconBuilt', 'tundraFuelReady', 'tundraTrialReserved', 'tundraTrialComplete'];
+    const phaseIndex = phaseOrder.indexOf(checkpoints.phase);
+    const completed = phaseIndex < 0 ? [] : phaseOrder.slice(0, phaseIndex + 1);
+    const payload = { schema: 1, seed: 4242, phase: checkpoints.phase, completed,
+      latest: checkpoints.latest, r3: checkpoints.r3 || null };
+    try {
+      localStorage.setItem(checkpointKey, JSON.stringify(payload));
+      emit('test checkpoint persisted', { phase: payload.phase, bytes: JSON.stringify(payload).length, gameStorageKeys: 'untouched' });
+    } catch (error) {
+      emit('test checkpoint persistence failed', String(error && error.message || error));
+    }
+  };
+  const setCheckpoint = (phase) => {
+    const data = game.__checkpoint();
+    parent.__r4aAccessCheckpoints ||= {};
+    parent.__r4aAccessCheckpoints[phase] = data;
+    parent.__r4aAccessCheckpoints.latest = data;
+    parent.__r4aAccessCheckpoints.phase = phase;
+    emit('checkpoint', { phase, day: data.day, layer: data.layerId, chunk: [data.chunkX, data.chunkY], bytes: JSON.stringify(data).length });
+    persistProgress();
+  };
+  const step = (n = 1) => { for (let i = 0; i < n; i++) game.__step(1 / 60); };
+  const awaitBrowserE = async () => {
+    game.__quick(true);
+    const consumeInput = e => { if (e.code === 'KeyE') game.__steps(1); };
+    game.addEventListener('keydown', consumeInput);
+    try { while (game.__state.resonance?.trial?.status !== 'reserved') await new Promise(resolve => game.requestAnimationFrame(resolve)); }
+    finally { game.removeEventListener('keydown', consumeInput); }
+  };
+  const distTo = (x, y) => Math.hypot(game.__state.player.x - (x + 0.5), game.__state.player.y - (y + 0.5));
+  const moveTo = (x, y, limit = 2400) => {
+    const path = game.__goto(x, y);
+    if (!path) throw new Error(`无路可达 ${x},${y} · ${game.__state.layerId} (${game.__state.chunkX},${game.__state.chunkY})`);
+    let i = 0;
+    const tolerance = r6eMode ? 0.25 : 0.95;
+    for (; i < limit && distTo(x, y) > tolerance; i++) step(1);
+    if (distTo(x, y) > tolerance) throw new Error(`移动超时 ${x},${y} · 玩家=${game.__state.player.x.toFixed(1)},${game.__state.player.y.toFixed(1)}`);
+    if (r6eMode) game.__state.player.clearPath();
+    return i;
+  };
+  const crossX = (dir, expectedX, limit = 1800) => {
+    const s = game.__state, oldX = s.chunkX | 0;
+    const targetX = dir > 0 ? s.map.w - 1 : 0;
+    // Horizontal exits are a fixed central corridor; route there even after gathering at a map corner.
+    game.__goto(targetX, Math.floor(s.map.h / 2));
+    let n = 0;
+    for (; n < limit && (game.__state.chunkX | 0) === oldX; n++) step(1);
+    if ((game.__state.chunkX | 0) !== expectedX) throw new Error(`区块出口失败：期望 x=${expectedX}，实际 ${game.__state.chunkX},${game.__state.chunkY}，玩家=(${game.__state.player.x.toFixed(1)},${game.__state.player.y.toFixed(1)})`);
+    return n;
+  };
+  const crossY = (dir, expectedY, limit = 1800) => {
+    const s = game.__state, oldY = s.chunkY | 0;
+    const targetY = dir > 0 ? s.map.h - 1 : 0;
+    // Vertical exits likewise require the map's central corridor.
+    game.__goto(Math.floor(s.map.w / 2), targetY);
+    let n = 0;
+    for (; n < limit && (game.__state.chunkY | 0) === oldY; n++) step(1);
+    if ((game.__state.chunkY | 0) !== expectedY) throw new Error(`区块出口失败：期望 y=${expectedY}，实际 ${game.__state.chunkX},${game.__state.chunkY}，玩家=(${game.__state.player.x.toFixed(1)},${game.__state.player.y.toFixed(1)})`);
+    return n;
+  };
+  const returnToOrigin = () => {
+    if (game.__state.layerId !== 'surface') throw new Error('返回原点前必须先回到地表');
+    let frames = 0;
+    while ((game.__state.chunkX | 0) > 0) frames += crossX(-1, (game.__state.chunkX | 0) - 1);
+    while ((game.__state.chunkX | 0) < 0) frames += crossX(1, (game.__state.chunkX | 0) + 1);
+    while ((game.__state.chunkY | 0) > 0) frames += crossY(-1, (game.__state.chunkY | 0) - 1);
+    while ((game.__state.chunkY | 0) < 0) frames += crossY(1, (game.__state.chunkY | 0) + 1);
+    if ((game.__state.chunkX | 0) !== 0 || (game.__state.chunkY | 0) !== 0) throw new Error('无法沿区块出口回到营地原点');
+    return frames;
+  };
+  const key = (code, frames = 1) => {
+    const keyName = code.replace(/^Key/, '').toLowerCase();
+    game.dispatchEvent(new game.KeyboardEvent('keydown', { code, key: keyName, bubbles: true }));
+    step(frames);
+    game.dispatchEvent(new game.KeyboardEvent('keyup', { code, key: keyName, bubbles: true }));
+    step(2);
+  };
+  const storageTotal = (res) => {
+    const s = game.__state, seen = new Set(); let total = 0;
+    const add = (stock) => { if (!stock || seen.has(stock)) return; seen.add(stock); total += Math.max(0, Number(stock[res]) || 0); };
+    add(s.pack && s.pack.stock);
+    for (const chunk of Object.values(s.chunkStore || {})) {
+      for (const b of [...(chunk.beacons || []), ...(chunk.buildings || [])]) add(b && b.stock);
+    }
+    for (const b of [...(s.beacons || []), ...(s.buildings || [])]) add(b && b.stock);
+    for (const layer of Object.values(s.layers || {})) for (const b of [...(layer.beacons || []), ...(layer.buildings || [])]) add(b && b.stock);
+    return total;
+  };
+  // Payments use only the active layer/chunk plus the backpack; dormant and remote stores
+  // must never satisfy an acquisition gate in this runner.
+  const spendableTotal = (res) => {
+    const s = game.__state; let total = Number(s.pack?.stock?.[res]) || 0;
+    for (const b of [...(s.beacons || []), ...(s.buildings || [])]) total += Number(b?.stock?.[res]) || 0;
+    return total;
+  };
+  const closestStand = (tx, ty) => {
+    const s = game.__state, m = s.map, sx = Math.floor(s.player.x), sy = Math.floor(s.player.y), out = [];
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if (!dx && !dy) continue;
+      const x = tx + dx, y = ty + dy;
+      if (!m.isWalk(x, y) || m.occWalk[y * m.w + x]) continue;
+      const path = game.__path(sx, sy, x, y);
+      if (path) out.push({ x, y, n: path.length });
+    }
+    out.sort((a, b) => a.n - b.n || a.y - b.y || a.x - b.x);
+    return out[0] || null;
+  };
+  const hover = async (tx, ty) => {
+    const canvas = game.document.querySelector('canvas'), p = game.__screenOf(tx, ty);
+    if (!p.inside) throw new Error(`交互目标未进入视野 ${tx},${ty}`);
+    canvas.dispatchEvent(new game.MouseEvent('mousemove', { clientX: p.cx, clientY: p.cy, bubbles: true }));
+    await new Promise((resolve) => game.requestAnimationFrame(resolve));
+    step(1);
+    return p;
+  };
+  const aimMine = async (tx, ty, keyName) => {
+    const canvas = game.document.querySelector('canvas');
+    const offsets = [[0, 0], [0, 1], [1, 0], [0, -1], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+    let last = null;
+    for (const [dx, dy] of offsets) {
+      const p = game.__screenOf(tx + dx, ty + dy);
+      if (!p.inside) continue;
+      canvas.dispatchEvent(new game.MouseEvent('mousemove', { clientX: p.cx, clientY: p.cy, bubbles: true }));
+      await new Promise((resolve) => game.requestAnimationFrame(resolve));
+      step(1);
+      last = game.__resolve();
+      if (last?.kind === 'mine' && last.res === keyName && last.x === tx && last.y === ty) return last;
+    }
+    throw new Error(`无法精确瞄准 ${keyName} @${tx},${ty}，实际=${JSON.stringify(last)}，鼠标格=${JSON.stringify(game.__state.cursor)}`);
+  };
+  const mineAt = async (tx, ty, keyName, kind = 'mine') => {
+    const stand = closestStand(tx, ty);
+    if (!stand) throw new Error(`资源节点无可达站位 ${tx},${ty}`);
+    const moveFrames = moveTo(stand.x, stand.y);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      for (let i = 0; i < 24; i++) step(1);
+      const action = kind === 'mine' ? await aimMine(tx, ty, keyName) : (await hover(tx, ty), game.__resolve());
+      if (!action || action.kind !== kind || (kind === 'mine' && (action.res !== keyName || action.x !== tx || action.y !== ty)))
+        throw new Error(`E目标异常 ${JSON.stringify(action)}，预期 ${kind}/${keyName} @${tx},${ty}，光标格=${game.__state.cursor?.x},${game.__state.cursor?.y}`);
+      const before = storageTotal(keyName), amount = game.__state.map.nodeAmt[ty * game.__state.map.w + tx];
+      key('KeyE', 18);
+      const after = storageTotal(keyName), remaining = game.__state.map.nodeAmt[ty * game.__state.map.w + tx];
+      if (after > before || remaining < amount) return { before, after, remaining, moveFrames };
+    }
+    const s = game.__state, action = game.__resolve();
+    throw new Error(`E交互未采到 ${keyName} @${tx},${ty}: ${JSON.stringify({
+      action: action && action.kind, remaining: s.map.nodeAmt[ty * s.map.w + tx],
+      pack: { ...s.pack.stock }, packCap: game.__carry().packCap,
+      total: storageTotal(keyName), floaty: s.floaties?.at(-1)?.txt || '',
+      layer: s.layerId, player: [s.player.x, s.player.y]
+    })}`);
+  };
+  const gather = async (tile, res, targetTotal, maxNodes = 120) => {
+    const log = [], s = game.__state, m = s.map;
+    let tries = 0;
+    while (spendableTotal(res) < targetTotal && tries++ < maxNodes) {
+      const sx = Math.floor(s.player.x), sy = Math.floor(s.player.y), choices = [];
+      for (let i = 0; i < m.tiles.length; i++) {
+        if (m.tiles[i] !== tile || (m.nodeAmt[i] || 0) <= 0) continue;
+        const tx = i % m.w, ty = Math.floor(i / m.w), stand = closestStand(tx, ty);
+        if (!stand) continue;
+        const path = game.__path(sx, sy, stand.x, stand.y);
+        if (path) choices.push({ tx, ty, d: path.length, idx: i });
+      }
+      choices.sort((a, b) => a.d - b.d || a.idx - b.idx);
+      if (!choices.length) break;
+      const node = choices[0], got = await mineAt(node.tx, node.ty, res);
+      log.push({ tile: [node.tx, node.ty], amountLeft: got.remaining, resource: got.after });
+    }
+    return { total: spendableTotal(res), target: targetTotal, nodes: log };
+  };
+  const research = async (id, sect) => {
+    if (!game.__state.activePanel || game.__state.activePanel !== 'research') key('KeyT');
+    if (sect) game.document.querySelector(`#panel [data-sect="${sect}"]`)?.click();
+    const row = game.document.querySelector(`#panel .rs[data-id="${id}"]`);
+    if (!row) throw new Error(`研究节点未显示：${id}`);
+    row.click(); step(2);
+    if (!game.__state.research?.unlocked?.[id]) throw new Error(`研究未解锁：${id} / ${game.__state.floaties?.at(-1)?.txt || ''}`);
+    const result = { id, data: spendableTotal('data'), research: { ...game.__state.research.unlocked } };
+    if (game.__state.activePanel === 'research') key('KeyT');
+    return result;
+  };
+  const cacheNonFoodPackAtCamp = async () => {
+    const s = game.__state, camp = s.beacons.find((b) => b.stock);
+    if (!camp) throw new Error('地表原点没有可用营火仓，不能整理母髓运输背包');
+    await openContainer(camp);
+    const before = { ...s.pack.stock };
+    for (const keyName of Object.keys(s.pack.stock || {})) {
+      if (keyName === 'food' || !(s.pack.stock[keyName] > 0)) continue;
+      const selector = `.srow[data-row="p-${keyName}"] .sbtnx[data-act="push"][data-k="${keyName}"][data-n="999"]`;
+      const button = game.document.querySelector(`#panel ${selector}`);
+      if (!button) throw new Error(`营火仓面板缺少背包物资转存按钮：${keyName}`);
+      button.click(); step(1);
+    }
+    const left = Object.fromEntries(Object.entries(s.pack.stock || {}).filter(([keyName, n]) => keyName !== 'food' && n > 0));
+    if (Object.keys(left).length) throw new Error(`深潜前背包仍有非食物物资：${JSON.stringify(left)}`);
+    key('Escape');
+    return { before, after: { ...s.pack.stock } };
+  };
+  const shaftAt = async (shaft, down) => {
+    const tx = shaft.x, ty = shaft.y, stand = closestStand(tx, ty);
+    if (!stand) throw new Error(`竖井无可达站位 ${tx},${ty}`);
+    moveTo(stand.x, stand.y); await hover(tx, ty);
+    const action = game.__resolve();
+    if (action?.kind !== 'shaft') throw new Error(`竖井交互对象异常：${JSON.stringify(action)}`);
+    const oldLayer = game.__state.layerId;
+    for (let attempt = 0; attempt < 3 && game.__state.layerId === oldLayer; attempt++) {
+      while ((game.__state.interactCd || 0) > 0) step(1);
+      step(2);
+      key('KeyE');
+    }
+    if (game.__state.layerId === oldLayer) throw new Error(`竖井未${down ? '下潜' : '返回'}：${JSON.stringify({ last: game.__state.floaties?.at(-1)?.txt || '', cd: game.__state.interactCd, deeper: game.__state.research?.unlocked?.deeper, action: game.__resolve()?.kind, pos: [game.__state.player.x, game.__state.player.y] })}`);
+    return game.__state.layerId;
+  };
+  const openContainer = async (container) => {
+    const stand = closestStand(container.x, container.y);
+    if (!stand) throw new Error(`容器没有可达交互站位：${container.x},${container.y}`);
+    moveTo(stand.x, stand.y); await hover(container.x, container.y);
+    const action = game.__resolve();
+    if (action?.kind !== 'container') throw new Error(`预期打开容器，实际交互目标为 ${JSON.stringify(action)}`);
+    key('KeyE'); step(1);
+    if (game.__state.activePanel !== 'store') throw new Error('容器面板未通过真实 E 输入打开');
+  };
+  const placeShaft = async () => {
+    const s = game.__state, m = s.map, candidates = [];
+    for (let y = 2; y < m.h - 2; y++) for (let x = 2; x < m.w - 2; x++) {
+      const d = Math.hypot(x + 0.5 - s.player.x, y + 0.5 - s.player.y);
+      if (d < 2 || d > 5.2 || m.get(x, y) !== 0 || m.occBuild[y * m.w + x] || m.occWalk[y * m.w + x]) continue;
+      if (game.__path(Math.floor(s.player.x), Math.floor(s.player.y), x, y)) candidates.push({ x, y, d });
+    }
+    candidates.sort((a, b) => a.d - b.d || a.y - b.y || a.x - b.x);
+    const at = candidates[0];
+    if (!at) throw new Error('depth1 找不到竖井合法落点');
+    key('KeyB');
+    if (s.activePanel !== 'build') throw new Error('建造面板未打开');
+    let row = game.document.querySelector('#panel .brow[data-type="shaft"]');
+    if (!row) {
+      // Selecting a category re-renders the panel and detaches every old chip.
+      // Target the live logistics chip directly instead of iterating stale nodes.
+      const logistics = game.document.querySelector('#panel .bcat[data-cat="logi"]');
+      if (logistics) { logistics.click(); step(1); row = game.document.querySelector('#panel .brow[data-type="shaft"]'); }
+    }
+    if (!row) throw new Error('建造面板未列出深潜竖井');
+    row.click(); step(1);
+    if (s.building !== 'shaft') throw new Error(`未选择竖井蓝图：${s.building}`);
+    const p = game.__screenOf(at.x, at.y), canvas = game.document.querySelector('canvas');
+    canvas.dispatchEvent(new game.MouseEvent('mousemove', { clientX: p.cx, clientY: p.cy, bubbles: true }));
+    canvas.dispatchEvent(new game.MouseEvent('mousedown', { clientX: p.cx, clientY: p.cy, bubbles: true, button: 0, buttons: 1 }));
+    step(1); // mouseDuties 需在按住状态下至少运行一帧，松手才会提交 1×1 蓝图。
+    canvas.dispatchEvent(new game.MouseEvent('mouseup', { clientX: p.cx, clientY: p.cy, bubbles: true, button: 0 }));
+    step(2);
+    const b = s.buildings.find((x) => x.type === 'shaft' && !x.entry && x.x === at.x && x.y === at.y);
+    if (!b || !b.site) throw new Error(`竖井蓝图未放置：${JSON.stringify(at)}`);
+    const stand = closestStand(at.x, at.y);
+    if (!stand) throw new Error('竖井工地周围没有可达施工站位');
+    moveTo(stand.x, stand.y);
+    await hover(at.x, at.y);
+    game.dispatchEvent(new game.KeyboardEvent('keydown', { code: 'KeyE', key: 'e', bubbles: true }));
+    let frames = 0;
+    for (; frames < 2400 && b.site; frames++) step(1);
+    game.dispatchEvent(new game.KeyboardEvent('keyup', { code: 'KeyE', key: 'e', bubbles: true })); step(2);
+    if (b.site) throw new Error(`竖井施工超时：${frames}帧 / ${b.work || 0}`);
+    for (let i = 0; i < 2 && (s.activePanel || s.building); i++) key('Escape');
+    if (s.activePanel || s.building) throw new Error('竖井建成后未能退出建造面板/蓝图模式');
+    return { x: b.x, y: b.y, frames, hp: b.hp };
+  };
+  const placeRemoteStore = async (site) => {
+    const s = game.__state, m = s.map, candidates = [];
+    moveTo(site.x, site.y);
+    for (let y = 2; y < m.h - 2; y++) for (let x = 2; x < m.w - 2; x++) {
+      const d = Math.hypot(x + 0.5 - (site.x + 0.5), y + 0.5 - (site.y + 0.5));
+      if (d < 2.2 || d > 4.8 || m.get(x, y) !== 0 || m.occBuild[y * m.w + x] || m.occWalk[y * m.w + x]) continue;
+      if (game.__path(Math.floor(s.player.x), Math.floor(s.player.y), x, y)) candidates.push({ x, y, d });
+    }
+    candidates.sort((a, b) => a.d - b.d || a.y - b.y || a.x - b.x);
+    const at = candidates[0];
+    if (!at) throw new Error('二站锚点附近找不到可达储物箱落点');
+    const before = { ore: Number(s.pack.stock.ore) || 0, vine: Number(s.pack.stock.vine) || 0 };
+    if (before.ore < 2 || before.vine < 2) throw new Error(`当地箱体材料不足：${JSON.stringify(before)}`);
+    key('KeyB');
+    if (s.activePanel !== 'build') throw new Error('储物箱建造面板未打开');
+    const logistics = game.document.querySelector('#panel .bcat[data-cat="logi"]');
+    if (logistics) { logistics.click(); step(1); }
+    const row = game.document.querySelector('#panel .brow[data-type="store"]');
+    if (!row) throw new Error('后勤分类未显示储物箱建造项');
+    row.click(); step(1);
+    if (s.building !== 'store') throw new Error(`未选择储物箱蓝图：${s.building}`);
+    const p = game.__screenOf(at.x, at.y), canvas = game.document.querySelector('canvas');
+    if (!p.inside) throw new Error(`储物箱落点未进入视野：${JSON.stringify(at)}`);
+    canvas.dispatchEvent(new game.MouseEvent('mousemove', { clientX: p.cx, clientY: p.cy, bubbles: true }));
+    canvas.dispatchEvent(new game.MouseEvent('mousedown', { clientX: p.cx, clientY: p.cy, bubbles: true, button: 0, buttons: 1 }));
+    step(1);
+    canvas.dispatchEvent(new game.MouseEvent('mouseup', { clientX: p.cx, clientY: p.cy, bubbles: true, button: 0 }));
+    step(2);
+    const b = s.buildings.find((x) => x.type === 'store' && x.x === at.x && x.y === at.y);
+    if (!b || !b.site) throw new Error(`储物箱施工蓝图未生成：${JSON.stringify(at)}`);
+    const stand = closestStand(at.x, at.y);
+    if (!stand) throw new Error('储物箱工地周围无可达施工站位');
+    moveTo(stand.x, stand.y); await hover(at.x, at.y);
+    game.dispatchEvent(new game.KeyboardEvent('keydown', { code: 'KeyE', key: 'e', bubbles: true }));
+    let frames = 0;
+    for (; frames < 1200 && b.site; frames++) step(1);
+    game.dispatchEvent(new game.KeyboardEvent('keyup', { code: 'KeyE', key: 'e', bubbles: true })); step(2);
+    if (b.site) throw new Error(`储物箱施工超时：${frames}帧 / ${b.work || 0}`);
+    for (let i = 0; i < 2 && (s.activePanel || s.building); i++) key('Escape');
+    if (s.activePanel || s.building) throw new Error('储物箱建成后未能退出建造面板/蓝图模式');
+    const after = { ore: Number(s.pack.stock.ore) || 0, vine: Number(s.pack.stock.vine) || 0 };
+    if (before.ore - after.ore !== 2 || before.vine - after.vine !== 2 || !b.stock)
+      throw new Error(`储物箱建造账本异常：${JSON.stringify({ at, before, after, stock: b.stock })}`);
+    return { x: b.x, y: b.y, frames, hp: b.hp, costPaid: { ore: 2, vine: 2 }, remainingPack: after };
+  };
+  const placeResonanceBeacon = async (site, siteId) => {
+    const label = siteId === 'third' ? '终站' : '二站';
+    const s = game.__state, m = s.map, cost = { ...game.__resonance().costs.construction[siteId] };
+    const before = Object.fromEntries(Object.keys(cost).map((res) => [res, spendableTotal(res)]));
+    for (const [res, need] of Object.entries(cost)) {
+      if (before[res] < need) throw new Error(`${label}信标开工前${res}不足：${before[res]}/${need}`);
+    }
+    const approaches = [];
+    for (let y = Math.max(1, site.y - 5); y <= Math.min(m.h - 2, site.y + 5); y++) {
+      for (let x = Math.max(1, site.x - 5); x <= Math.min(m.w - 2, site.x + 5); x++) {
+        if ((x === site.x && y === site.y) || !m.isWalk(x, y)) continue;
+        const d = Math.hypot(x - site.x, y - site.y);
+        if (d > 5.2) continue;
+        const path = game.__path(Math.floor(s.player.x), Math.floor(s.player.y), x, y);
+        if (path) approaches.push({ x, y, d, path: path.length });
+      }
+    }
+    approaches.sort((a, b) => a.path - b.path || a.d - b.d || a.y - b.y || a.x - b.x);
+    const approach = approaches[0];
+    if (!approach) throw new Error(`${label}信标周围没有可达建造站位`);
+    const approachFrames = moveTo(approach.x, approach.y, 2400);
+    key('KeyB');
+    if (s.activePanel !== 'build') throw new Error(`${label}信标建造面板未打开`);
+    const logistics = game.document.querySelector('#panel .bcat[data-cat="logi"]');
+    if (logistics) { logistics.click(); step(1); }
+    const row = game.document.querySelector('#panel .brow[data-type="resonanceBeacon"]');
+    if (!row) throw new Error('后勤分类没有显示共鸣信标');
+    row.click(); step(1);
+    if (s.building !== 'resonanceBeacon') throw new Error(`${label}信标蓝图选择失败：${s.building}`);
+    await hover(site.x, site.y);
+    const point = game.__screenOf(site.x, site.y), canvas = game.document.querySelector('canvas');
+    canvas.dispatchEvent(new game.MouseEvent('mousedown', { clientX: point.cx, clientY: point.cy, bubbles: true, button: 0, buttons: 1 }));
+    step(1);
+    canvas.dispatchEvent(new game.MouseEvent('mouseup', { clientX: point.cx, clientY: point.cy, bubbles: true, button: 0 }));
+    step(2);
+    const beacon = s.buildings.find((b) => b.type === 'resonanceBeacon' && b.resonanceSiteId === siteId
+      && b.x === site.x && b.y === site.y);
+    if (!beacon?.site || s.resonance.sites[siteId].status !== 'building')
+      throw new Error(`${label}信标蓝图未落在已揭示锚点：${JSON.stringify({ beacon, site: s.resonance.sites[siteId] })}`);
+    const afterPlacement = Object.fromEntries(Object.keys(cost).map((res) => [res, spendableTotal(res)]));
+    const custody = () => Object.fromEntries(Object.keys(cost).map(res => [res,storageTotal(res)+(Number(s.deathPack?.stock?.[res])||0)]));
+    const custodyBeforeWork = custody();
+    for (const [res, need] of Object.entries(cost)) {
+      if (before[res] - afterPlacement[res] !== need)
+        throw new Error(`${label}信标蓝图扣账异常 ${res}：${before[res]}→${afterPlacement[res]}，应扣${need}`);
+    }
+    for (let i = 0; i < 2 && (s.activePanel || s.building); i++) key('Escape');
+    const stand = closestStand(site.x, site.y);
+    if (!stand) throw new Error(`${label}信标工地周围没有可达施工站位`);
+    const workFrames = moveTo(stand.x, stand.y, 1800);
+    await hover(site.x, site.y);
+    const action = game.__resolve();
+    if (action?.kind !== 'build' || action.b !== beacon)
+      throw new Error(`${label}信标工地未成为真实 E 交互目标：${JSON.stringify({ kind: action?.kind, site: [site.x, site.y] })}`);
+    key('KeyE', 900);
+    const afterBuild = Object.fromEntries(Object.keys(cost).map((res) => [res, spendableTotal(res)]));
+    const custodyAfterWork = custody();
+    if (beacon.site || s.resonance.sites[siteId].status !== 'built')
+      throw new Error(`真实 E 输入未完成${label}信标施工：${JSON.stringify({ site: beacon.site, work: beacon.work, status: s.resonance.sites[siteId].status })}`);
+    if (Object.keys(cost).some((res) => (r6eMode ? custodyAfterWork[res] !== custodyBeforeWork[res] : afterBuild[res] !== afterPlacement[res])))
+      throw new Error(`${label}施工过程资源不守恒：${JSON.stringify({ afterPlacement, afterBuild,custodyBeforeWork,custodyAfterWork,deathPack:s.deathPack })}`);
+    return { siteId, anchor: { x: site.x, y: site.y }, approach: { x: approach.x, y: approach.y, path: approach.path, frames: approachFrames },
+      work: { x: stand.x, y: stand.y, frames: workFrames, action: action.kind }, status: s.resonance.sites[siteId].status,
+      hp: beacon.hp, cost, before, afterPlacement, afterBuild, custodyBeforeWork,custodyAfterWork,
+      deathPack:s.deathPack && {layer:s.deathPack.layerId,chunk:[s.deathPack.chunkX,s.deathPack.chunkY],stock:{...s.deathPack.stock}},remainingPack: { ...s.pack.stock } };
+  };
+  const placeSecondBeacon = (site) => placeResonanceBeacon(site, 'second');
+  const placeThirdBeacon = (site) => placeResonanceBeacon(site, 'third');
+  const placeLocalDefense = async (type, cat, x, y) => {
+    const s = game.__state, m = s.map;
+    for (let i = 0; i < 2 && s.activePanel; i++) key('Escape');
+    const approach = closestStand(x, y);
+    if (!approach) throw new Error(`${type} 没有可达建造站位：${x},${y}`);
+    const moveFrames = moveTo(approach.x, approach.y, 2400);
+    key('KeyB');
+    if (s.activePanel !== 'build') throw new Error(`${type} 建造面板未打开`);
+    const category = game.document.querySelector(`#panel .bcat[data-cat="${cat}"]`);
+    if (category) { category.click(); step(1); }
+    const row = game.document.querySelector(`#panel .brow[data-type="${type}"]`);
+    if (!row) throw new Error(`建造分类 ${cat} 未显示 ${type}`);
+    row.click(); step(1);
+    if (s.building !== type) throw new Error(`${type} 蓝图选择失败：${s.building}`);
+    await hover(x, y);
+    const p = game.__screenOf(x, y), canvas = game.document.querySelector('canvas');
+    if (!p.inside) throw new Error(`${type} 建造格未进入视野：${x},${y}`);
+    canvas.dispatchEvent(new game.MouseEvent('mousedown', { clientX: p.cx, clientY: p.cy, bubbles: true, button: 0, buttons: 1 }));
+    step(1);
+    canvas.dispatchEvent(new game.MouseEvent('mouseup', { clientX: p.cx, clientY: p.cy, bubbles: true, button: 0 }));
+    step(2);
+    const b = s.buildings.find((v) => v.type === type && v.x === x && v.y === y);
+    if (!b?.site) throw new Error(`${type} 蓝图未实际落地：${JSON.stringify({ building: s.building, pos: [x, y] })}`);
+    for (let i = 0; i < 2 && (s.activePanel || s.building); i++) key('Escape');
+    const stand = closestStand(x, y);
+    if (!stand) throw new Error(`${type} 工地没有可达施工位：${x},${y}`);
+    const workMoveFrames = moveTo(stand.x, stand.y, 1800);
+    await hover(x, y);
+    const action = game.__resolve();
+    if (action?.kind !== 'build' || action.b !== b) throw new Error(`${type} 工地未成为真实 E 交互目标：${JSON.stringify({ kind: action?.kind, x, y })}`);
+    key('KeyE', 1080);
+    if (b.site) throw new Error(`${type} 真实 E 施工未完成：${b.work || 0}`);
+    return { type, pos: [x, y], moveFrames, workMoveFrames, work: b.work, hp: b.hp, fuel: b.fuel || 0 };
+  };
+  const ensureR3Checkpoint = async () => {
+    if (parent.__r4aAccessCheckpoints?.r3) return parent.__r4aAccessCheckpoints.r3;
+    // The R3 harness exports this checkpoint to its parent, which is this page—not
+    // to the R3 iframe's own window. Reuse it before deciding to rerun the long gate.
+    if (parent.__r4StartCheckpoint) {
+      const cp = parent.__r4StartCheckpoint;
+      if (cp.resonance?.sites?.first?.status === 'complete' && cp.resonance?.sites?.second?.status === 'revealed') {
+        parent.__r4aAccessCheckpoints ||= {};
+        parent.__r4aAccessCheckpoints.r3 = cp;
+        emit('R3 checkpoint ready', { day: cp.day, chunk: [cp.chunkX, cp.chunkY], sites: cp.resonance.sites, source: 'parent bridge' });
+        return cp;
+      }
+    }
+    let runner = [...document.querySelectorAll('iframe')].find((f) => f.src.includes('__r3_browser_test'));
+    const isDone = () => runner?.contentDocument?.querySelector('#out')?.dataset.done === 'true';
+    if (runner && isDone() && !parent.__r4StartCheckpoint) { runner.remove(); runner = null; }
+    if (!runner) {
+      runner = document.createElement('iframe');
+      runner.style = 'width:720px;height:520px;border:1px solid #607080';
+      runner.src = '/__r3_browser_test.html'; document.body.appendChild(runner);
+    }
+    if (!isDone()) await new Promise((resolve, reject) => {
+      let elapsed = 0;
+      const poll = setInterval(() => {
+        elapsed += 250;
+        if (isDone()) { clearInterval(poll); resolve(); }
+        else if (elapsed > 12 * 60 * 1000) { clearInterval(poll); reject(new Error('R3 首站检查点测试超过12分钟')); }
+      }, 250);
+    });
+    const cp = parent.__r4StartCheckpoint;
+    if (!cp || cp.resonance?.sites?.first?.status !== 'complete' || cp.resonance?.sites?.second?.status !== 'revealed') {
+      const detail = runner.contentDocument.querySelector('#out')?.textContent.slice(-900);
+      runner.remove(); delete parent.__r4StartCheckpoint;
+      throw new Error(`R3 未导出合格首站检查点：${detail}`);
+    }
+    parent.__r4aAccessCheckpoints ||= {};
+    parent.__r4aAccessCheckpoints.r3 = cp;
+    emit('R3 checkpoint ready', { day: cp.day, chunk: [cp.chunkX, cp.chunkY], sites: cp.resonance.sites });
+    return cp;
+  };
+  const gameWindowForResume = async () => {
+    const r3frame = [...document.querySelectorAll('iframe')].find((f) => f.src.includes('__r3_browser_test'));
+    const nestedGame = r3frame?.contentDocument?.querySelector('iframe')?.contentWindow;
+    if (nestedGame && typeof nestedGame.__restoreCheckpoint === 'function') return nestedGame;
+    let frame = document.querySelector('#r4a-game-frame');
+    if (!frame) {
+      frame = document.createElement('iframe');
+      frame.id = 'r4a-game-frame';
+      frame.style = 'width:720px;height:520px;border:1px solid #607080';
+      const settingsRaw = localStorage.getItem('deep-light-settings-v1');
+      let settings = {};
+      try { settings = settingsRaw ? JSON.parse(settingsRaw) : {}; } catch (_) { }
+      localStorage.setItem('deep-light-settings-v1', JSON.stringify({ ...settings, autosave: false }));
+      frame.src = '/';
+      document.body.appendChild(frame);
+    }
+    let elapsed = 0;
+    while (elapsed < 30000) {
+      const win = frame.contentWindow;
+      if (win && typeof win.__restoreCheckpoint === 'function') return win;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      elapsed += 100;
+    }
+    throw new Error('独立游戏恢复框架加载超时');
+  };
+  const run = async () => {
+    if (busy) return; busy = true; resume.hidden = true;
+    try {
+      if (!game) {
+        const cp = parent.__r4aAccessCheckpoints?.latest || await ensureR3Checkpoint();
+        game = await gameWindowForResume();
+        if (!game) throw new Error('无法连接 R3 测试中的游戏 iframe');
+        originalRandom = game.Math.random;
+        if (!game.__restoreCheckpoint(cp)) throw new Error('无法恢复真实首站完成检查点');
+      } else {
+        const previous = parent.__r4aAccessCheckpoints?.latest || parent.__r4aAccessCheckpoints?.r3;
+        if (previous && !game.__restoreCheckpoint(previous)) throw new Error('无法恢复最近成功检查点');
+      }
+      seedRng(game);
+      const s = game.__state;
+      game.__quick(false); game.__settings.autosave = false;
+      if (!s.milestone?.bossDefeated || s.resonance?.sites?.first?.status !== 'complete') throw new Error('恢复状态不满足首站已完成前置');
+      const startTotalData = spendableTotal('data');
+      emit('resume', { phase: parent.__r4aAccessCheckpoints?.phase || 'r3', day: s.day, layer: s.layerId,
+        chunk: [s.chunkX, s.chunkY], data: startTotalData, research: Object.keys(s.research?.unlocked || {}),
+        player: { hp: s.playerHp, dead: !!s.playerDead }, deathPack: s.deathPack && { x: s.deathPack.x, y: s.deathPack.y,
+          stock: { ...s.deathPack.stock } }, sites: Object.fromEntries(Object.entries(s.resonance?.sites || {})
+          .map(([id, site]) => [id, { status: site.status, completedDay: site.completedDay }])) });
+
+      if (restoredProgress) emit('checkpoint recovery source', { phase: restoredProgress.phase, seed: restoredProgress.seed, storageKey: checkpointKey });
+
+      // Phase 1: 地表分区只有 mining 可见；先实际采档案并解锁高效采掘。
+      if (!parent.__r4aAccessCheckpoints?.surfaceResearch) {
+        if (s.layerId !== 'surface') throw new Error(`surface research resume 层错误：${s.layerId}`);
+        if ((s.chunkX | 0) === 1 && (s.chunkY | 0) === 0) {
+          const local = await gather(4, 'data', 9);
+          emit('first remote archive', local);
+        }
+        if ((s.chunkX | 0) !== 0 || (s.chunkY | 0) !== 0) returnToOrigin();
+        let home = await gather(4, 'data', 6);
+        emit('home archive', home);
+        if (spendableTotal('data') < 6) {
+          crossX(1, 1); crossX(1, 2);
+          const corridor = await gather(4, 'data', 6);
+          emit('corridor archive', corridor);
+          crossX(-1, 1); crossX(-1, 0);
+        }
+        if (spendableTotal('data') < 6) throw new Error(`地表可支付档案不足6：现有 ${spendableTotal('data')}`);
+        await research('mining', 'founder');
+        const cached = await cacheNonFoodPackAtCamp();
+        emit('camp pack cache before deep route', cached);
+        setCheckpoint('surfaceResearch');
+      }
+
+      // Phase 2: 天然竖井首潜后深渊分区才开放；先后支付 deep=16 与 deeper=20。
+      if (!parent.__r4aAccessCheckpoints?.depth1Research) {
+        if (s.layerId === 'surface') {
+          const entry = s.buildings.find((b) => b.type === 'shaft' && (b.entry || b.natural));
+          if (!entry) throw new Error('营地天然竖井不存在');
+          await shaftAt(entry, true);
+        }
+        if (s.layerId !== 'depth1') throw new Error(`首潜后未到达 depth1：${s.layerId}`);
+        const deepArchive = await gather(4, 'data', 16);
+        emit('depth1 archive for deep', deepArchive);
+        if (spendableTotal('data') < 16) throw new Error(`depth1 可支付档案不足16：现有 ${spendableTotal('data')}`);
+        await research('deep', 'deep');
+        const deeperArchive = await gather(4, 'data', 20);
+        emit('depth1 archive for deeper', deeperArchive);
+        if (spendableTotal('data') < 20) throw new Error(`depth1 可支付档案不足20：现有 ${spendableTotal('data')}`);
+        await research('deeper', 'deep');
+        setCheckpoint('depth1Research');
+      }
+
+      // Phase 3: 在 depth1 实际采集竖井材料、通过建造 UI 落蓝图并按住 E 完工，再进入 depth2。
+      if (!parent.__r4aAccessCheckpoints?.depth2Core) {
+        // 已研究完成的续跑档无需背着档案下潜；先用真实入口返营卸货，避免满包采集丢料。
+        if (r6eMode && s.layerId === 'depth1' && (s.pack?.stock?.data || 0) > 0) {
+          const entry = s.buildings.find(b => b.type === 'shaft' && b.entry);
+          if (!entry) throw new Error('R6-E 卸货前找不到首层入口');
+          await shaftAt(entry, false);
+          if (s.layerId !== 'surface') throw new Error('R6-E 档案卸货未返回地表');
+          returnToOrigin(); emit('R6-E archival cargo cached through actual camp UI', await cacheNonFoodPackAtCamp());
+          const campEntry = s.buildings.find(b => b.type === 'shaft' && (b.entry || b.natural));
+          await shaftAt(campEntry, true);
+          if (s.layerId !== 'depth1') throw new Error('R6-E 卸货后未返回首层');
+        }
+        const ore = await gather(2, 'ore', 8);
+        const vine = await gather(3, 'vine', 4);
+        emit('depth1 shaft materials', { ore, vine });
+        if (spendableTotal('ore') < 8 || spendableTotal('vine') < 4) throw new Error('depth1 无法凑齐竖井账本材料');
+        const built = await placeShaft(); emit('depth1 shaft built', built);
+        const shaft = s.buildings.find((b) => b.type === 'shaft' && !b.entry && !b.site);
+        if (!shaft) throw new Error('depth1 没有建成可用竖井');
+        const packUsed = Object.values(s.pack.stock || {}).reduce((sum, n) => sum + (Number(n) || 0), 0);
+        const packCap = game.__carry().packCap || 0;
+        if (packCap - packUsed < 16) throw new Error(`进入 depth2 前背包空位不足以带回16母髓：空位 ${packCap - packUsed}/16`);
+        emit('depth2 backpack capacity check', { pack: { ...s.pack.stock }, used: packUsed, cap: packCap, free: packCap - packUsed });
+        await shaftAt(shaft, true);
+        if (s.layerId !== 'depth2') throw new Error(`自建竖井未进入 depth2：${s.layerId}`);
+        const mother = await gather(5, 'core', 16);
+        emit('depth2 mother core', mother);
+        if ((Number(s.pack.stock?.core) || 0) < 16) throw new Error(`depth2 背包母髓不足16：当前 ${s.pack.stock?.core || 0}`);
+        setCheckpoint('depth2Core');
+      }
+
+      // Phase 4: 由真实层间入口返回原点，把10母髓放入营地容器，留6给二站。
+      if (!parent.__r4aAccessCheckpoints?.campCoreCache) {
+        if (s.layerId === 'depth2') {
+          const entry = s.buildings.find((b) => b.type === 'shaft' && b.entry);
+          if (!entry) throw new Error('depth2 返回竖井不存在');
+          await shaftAt(entry, false);
+        }
+        if (s.layerId === 'depth1') {
+          const entry = s.buildings.find((b) => b.type === 'shaft' && b.entry);
+          if (!entry) throw new Error('depth1 营地入口竖井不存在');
+          await shaftAt(entry, false);
+        }
+        if (s.layerId !== 'surface' || (s.chunkX | 0) !== 0 || (s.chunkY | 0) !== 0)
+          throw new Error(`深层回撤未返回原点：${s.layerId} (${s.chunkX},${s.chunkY})`);
+        const camp = s.beacons.find((b) => b.stock);
+        if (!camp) throw new Error('营地没有可收纳母髓的容器');
+        const before = { pack: s.pack.stock.core || 0, camp: camp.stock.core || 0 };
+        await openContainer(camp);
+        const panel = game.document.querySelector('#panel');
+        if (s.activePanel !== 'store' || !panel) throw new Error('营地储存面板未通过 E 打开');
+        const stackPush = [...panel.querySelectorAll('.sbtnx')].find((el) => el.dataset.act === 'push'
+          && el.dataset.k === 'core' && el.dataset.n === '10');
+        if (stackPush) { stackPush.click(); step(1); }
+        else for (let i = 0; i < 10; i++) {
+          const livePanel = game.document.querySelector('#panel');
+          const one = [...(livePanel?.querySelectorAll('.sbtnx') || [])].find((el) => el.dataset.act === 'push'
+            && el.dataset.k === 'core' && el.dataset.n === '1');
+          if (!one) throw new Error(`储物面板第 ${i + 1}/10 次母髓存入按钮缺失`);
+          one.click(); step(1);
+        }
+        const after = { pack: s.pack.stock.core || 0, camp: camp.stock.core || 0 };
+        if (before.pack - after.pack !== 10 || after.camp - before.camp !== 10 || after.pack < 6)
+          throw new Error(`母髓缓存账本错误：${JSON.stringify({ before, after })}`);
+        setCheckpoint('campCoreCache');
+        emit('R4-A deep-access subgate passed', { storedAtCamp: 10, remainingForSecond: after.pack,
+          surfaceResearch: s.research.unlocked, chunk: [s.chunkX, s.chunkY], day: s.day });
+      }
+
+      // Phase 5: 从检查点实际沿中央出口走到二站区块，只审查真实现地图，绝不注入资源。
+      if (!parent.__r4aAccessCheckpoints?.shaleArrival) {
+        if (s.layerId !== 'surface') throw new Error(`前往二站前必须在地表：${s.layerId}`);
+        if ((s.chunkX | 0) !== 0 || (s.chunkY | 0) !== 0) returnToOrigin();
+        const route = [];
+        while ((s.chunkX | 0) < 3) {
+          const nextX = (s.chunkX | 0) + 1;
+          const frames = crossX(1, nextX);
+          route.push({ chunk: [s.chunkX | 0, s.chunkY | 0], frames, biome: game.__eco().biome });
+        }
+        const site = s.resonance?.sites?.second;
+        if ((s.chunkX | 0) !== 3 || (s.chunkY | 0) !== 0 || game.__eco().biome !== 'shaleRise')
+          throw new Error(`实际路线未抵达碎岩台地首选区块：${JSON.stringify({ chunk: [s.chunkX, s.chunkY], biome: game.__eco().biome, route })}`);
+        if (!site || site.status !== 'revealed' || site.chunkX !== 3 || site.chunkY !== 0)
+          throw new Error(`二站实际落点与路线不一致：${JSON.stringify(site)}`);
+
+        const tiles = s.map.tiles, amounts = s.map.nodeAmt, kinds = { ore: 2, vine: 3, data: 4 };
+        const reachable = {};
+        for (const [name, tile] of Object.entries(kinds)) {
+          let nodes = 0, total = 0;
+          for (let i = 0; i < tiles.length; i++) {
+            if (tiles[i] !== tile || (amounts[i] || 0) <= 0) continue;
+            const tx = i % s.map.w, ty = Math.floor(i / s.map.w);
+            if (!closestStand(tx, ty)) continue;
+            nodes++; total += amounts[i] || 0;
+          }
+          reachable[name] = { nodes, amount: total };
+        }
+        const blooms = (s.layers?.surface?.nightops?.blooms || []).filter((b) => b.alive && b.charges > 0)
+          .map((b) => ({ x: b.x, y: b.y, charges: b.charges }));
+        const destination = {
+          day: s.day, hp: s.playerHp, hunger: s.playerHunger,
+          chunk: [s.chunkX | 0, s.chunkY | 0], biome: game.__eco().biome, route,
+          site: { status: site.status, x: site.x, y: site.y }, reachable, blooms,
+          inventories: { pack: { ...s.pack.stock }, localContainers: [...(s.beacons || []), ...(s.buildings || [])]
+            .filter((b) => b.stock).map((b) => ({ type: b.type, x: b.x, y: b.y, stock: { ...b.stock } })) },
+        };
+        setCheckpoint('shaleArrival');
+        emit('R4-A shale-rise arrival subgate passed', destination);
+      }
+
+      // Phase 6: 用真实背包材料建当地箱，再实采少量矿验证产出进入该箱而非虚报路线供给。
+      if (!parent.__r4aAccessCheckpoints?.shaleStoreSample) {
+        if (s.layerId !== 'surface' || (s.chunkX | 0) !== 3 || (s.chunkY | 0) !== 0 || game.__eco().biome !== 'shaleRise')
+          throw new Error(`本地后勤子门恢复位置错误：${JSON.stringify({ layer: s.layerId, chunk: [s.chunkX, s.chunkY], biome: game.__eco().biome })}`);
+        const site = s.resonance?.sites?.second;
+        if (!site || site.status !== 'revealed' || site.chunkX !== 3 || site.chunkY !== 0)
+          throw new Error(`当前检查点没有有效二站锚点：${JSON.stringify(site)}`);
+        const storeResult = await placeRemoteStore(site);
+        const store = s.buildings.find((b) => b.type === 'store' && b.x === storeResult.x && b.y === storeResult.y);
+        if (!store) throw new Error('储物箱已建成但未能回读结构对象');
+        const nodeOreBefore = s.map.tiles.reduce((n, tile, i) => n + (tile === 2 ? (s.map.nodeAmt[i] || 0) : 0), 0);
+        const packOreBefore = Number(s.pack.stock.ore) || 0;
+        const mined = await gather(2, 'ore', packOreBefore + 2, 20);
+        const nodeOreAfter = s.map.tiles.reduce((n, tile, i) => n + (tile === 2 ? (s.map.nodeAmt[i] || 0) : 0), 0);
+        const storedOre = Number(store.stock?.ore) || 0, packOreAfter = Number(s.pack.stock.ore) || 0;
+        const actualGain = storedOre + packOreAfter - packOreBefore;
+        if (actualGain < 2 || nodeOreBefore - nodeOreAfter !== actualGain
+          || storedOre !== actualGain || packOreAfter !== packOreBefore)
+          throw new Error(`当地采矿/储存账本不一致：${JSON.stringify({ mined, nodeOreBefore, nodeOreAfter, actualGain, storedOre, packOreBefore, packOreAfter })}`);
+        const ledger = {
+          store: { x: store.x, y: store.y, hp: store.hp, cap: store.store, stock: { ...store.stock } },
+          packBefore: { ore: packOreBefore, data: Number(s.pack.stock.data) || 0, core: Number(s.pack.stock.core) || 0 },
+          packAfter: { ore: packOreAfter, data: Number(s.pack.stock.data) || 0, core: Number(s.pack.stock.core) || 0 },
+          mine: { nodesBefore: nodeOreBefore, nodesAfter: nodeOreAfter, actualGain, detail: mined.nodes },
+          localSpendable: { ore: spendableTotal('ore'), data: spendableTotal('data'), core: spendableTotal('core') },
+        };
+        setCheckpoint('shaleStoreSample');
+        emit('R4-A local logistics subgate passed', { storeResult, ledger, day: s.day, hp: s.playerHp });
+      }
+
+      // Phase 7: 实际采收本站全部施工辉髓，不把矿脉总量当作已经到手的补给。
+      if (!parent.__r4aAccessCheckpoints?.shaleOre18) {
+        if (s.layerId !== 'surface' || (s.chunkX | 0) !== 3 || (s.chunkY | 0) !== 0 || game.__eco().biome !== 'shaleRise')
+          throw new Error(`二站矿石补给恢复位置错误：${JSON.stringify({ layer: s.layerId, chunk: [s.chunkX, s.chunkY], biome: game.__eco().biome })}`);
+        const beforeSpendable = spendableTotal('ore');
+        const beforeNodes = s.map.tiles.reduce((n, tile, i) => n + (tile === 2 ? (s.map.nodeAmt[i] || 0) : 0), 0);
+        const gathered = await gather(2, 'ore', 18, 40);
+        const afterNodes = s.map.tiles.reduce((n, tile, i) => n + (tile === 2 ? (s.map.nodeAmt[i] || 0) : 0), 0);
+        const afterSpendable = spendableTotal('ore');
+        if (afterSpendable < 18 || beforeNodes - afterNodes !== afterSpendable - beforeSpendable)
+          throw new Error(`二站18辉髓实采/账本未闭合：${JSON.stringify({ beforeSpendable, afterSpendable, beforeNodes, afterNodes, gathered })}`);
+        const store = s.buildings.find((b) => b.type === 'store' && b.x === 47 && b.y === 34);
+        if (!store || (Number(store.stock?.ore) || 0) !== afterSpendable || (Number(s.pack.stock?.ore) || 0) !== 0)
+          throw new Error(`二站施工辉髓未全部进入当地箱：${JSON.stringify({ store: store?.stock, pack: s.pack.stock, afterSpendable })}`);
+        const ledger = { beforeSpendable, afterSpendable, beforeNodes, afterNodes, actualMined: beforeNodes - afterNodes,
+          gathered, store: { x: store.x, y: store.y, stock: { ...store.stock }, cap: store.store },
+          remainingNeed: { ore: Math.max(0, 18 - afterSpendable), core: Math.max(0, 6 - spendableTotal('core')),
+            data: Math.max(0, 4 - spendableTotal('data')) } };
+        setCheckpoint('shaleOre18');
+        emit('R4-A second-site construction ore gathered', { ledger, day: s.day, hp: s.playerHp, hunger: s.playerHunger });
+      }
+
+      // Phase 8: 等候碎岩台地真实夜行生成，再以游戏交互采足施工+预约夜髓4。
+      if (!parent.__r4aAccessCheckpoints?.shaleNight4) {
+        if (s.layerId !== 'surface' || (s.chunkX | 0) !== 3 || (s.chunkY | 0) !== 0 || game.__eco().biome !== 'shaleRise')
+          throw new Error(`二站夜采恢复位置错误：${JSON.stringify({ layer: s.layerId, chunk: [s.chunkX, s.chunkY], biome: game.__eco().biome })}`);
+        const nightops = s.layers?.surface?.nightops;
+        if (!nightops?.blooms?.length) throw new Error('二站夜行点未初始化，不能证明夜髓路线');
+        const bloomReady = () => (game.__state.layers?.surface?.nightops?.blooms || []).some((b) => b.alive && b.charges > 0);
+        const waitStart = { day: s.day, t: s.t, paused: s.paused, quickPause: s.quickPause,
+          bloomReady: bloomReady(), hp: s.playerHp, hunger: s.playerHunger };
+        let waitFrames = 0;
+        // Freeze the live RAF loop while advancing production simulation in short batches.
+        // This avoids racing the game's own frame loop and yields to the browser between batches.
+        game.__quick(true);
+        try {
+          while (!bloomReady() && waitFrames < 7200 && game.__state.playerHp > 0) {
+            const batch = Math.min(60, 7200 - waitFrames);
+            const before = { day: game.__state.day, t: game.__state.t };
+            game.__steps(batch);
+            waitFrames += batch;
+            const after = game.__state;
+            const elapsed = (after.day - before.day) * 400 + after.t - before.t;
+            if (!(elapsed > 0)) throw new Error(`确定性等待没有推进游戏时钟：${JSON.stringify({ before, after: { day: after.day, t: after.t }, batch, paused: after.paused, quickPause: after.quickPause })}`);
+            if (waitFrames % 300 === 0) {
+              emit('R4-A 等待夜辉草', { day: after.day, t: +after.t.toFixed(2), waitFrames,
+                hp: after.playerHp, hunger: after.playerHunger, ready: bloomReady() });
+              await new Promise((resolve) => game.requestAnimationFrame(resolve));
+            }
+          }
+        } finally {
+          game.__quick(false);
+        }
+        if (!bloomReady())
+          throw new Error(`确定性推进7200步后未等到可采夜辉草：${JSON.stringify({ waitStart, waitFrames, day: s.day, t: s.t, hp: s.playerHp, paused: s.paused, quickPause: s.quickPause, wave: game.__wave(), blooms: nightops.blooms })}`);
+        const nightCost = game.__resonance().costs.construction.second.night || 0;
+        const reservationCost = game.__resonance().costs.trialStart.night || 0;
+        const nightNeeded = nightCost + reservationCost;
+        const before = spendableTotal('night'), samples = [];
+        const harvestOrder = nightops.blooms.filter(b => b.alive && b.charges > 0);
+        harvestOrder.sort((a,b) => Math.hypot(a.x-s.player.x,a.y-s.player.y)-Math.hypot(b.x-s.player.x,b.y-s.player.y));
+        for (const bloom of harvestOrder) {
+          while (spendableTotal('night') < nightNeeded && bloom.alive && bloom.charges > 0 && s.playerHp > 0) {
+            moveTo(bloom.x, bloom.y, 1800); await hover(bloom.x, bloom.y);
+            let cdGuard = 0;
+            while ((s.interactCd || 0) > 0 && cdGuard++ < 90) step(1);
+            const action = game.__resolve();
+            if (action?.kind !== 'bloom' || action.b !== bloom)
+              throw new Error(`夜采输入目标异常：${JSON.stringify({ action: action?.kind, target: [bloom.x, bloom.y], cursor: s.cursor, day:s.day,t:s.t,hp:s.playerHp,player:[s.player.x,s.player.y],alive:bloom.alive,charges:bloom.charges,samples })}`);
+            const beforeOne = spendableTotal('night');
+            key('KeyE', 12);
+            samples.push({ at: [bloom.x, bloom.y], before: beforeOne, after: spendableTotal('night'), charges: bloom.charges, hp: s.playerHp });
+            if (spendableTotal('night') <= beforeOne) throw new Error(`夜髓未入账：${JSON.stringify({ bloom, pack: s.pack.stock, store: s.buildings.find((b) => b.type === 'store')?.stock })}`);
+          }
+          if (spendableTotal('night') >= nightNeeded) break;
+        }
+        if (spendableTotal('night') < nightNeeded || s.playerHp <= 0)
+          throw new Error(`二站施工+预约夜髓未采足：${JSON.stringify({ before, after: spendableTotal('night'), nightNeeded, hp: s.playerHp, samples, blooms: nightops.blooms })}`);
+        const box = s.buildings.find((b) => b.type === 'store' && b.x === 47 && b.y === 34);
+        const ledger = { before, after: spendableTotal('night'), samples, store: { ...box?.stock }, pack: { ...s.pack.stock },
+          day: s.day, hp: s.playerHp, hunger: s.playerHunger, tide: game.__wave().蚀潮中,
+          waitStart, waitFrames, waitSimSeconds: waitFrames / 60 };
+        setCheckpoint('shaleNight4');
+        emit('R4-A second-site nightbloom harvest passed', { ...ledger, nightCost, reservationCost, nightNeeded });
+      }
+
+      // Phase 9: 用真实建造面板与 E 键施工，验证四类信标材料一次扣费且施工过程不重复扣料。
+      if (!parent.__r4aAccessCheckpoints?.shaleBeaconBuilt) {
+        if (r6eMode && spendableTotal('data') < 4) {
+          emit('R6-E local second-site archive harvest', await gather(4,'data',4));
+          if (spendableTotal('data') < 4) throw new Error('R6-E 二站当地档案仍不足');
+        }
+        const site = s.resonance?.sites?.second;
+        if (s.layerId !== 'surface' || (s.chunkX | 0) !== 3 || (s.chunkY | 0) !== 0
+          || !site || site.status !== 'revealed' || site.chunkX !== 3 || site.chunkY !== 0 || site.x == null || site.y == null)
+          throw new Error(`二站建造恢复位置/阶段错误：${JSON.stringify({ layer: s.layerId, chunk: [s.chunkX, s.chunkY], site })}`);
+        const ledger = await placeSecondBeacon(site);
+        setCheckpoint('shaleBeaconBuilt');
+        emit('R4-A second-site beacon construction passed', { ledger, day: s.day, hp: s.playerHp, hunger: s.playerHunger });
+      }
+
+      // Phase 10: 先让夜采后的普通蚀潮过去，再真实回营从容器装载二站防守燃料。
+      // 这是唯一使用的补给来源；无法满足最低需求时停在 phase9 检查点，不注入资源。
+      if (!parent.__r4aAccessCheckpoints?.shaleFuelTransport) {
+        game.__quick(true);
+        const secondTrial = () => s.resonance?.sites?.second?.trial?.status || null;
+        const beforeWait = { day: s.day, t: +s.t.toFixed(2), hp: s.playerHp, chunk: [s.chunkX, s.chunkY], secondTrial: secondTrial() };
+        let waitFrames = 0;
+        if (s.t >= 320) {
+          while (waitFrames < 6000 && ((s.day | 0) === (beforeWait.day | 0) || s.t >= 320)) {
+            const batch = Math.min(300, 6000 - waitFrames);
+            game.__steps(batch); waitFrames += batch;
+            if (waitFrames % 600 === 0) {
+              emit('R4-A 等待夜采后的潮夜结束', { day: s.day, t: +s.t.toFixed(2), hp: s.playerHp,
+                dead: !!s.playerDead, secondTrial: secondTrial(), waitFrames });
+              await new Promise((resolve) => game.requestAnimationFrame(resolve));
+            }
+          }
+        }
+        if (waitFrames >= 6000 || s.t >= 320) throw new Error(`普通潮夜未能推进至白昼：${JSON.stringify({ beforeWait, after: { day: s.day, t: s.t, hp: s.playerHp }, waitFrames })}`);
+        if (s.layerId !== 'surface') throw new Error(`潮后玩家不在地表：${s.layerId}`);
+        game.__quick(false); // 行走需要恢复实时玩家移动；quickPause 下 __steps 只推进时钟而不驱动路径。
+        if ((s.chunkX | 0) !== 0 || (s.chunkY | 0) !== 0) returnToOrigin();
+        if ((s.chunkX | 0) !== 0 || (s.chunkY | 0) !== 0) throw new Error(`回营失败：${s.chunkX},${s.chunkY}`);
+        const holders = [...(s.beacons || []), ...(s.buildings || []).filter((b) => b.type === 'store')]
+          .filter((b, i, a) => b?.stock && a.findIndex((v) => v === b) === i)
+          .sort((a, b) => (Number(b.stock.fuel) || 0) - (Number(a.stock.fuel) || 0));
+        if (!holders.length) throw new Error('营地找不到可供 UI 提取补给的容器');
+        const campFuelBefore = holders.reduce((n, b) => n + (Number(b.stock.fuel) || 0), 0);
+        const campFoodBefore = holders.reduce((n, b) => n + (Number(b.stock.food) || 0), 0);
+        const takeOne = (res) => {
+          const button = game.document.querySelector(`#panel .srow[data-row="c-${res}"] .sbtnx[data-act="pull"][data-k="${res}"][data-n="1"]`);
+          if (!button || button.classList.contains('off')) return false;
+          const before = Number(s.pack.stock?.[res]) || 0;
+          button.click(); step(1);
+          return (Number(s.pack.stock?.[res]) || 0) > before;
+        };
+        for (const holder of holders) {
+          if ((Number(s.pack.stock?.fuel) || 0) >= 10) break;
+          if (!(Number(holder.stock.fuel) > 0)) continue;
+          await openContainer(holder);
+          while ((Number(s.pack.stock?.fuel) || 0) < 10 && takeOne('fuel')) { }
+          game.document.querySelector('#panel .pclose')?.click(); step(1);
+          if (s.activePanel === 'store') key('Escape');
+        }
+        const pulled = { fuel: Number(s.pack.stock?.fuel) || 0, food: Number(s.pack.stock?.food) || 0 };
+        const campFuelAfter = holders.reduce((n, b) => n + (Number(b.stock.fuel) || 0), 0);
+        const ledger = { beforeWait, waitFrames, afterWait: { day: s.day, t: +s.t.toFixed(2), hp: s.playerHp,
+            dead: !!s.playerDead, chunk: [s.chunkX, s.chunkY] }, campFuelBefore, campFoodBefore, pulled,
+          campFuelAfter, pack: { ...s.pack.stock } };
+        if (pulled.fuel < 5) throw new Error(`营地容器的真实燃料库存不足5：${JSON.stringify(ledger)}`);
+        setCheckpoint('shaleFuelTransport');
+        emit('R4-A camp fuel transport passed; local furnace must cover any remaining defense budget', ledger);
+      }
+
+      // Phase 11: 回二站实采熔炉/灯/塔材料，使用真实 UI 手做炼油，再完成当地照明与防守工事。
+      if (!parent.__r4aAccessCheckpoints?.shaleDefenseReady) {
+        game.__quick(false);
+        if (s.layerId !== 'surface') throw new Error(`二站补给后不在地表：${s.layerId}`);
+        if ((s.chunkX | 0) !== 0 || (s.chunkY | 0) !== 0) returnToOrigin();
+        crossX(1, 1); crossX(1, 2); crossX(1, 3);
+        const site = s.resonance?.sites?.second;
+        if (!site || site.status !== 'built' || site.chunkX !== 3 || site.chunkY !== 0 || site.x == null || site.y == null)
+          throw new Error(`二站防守恢复状态错误：${JSON.stringify({ chunk: [s.chunkX, s.chunkY], site })}`);
+        const recovered = [];
+        const dp = s.deathPack;
+        if (dp && dp.layerId === s.layerId && (dp.chunkX == null || (dp.chunkX | 0) === (s.chunkX | 0))
+          && (dp.chunkY == null || (dp.chunkY | 0) === (s.chunkY | 0))) {
+          const tx = Math.floor(dp.x), ty = Math.floor(dp.y);
+          moveTo(tx, ty, 1800); await hover(tx, ty);
+          const action = game.__resolve();
+          if (action?.kind === 'deathPack') { key('KeyE', 2); recovered.push({ pos: [tx, ty], cleared: !s.deathPack, stock: { ...dp.stock }, held: dp.held || null }); }
+        }
+        const nodeTotal = (tile) => s.map.tiles.reduce((n, v, i) => n + (v === tile ? (s.map.nodeAmt[i] || 0) : 0), 0);
+        const nodesBefore = { ore: nodeTotal(2), vine: nodeTotal(3) };
+        const oreGather = await gather(2, 'ore', 12, 100);
+        const vineGather = await gather(3, 'vine', 6, 100);
+        if (spendableTotal('ore') < 12 || spendableTotal('vine') < 6)
+          throw new Error(`二站熔炉/灯/辉光塔材料实采不足：${JSON.stringify({ oreGather, vineGather, spendable: { ore: spendableTotal('ore'), vine: spendableTotal('vine') } })}`);
+        const furnaceCandidates = [];
+        for (let y = Math.max(2, site.y - 12); y <= Math.min(s.map.h - 3, site.y + 12); y++) for (let x = Math.max(2, site.x - 12); x <= Math.min(s.map.w - 3, site.x + 12); x++) {
+          const d = Math.hypot(x - site.x, y - site.y), i = y * s.map.w + x;
+          if (d < 6 || d > 12 || s.map.get(x, y) !== 0 || !s.map.isWalk(x, y) || s.map.occBuild[i] || s.map.occWalk[i]) continue;
+          const path = game.__path(Math.floor(s.player.x), Math.floor(s.player.y), x, y);
+          if (path) furnaceCandidates.push({ x, y, path: path.length });
+        }
+        furnaceCandidates.sort((a, b) => a.path - b.path || a.y - b.y || a.x - b.x);
+        const furnaceSite = furnaceCandidates[0];
+        if (!furnaceSite) throw new Error('二站附近找不到可达熔炉建造格');
+        const furnacePlace = await placeLocalDefense('furnace', 'prod', furnaceSite.x, furnaceSite.y);
+        const furnace = s.buildings.find((b) => b.type === 'furnace' && b.x === furnaceSite.x && b.y === furnaceSite.y && !b.site);
+        if (!furnace) throw new Error(`二站熔炉未完工：${JSON.stringify(furnacePlace)}`);
+        const furnaceStand = closestStand(furnace.x, furnace.y);
+        moveTo(furnaceStand.x, furnaceStand.y, 1800);
+        let furnaceCdGuard = 0;
+        while ((s.interactCd || 0) > 0 && furnaceCdGuard++ < 90) step(1);
+        await hover(furnace.x, furnace.y);
+        const stationAction = game.__resolve();
+        if (stationAction?.kind !== 'station' || stationAction.b !== furnace) throw new Error(`熔炉未成为真实 E 交互目标：${JSON.stringify(stationAction)}`);
+        key('KeyE', 12);
+        if (s.activePanel !== 'furnace' || !(furnace.fuel > 0)) throw new Error(`熔炉真实 E 点火/操作台失败：${JSON.stringify({ panel: s.activePanel, fuel: furnace.fuel, interactCd: s.interactCd, action: stationAction.kind, floaty: s.floaties?.at(-1)?.txt })}`);
+        const refineBefore = { ore: spendableTotal('ore'), fuel: spendableTotal('fuel'), fire: furnace.fuel };
+        const refineBatches = [];
+        for (let i = 0; i < 2; i++) {
+          const once = game.document.querySelector('#panel [data-act="once"]');
+          if (!once) throw new Error('熔炉 UI 未显示“做一次”控制');
+          const ore0 = spendableTotal('ore'), fuel0 = spendableTotal('fuel');
+          once.click(); step(2);
+          refineBatches.push({ batch: i + 1, ore: [ore0, spendableTotal('ore')], fuel: [fuel0, spendableTotal('fuel')], fire: furnace.fuel });
+          if (ore0 - spendableTotal('ore') !== 1 || spendableTotal('fuel') - fuel0 !== 2)
+            throw new Error(`熔炉炼油第${i + 1}批账本不符：${JSON.stringify(refineBatches.at(-1))}`);
+        }
+        key('Escape');
+        if (s.activePanel) key('Escape');
+        const beforeDefense = { ore: spendableTotal('ore'), vine: spendableTotal('vine'), fuel: spendableTotal('fuel') };
+        if (beforeDefense.ore < 8 || beforeDefense.vine < 2 || beforeDefense.fuel < 9)
+          throw new Error(`二站灯/塔支付前材料缺口：${JSON.stringify({ beforeDefense, furnacePlace, refineBatches })}`);
+        const freeNear = (radius, excluded = []) => {
+          const choices = [];
+          for (let y = Math.max(1, site.y - radius); y <= Math.min(s.map.h - 2, site.y + radius); y++) for (let x = Math.max(1, site.x - radius); x <= Math.min(s.map.w - 2, site.x + radius); x++) {
+            const d = Math.hypot(x - site.x, y - site.y), i = y * s.map.w + x;
+            if (d < 1.5 || d > radius || s.map.get(x, y) !== 0 || !s.map.isWalk(x, y) || s.map.occBuild[i] || s.map.occWalk[i]
+              || excluded.some((p) => Math.hypot(x - p.x, y - p.y) < 1.5)) continue;
+            const path = game.__path(Math.floor(s.player.x), Math.floor(s.player.y), x, y);
+            if (path) choices.push({ x, y, d, path: path.length });
+          }
+          choices.sort((a, b) => a.path - b.path || a.d - b.d || a.y - b.y || a.x - b.x);
+          return choices[0] || null;
+        };
+        const towerSite = freeNear(3);
+        if (!towerSite) throw new Error('二站信标周围没有可达辉光塔空位');
+        const towerBuild = await placeLocalDefense('towerGlow', 'def', towerSite.x, towerSite.y);
+        const lampSite = freeNear(4, [towerSite]);
+        if (!lampSite) throw new Error('二站信标周围没有可达灯柱空位');
+        const lampBuild = await placeLocalDefense('lamp', 'light', lampSite.x, lampSite.y);
+        const tower = s.buildings.find((b) => b.type === 'towerGlow' && b.x === towerSite.x && b.y === towerSite.y && !b.site);
+        const lamp = s.buildings.find((b) => b.type === 'lamp' && b.x === lampSite.x && b.y === lampSite.y && !b.site);
+        if (!tower || !lamp) throw new Error(`二站防守工事未完工：${JSON.stringify({ tower, lamp })}`);
+        const ledger = { recovered, nodesBefore, nodesAfter: { ore: nodeTotal(2), vine: nodeTotal(3) }, oreGather, vineGather,
+          furnace: { ...furnacePlace, pos: [furnace.x, furnace.y], fuelLeft: furnace.fuel, refineBefore, refineBatches,
+            refineAfter: { ore: spendableTotal('ore'), fuel: spendableTotal('fuel') } },
+          tower: { ...towerBuild, hp: tower.hp, pos: [tower.x, tower.y] },
+          lamp: { ...lampBuild, pos: [lamp.x, lamp.y], fuel: lamp.fuel },
+          beforeDefense, afterBuild: { ore: spendableTotal('ore'), vine: spendableTotal('vine'), fuel: spendableTotal('fuel') },
+          anchor: [site.x, site.y], hp: s.playerHp, hunger: s.playerHunger, day: s.day, t: +s.t.toFixed(2) };
+        if (tower.site || lamp.site || ledger.afterBuild.fuel < 7 || ledger.afterBuild.ore !== beforeDefense.ore - 8)
+          throw new Error(`二站防守建造账本验收失败：${JSON.stringify(ledger)}`);
+        const beaconStand = closestStand(site.x, site.y);
+        moveTo(beaconStand.x, beaconStand.y, 1800);
+        game.__quick(true);
+        setCheckpoint('shaleDefenseReady');
+        emit('R4-A second-site local furnace, lamp, and glow tower ready', ledger);
+      }
+
+      // Phase 12: 临近潮起点亮人工光，真实 E 预约二站，并连续推进至黎明结算。
+      if (!parent.__r4aAccessCheckpoints?.shaleTrialComplete) {
+        const site = s.resonance?.sites?.second;
+        if (s.layerId !== 'surface' || (s.chunkX | 0) !== 3 || (s.chunkY | 0) !== 0 || !site || site.status !== 'built')
+          throw new Error(`二站预约恢复位置错误：${JSON.stringify({ layer: s.layerId, chunk: [s.chunkX, s.chunkY], site })}`);
+        const lamp = s.buildings.find((b) => b.type === 'lamp' && !b.site && Math.hypot(b.x - site.x, b.y - site.y) <= 4);
+        const beacon = s.buildings.find((b) => b.type === 'resonanceBeacon' && b.resonanceSiteId === 'second' && b.x === site.x && b.y === site.y && !b.site);
+        const tower = s.buildings.find((b) => b.type === 'towerGlow' && !b.site && Math.hypot(b.x - site.x, b.y - site.y) <= 3.1);
+        if (!lamp || !beacon || !tower) throw new Error(`二站灯/塔/信标不齐：${JSON.stringify({ lamp, beacon, tower })}`);
+        const secondResult = () => site.trial?.status || null;
+        game.__quick(true);
+        let waitFrames = 0;
+        if (s.t >= 320) {
+          const seconds = (400 - s.t) + 300;
+          waitFrames = Math.ceil(seconds * 60);
+          game.__steps(waitFrames);
+        } else if (s.t < 300) {
+          waitFrames = Math.ceil((300 - s.t) * 60);
+          game.__steps(waitFrames);
+        }
+        await new Promise((resolve) => game.requestAnimationFrame(resolve));
+        const windowAt = { day: s.day, t: +s.t.toFixed(2), frames: waitFrames, hp: s.playerHp };
+        game.__quick(false);
+        const lampStand = closestStand(lamp.x, lamp.y);
+        moveTo(lampStand.x, lampStand.y, 1800);
+        const refuelLog = [];
+        while ((lamp.fuel || 0) < 4) {
+          if (spendableTotal('fuel') <= 4) throw new Error(`灯柱潮前燃料不足且不能挤占预约4份：${JSON.stringify({ tank: lamp.fuel, stock: spendableTotal('fuel') })}`);
+          let cooldownGuard = 0;
+          while ((s.interactCd || 0) > 0 && cooldownGuard++ < 90) step(1);
+          await hover(lamp.x, lamp.y);
+          const action = game.__resolve();
+          const before = spendableTotal('fuel'), tankBefore = lamp.fuel || 0;
+          if (action?.kind !== 'refuel' || action.b !== lamp) throw new Error(`灯柱未成为真实 E 加油目标：${JSON.stringify({ kind: action?.kind, tankBefore, before })}`);
+          key('KeyE', 1);
+          refuelLog.push({ action: action.kind, fuel: [before, spendableTotal('fuel')], tank: [tankBefore, lamp.fuel || 0] });
+          if ((lamp.fuel || 0) !== tankBefore + 1) throw new Error(`灯柱补燃料未精确入槽：${JSON.stringify(refuelLog.at(-1))}`);
+        }
+        step(6);
+        const beaconLight = s.light[site.y * s.map.w + site.x] || 0;
+        const beaconStand = closestStand(site.x, site.y);
+        moveTo(beaconStand.x, beaconStand.y, 1800); await hover(site.x, site.y);
+        const action = game.__resolve(), fuelBeforeReservation = spendableTotal('fuel'), nightBeforeReservation = spendableTotal('night');
+        if (beaconLight < 1 || action?.kind !== 'resonance' || action.b !== beacon)
+          throw new Error(`二站亮度/预约目标不满足：${JSON.stringify({ beaconLight, action: action?.kind, hp: s.playerHp })}`);
+        if (r6eMode) {
+          const prompt = document.createElement('p'); prompt.id = 'r6e-input';
+          prompt.textContent = 'R6-E 二站就绪：在游戏画布按 E 预约'; document.body.prepend(prompt);
+          emit('R6-E awaiting actual browser E input', {day:s.day,t:s.t,stand:beaconStand,site:{x:site.x,y:site.y},fuelBefore: fuelBeforeReservation,nightBefore:nightBeforeReservation});
+          await awaitBrowserE();
+          prompt.textContent = 'R6-E 已接收 E，正在守潮';
+        } else key('KeyE', 12);
+        const trial = s.resonance?.trial;
+        const reservation = { action: action.kind, status: trial?.status, siteId: trial?.siteId, targetDay: trial?.targetDay,
+          attempts: trial?.attempts, fuel: [fuelBeforeReservation, spendableTotal('fuel')], night: [nightBeforeReservation, spendableTotal('night')],
+          lampFuel: lamp.fuel, beaconLight, tower: tower.type, windowAt };
+        // A reservation made before TIDE_START targets this same day's tide;
+        // only one made at/after the tide boundary advances to the next day.
+        const expectedTargetDay = (s.day | 0) + (windowAt.t >= 320 ? 1 : 0);
+        if (trial?.status !== 'reserved' || trial.siteId !== 'second' || trial.targetDay !== expectedTargetDay
+          || fuelBeforeReservation - spendableTotal('fuel') !== 4 || nightBeforeReservation - spendableTotal('night') !== 1)
+          throw new Error(`二站真实 E 预约账本不符：${JSON.stringify(reservation)}`);
+        setCheckpoint('shaleTrialReserved');
+        emit('R4-A second-site standard tide reserved', { reservation, refuelLog });
+        game.__quick(true);
+        const start = { day: s.day, t: +s.t.toFixed(2), hp: s.playerHp, beaconHp: beacon.hp, lampFuel: lamp.fuel, towerHp: tower.hp };
+        const samples = [];
+        let simulatedFrames = 0, maxEnemies = 0;
+        while (simulatedFrames < 7200 && site.status !== 'complete' && secondResult() !== 'failed') {
+          const batch = Math.min(300, 7200 - simulatedFrames);
+          game.__steps(batch); simulatedFrames += batch;
+          const alive = (s.enemies || []).filter((e) => e.alive).length;
+          maxEnemies = Math.max(maxEnemies, alive);
+          if (simulatedFrames % 600 === 0) {
+            if (trial?.status === 'active') key('Space', 1);
+            const sample = { day: s.day, t: +s.t.toFixed(1), hp: s.playerHp, dead: !!s.playerDead, beaconHp: beacon.hp,
+              lampFuel: lamp.fuel, towerHp: tower.hp, aliveEnemies: alive, trial: secondResult(), chunk: [s.chunkX, s.chunkY] };
+            samples.push(sample);
+            emit('R4-A 二站反冲夜进度', { simulatedFrames, ...sample });
+            await new Promise((resolve) => game.requestAnimationFrame(resolve));
+          }
+        }
+        const trialResult = { status: site.status, trial: secondResult(), day: s.day, t: +s.t.toFixed(2), hp: s.playerHp,
+          beaconHp: beacon.hp, lampFuel: lamp.fuel, towerHp: tower.hp, maxEnemies, simulatedFrames, samples };
+        if (site.status !== 'complete' || secondResult() !== 'complete') throw new Error(`二站反冲夜未能守至黎明：${JSON.stringify(trialResult)}`);
+        game.__quick(false);
+        setCheckpoint('shaleTrialComplete');
+        emit('R4-A second-site tide completed', { start, trialResult, reservation });
+      }
+
+      // R4-B Phase 13: 从真实二站检查点沿区块出口回苔原营地，检查终站固定锚点。
+      if (!parent.__r4aAccessCheckpoints?.tundraReturn) {
+        game.__quick(false);
+        const returnStart = { day: s.day, t: +s.t.toFixed(2), chunk: [s.chunkX | 0, s.chunkY | 0],
+          hp: s.playerHp, hunger: s.playerHunger };
+        if (s.layerId !== 'surface') throw new Error(`终站远征回撤前不在地表：${s.layerId}`);
+        const routeToOriginFrames = returnToOrigin();
+        const report = game.__resonance(), site = s.resonance?.sites?.third;
+        if ((s.chunkX | 0) !== 0 || (s.chunkY | 0) !== 0 || game.__eco().biome !== 'tundra')
+          throw new Error(`沿真实出口未返回苔原原点：${JSON.stringify({ chunk: [s.chunkX, s.chunkY], biome: game.__eco().biome })}`);
+        if (!site || site.status !== 'revealed' || site.chunkX !== 0 || site.chunkY !== 0
+          || !Number.isInteger(site.x) || !Number.isInteger(site.y))
+          throw new Error(`终站没有稳定可建锚点：${JSON.stringify(site)}`);
+        const siteIx = site.y * s.map.w + site.x;
+        if (s.map.get(site.x, site.y) !== 0 || !s.map.isWalk(site.x, site.y)
+          || s.map.occBuild[siteIx] || s.map.occWalk[siteIx]
+          || !game.__path(Math.floor(s.player.x), Math.floor(s.player.y), site.x, site.y))
+          throw new Error(`终站锚点未通过真实区块可达性检查：${JSON.stringify({ site, tile: s.map.get(site.x, site.y), occBuild: s.map.occBuild[siteIx], occWalk: s.map.occWalk[siteIx] })}`);
+        const result = { returnStart, returned: { day: s.day, t: +s.t.toFixed(2), chunk: [s.chunkX, s.chunkY],
+            hp: s.playerHp, hunger: s.playerHunger, frames: routeToOriginFrames },
+          biome: game.__eco().biome, site: { ...site }, costs: report.costs, light: report.lighting };
+        setCheckpoint('tundraReturn');
+        emit('R4-B returned to origin and verified stable terminal anchor', result);
+      }
+
+      // R4-B Phase 14: 实采营地矿脉/档案，并用真实熔炉 UI/E 配方补足标准预约燃料。
+      if (!parent.__r4aAccessCheckpoints?.tundraMaterialsReady) {
+        game.__quick(false);
+        if (s.layerId !== 'surface' || (s.chunkX | 0) !== 0 || (s.chunkY | 0) !== 0)
+          throw new Error(`终站备料必须在原点区块：${JSON.stringify({ layer: s.layerId, chunk: [s.chunkX, s.chunkY] })}`);
+        const recoveredPack = [];
+        const deathPack = s.deathPack;
+        if (deathPack?.layerId === 'surface' && (deathPack.chunkX == null || (deathPack.chunkX | 0) === 0)
+          && (deathPack.chunkY == null || (deathPack.chunkY | 0) === 0)) {
+          const tx = Math.floor(deathPack.x), ty = Math.floor(deathPack.y);
+          const packStand = closestStand(tx, ty);
+          if (!packStand) throw new Error(`营地遗物包周围没有可达回收站位：${tx},${ty}`);
+          moveTo(packStand.x, packStand.y, 1800); await hover(tx, ty);
+          const action = game.__resolve();
+          if (action?.kind === 'deathPack') {
+            key('KeyE', 2);
+            if (s.deathPack) throw new Error(`营地遗物包实际 E 回收后仍存在：${JSON.stringify(s.deathPack)}`);
+            recoveredPack.push({ pos: [tx, ty], contents: { stock: { ...(deathPack.stock || {}) }, held: deathPack.held || null } });
+          }
+        }
+        const report = game.__resonance(), construction = report.costs.construction.third, trialCost = report.costs.trialStart;
+        const before = Object.fromEntries(['ore', 'core', 'data', 'fuel', 'night'].map((r) => [r, spendableTotal(r)]));
+        let furnace = s.buildings.find((b) => b.type === 'furnace' && !b.site);
+        const furnaceBuildCost = furnace ? {} : game.__cost('furnace');
+        const fuelBatchesNeeded = Math.ceil(Math.max(0, trialCost.fuel - before.fuel) / 2);
+        const oreTarget = construction.ore + (furnaceBuildCost.ore || 0) + fuelBatchesNeeded;
+        const vineTarget = (furnaceBuildCost.vine || 0) + (fuelBatchesNeeded && !(furnace?.fuel > 0) ? 1 : 0);
+        const oreGather = before.ore < oreTarget ? await gather(2, 'ore', oreTarget, 180) : null;
+        const vineBefore = spendableTotal('vine');
+        const vineGather = vineBefore < vineTarget ? await gather(3, 'vine', vineTarget, 180) : null;
+        const dataGather = before.data < construction.data ? await gather(4, 'data', construction.data, 180) : null;
+        let furnacePlace = null, ignition = null, refineBatches = [];
+        if (spendableTotal('fuel') < trialCost.fuel) {
+          if (!furnace) {
+            const site = s.resonance?.sites?.third, candidates = [];
+            for (let y = 2; y < s.map.h - 2; y++) for (let x = 2; x < s.map.w - 2; x++) {
+              const d = Math.hypot(x - site.x, y - site.y), i = y * s.map.w + x;
+              if (d < 4 || d > 10 || s.map.get(x, y) !== 0 || !s.map.isWalk(x, y) || s.map.occBuild[i] || s.map.occWalk[i]) continue;
+              const path = game.__path(Math.floor(s.player.x), Math.floor(s.player.y), x, y);
+              if (path) candidates.push({ x, y, d, path: path.length });
+            }
+            candidates.sort((a, b) => a.path - b.path || a.d - b.d || a.y - b.y || a.x - b.x);
+            const spot = candidates[0];
+            if (!spot) throw new Error('原点终站附近找不到真实熔炉建造位');
+            furnacePlace = await placeLocalDefense('furnace', 'prod', spot.x, spot.y);
+            furnace = s.buildings.find((b) => b.type === 'furnace' && b.x === spot.x && b.y === spot.y && !b.site);
+            if (!furnace) throw new Error(`原点熔炉未真实建成：${JSON.stringify(furnacePlace)}`);
+          }
+          // 备料/建造期间旧炉余火可能烧尽，点火前重新查现场库存，不沿用早先预算。
+          if (r6eMode && !(furnace.fuel > 0) && spendableTotal('vine') < 1) {
+            for(let i=0;i<2 && s.activePanel;i++) key('Escape');
+            emit('R6-E terminal furnace ignition harvest', await gather(3,'vine',1,180));
+          }
+          const stand = closestStand(furnace.x, furnace.y);
+          if (!stand) throw new Error('原点熔炉附近没有可达 E 操作站位');
+          moveTo(stand.x, stand.y, 1800);
+          let cdGuard = 0;
+          while ((s.interactCd || 0) > 0 && cdGuard++ < 90) step(1);
+          await hover(furnace.x, furnace.y);
+          const action = game.__resolve();
+          if (action?.kind !== 'station' || action.b !== furnace)
+            throw new Error(`原点熔炉未成为真实 E 操作目标：${JSON.stringify(action)}`);
+          const fuelBeforeIgnition = spendableTotal('fuel'), vineBeforeIgnition = spendableTotal('vine');
+          key('KeyE', 12);
+          ignition = { panel: s.activePanel, furnaceFuel: furnace.fuel, fuel: [fuelBeforeIgnition, spendableTotal('fuel')],
+            vine: [vineBeforeIgnition, spendableTotal('vine')], action: action.kind };
+          if (s.activePanel !== 'furnace' || !(furnace.fuel > 0))
+            throw new Error(`原点熔炉未能用实际藤木点火/打开面板：${JSON.stringify(ignition)}`);
+          const requiredBatches = Math.ceil((trialCost.fuel - spendableTotal('fuel')) / 2);
+          for (let batch = 0; batch < requiredBatches; batch++) {
+            const once = game.document.querySelector('#panel [data-act="once"]');
+            if (!once) throw new Error('原点熔炉 UI 未显示“做一次”炼油控制');
+            const ore0 = spendableTotal('ore'), fuel0 = spendableTotal('fuel');
+            once.click(); step(2);
+            refineBatches.push({ batch: batch + 1, ore: [ore0, spendableTotal('ore')], fuel: [fuel0, spendableTotal('fuel')], fire: furnace.fuel });
+            if (ore0 - spendableTotal('ore') !== 1 || spendableTotal('fuel') - fuel0 !== 2)
+              throw new Error(`原点熔炉炼油账本不符：${JSON.stringify(refineBatches.at(-1))}`);
+          }
+          key('Escape');
+          if (s.activePanel) key('Escape');
+          if (s.activePanel) throw new Error(`熔炉面板未通过真实 Escape 关闭：${s.activePanel}`);
+        }
+        const after = Object.fromEntries(['ore', 'vine', 'core', 'data', 'fuel', 'night'].map((r) => [r, spendableTotal(r)]));
+        if (after.ore < construction.ore || after.data < construction.data
+          || after.core < construction.core || after.fuel < trialCost.fuel)
+          throw new Error(`终站施工/预约必需材料无法从原点当前库存与实际生产闭合：${JSON.stringify({ construction, trialCost, before, after, oreTarget, vineTarget, oreGather, vineGather, dataGather, furnacePlace, ignition, refineBatches, stores: [...(s.beacons || []), ...(s.buildings || [])].filter((b) => b.stock).map((b) => ({ type: b.type, stock: b.stock })) })}`);
+        const ledger = { construction, trialCost, recoveredPack, before, after, oreTarget, vineTarget, oreGather, vineGather, dataGather,
+          furnace: furnace && { x: furnace.x, y: furnace.y, hp: furnace.hp, remainingFire: furnace.fuel, place: furnacePlace, ignition, refineBatches },
+          localNodes: { ore: s.map.tiles.reduce((n, t, i) => n + (t === 2 ? (s.map.nodeAmt[i] || 0) : 0), 0),
+            vine: s.map.tiles.reduce((n, t, i) => n + (t === 3 ? (s.map.nodeAmt[i] || 0) : 0), 0),
+            data: s.map.tiles.reduce((n, t, i) => n + (t === 4 ? (s.map.nodeAmt[i] || 0) : 0), 0) },
+          pack: { ...s.pack.stock }, containers: [...(s.beacons || []), ...(s.buildings || [])].filter((b) => b.stock)
+            .map((b) => ({ type: b.type, x: b.x, y: b.y, stock: { ...b.stock } })) };
+        setCheckpoint('tundraMaterialsReady');
+        emit('R4-B tundra ore/archive/core supply and real fuel production passed', ledger);
+      }
+
+      // R4-B Phase 15: 夜髓必须在营地本图等蚀潮夜辉草后真实 E 采集，不跨图挪用或写入资源。
+      if (!parent.__r4aAccessCheckpoints?.tundraSupplyReady) {
+        game.__quick(false);
+        const report = game.__resonance(), site = s.resonance?.sites?.third;
+        const need = report.costs.construction.third.night + report.costs.trialStart.night;
+        const ops = s.layers?.surface?.nightops;
+        if (!ops?.blooms?.length) throw new Error('原点夜行节点未初始化，不能证明终站夜髓来源');
+        const bloomReady = () => (s.layers?.surface?.nightops?.blooms || []).some((b) => b.alive && b.charges > 0);
+        const waitStart = { day: s.day, t: +s.t.toFixed(2), night: spendableTotal('night'), hp: s.playerHp,
+          hunger: s.playerHunger, blooms: ops.blooms.map((b) => ({ x: b.x, y: b.y, alive: b.alive, charges: b.charges })) };
+        let waitFrames = 0;
+        if (spendableTotal('night') < need && !bloomReady()) {
+          game.__quick(true);
+          try {
+            // 最多跨过一个完整循环，直到营地本图的夜辉草真实出现。
+            while (!bloomReady() && waitFrames < 26000 && s.playerHp > 0) {
+              const batch = Math.min(120, 26000 - waitFrames);
+              game.__steps(batch); waitFrames += batch;
+              if (waitFrames % 600 === 0) {
+                emit('R4-B 等待原点夜辉草', { day: s.day, t: +s.t.toFixed(1), waitFrames, hp: s.playerHp,
+                  night: spendableTotal('night'), ready: bloomReady() });
+                await new Promise((resolve) => game.requestAnimationFrame(resolve));
+              }
+            }
+          } finally { game.__quick(false); }
+        }
+        const harvests = [];
+        if (spendableTotal('night') < need) {
+          const ordered = ops.blooms.filter(b => b.alive && b.charges > 0);
+          ordered.sort((a,b) => Math.hypot(a.x-s.player.x,a.y-s.player.y)-Math.hypot(b.x-s.player.x,b.y-s.player.y));
+          for (const bloom of ordered) {
+            while (spendableTotal('night') < need && bloom.alive && bloom.charges > 0 && s.playerHp > 0) {
+              const stand = closestStand(bloom.x, bloom.y);
+              if (!stand) throw new Error(`原点夜辉草没有可达采集站位：${bloom.x},${bloom.y}`);
+              moveTo(stand.x, stand.y, 1800); await hover(bloom.x, bloom.y);
+              let cdGuard = 0;
+              while ((s.interactCd || 0) > 0 && cdGuard++ < 90) step(1);
+              const action = game.__resolve();
+              if (action?.kind !== 'bloom' || action.b !== bloom)
+                throw new Error(`终站夜髓采集不是实际夜辉草 E 目标：${JSON.stringify({ kind: action?.kind, bloom, cursor: s.cursor,player:[s.player.x,s.player.y],day:s.day,t:s.t,hp:s.playerHp,harvests })}`);
+              const before = spendableTotal('night');
+              key('KeyE', 12);
+              harvests.push({ pos: [bloom.x, bloom.y], before, after: spendableTotal('night'), charges: bloom.charges, hp: s.playerHp });
+              if (spendableTotal('night') <= before) throw new Error(`原点夜辉草没有把夜髓记入账本：${JSON.stringify(harvests.at(-1))}`);
+            }
+            if (spendableTotal('night') >= need) break;
+          }
+        }
+        const ledger = { waitStart, waitFrames, waitSimSeconds: +(waitFrames / 60).toFixed(1), need,
+          after: spendableTotal('night'), harvests, blooms: ops.blooms.map((b) => ({ x: b.x, y: b.y, alive: b.alive, charges: b.charges })),
+          player: { hp: s.playerHp, hunger: s.playerHunger, day: s.day, t: +s.t.toFixed(2), dead: !!s.playerDead } };
+        if (!site || site.status !== 'revealed' || spendableTotal('night') < need || s.playerHp <= 0)
+          throw new Error(`终站夜髓/生还准备未闭合：${JSON.stringify(ledger)}`);
+        setCheckpoint('tundraSupplyReady');
+        emit('R4-B local nightbloom harvest and trial stock passed', ledger);
+      }
+
+      // R4-B Phase 16: 真实建造 UI 放置终站信标、核对一次扣料，再以 E 完工。
+      if (!parent.__r4aAccessCheckpoints?.tundraBeaconBuilt) {
+        const site = s.resonance?.sites?.third;
+        if (s.layerId !== 'surface' || (s.chunkX | 0) !== 0 || (s.chunkY | 0) !== 0
+          || !site || site.status !== 'revealed' || site.chunkX !== 0 || site.chunkY !== 0)
+          throw new Error(`终站建造恢复状态错误：${JSON.stringify({ layer: s.layerId, chunk: [s.chunkX, s.chunkY], site })}`);
+        const ledger = await placeThirdBeacon(site);
+        const beacon = s.buildings.find((b) => b.type === 'resonanceBeacon' && b.resonanceSiteId === 'third'
+          && b.x === site.x && b.y === site.y && !b.site);
+        if (!beacon || site.status !== 'built') throw new Error(`原点终站信标没有完成真实施工：${JSON.stringify({ ledger, beacon, site })}`);
+        setCheckpoint('tundraBeaconBuilt');
+        emit('R4-B third beacon built through the real build panel and E work', { ledger, day: s.day,
+          t: +s.t.toFixed(2), hp: s.playerHp, hunger: s.playerHunger, beaconHp: beacon.hp });
+      }
+
+      // R4-B Phase 17: 在夜采和施工耗时之后再核燃料；必要时按真实配方补足预约成本。
+      if (!parent.__r4aAccessCheckpoints?.tundraFuelReady) {
+        const required = game.__resonance().costs.trialStart.fuel;
+        const before = spendableTotal('fuel'), batchesNeeded = Math.ceil(Math.max(0, required - before) / 2);
+        const site = s.resonance?.sites?.third;
+        let furnace = s.buildings.filter((b) => b.type === 'furnace' && !b.site)
+          .sort((a, b) => Math.hypot(a.x - site.x, a.y - site.y) - Math.hypot(b.x - site.x, b.y - site.y))[0] || null;
+        let furnacePlace = null, oreGather = null, vineGather = null;
+        if (before < required) {
+          // 信标 E 交互优先级高于相邻站台；若旧炉贴着终站，就在原点另建一台可实际操作的炉。
+          const furnaceBuildCost = furnace ? {} : game.__cost('furnace');
+          const oreTarget = (furnaceBuildCost.ore || 0) + batchesNeeded;
+          const vineTarget = (furnaceBuildCost.vine || 0) + (furnace && furnace.fuel > 0 ? 0 : 1);
+          if (spendableTotal('ore') < oreTarget) {
+            oreGather = await gather(2, 'ore', oreTarget, 100);
+            if (spendableTotal('ore') < oreTarget)
+              throw new Error(`终站燃料准备辉髓未采足：${JSON.stringify({ target: oreTarget, now: spendableTotal('ore'), oreGather })}`);
+          }
+          if (spendableTotal('vine') < vineTarget) {
+            vineGather = await gather(3, 'vine', vineTarget, 100);
+            if (spendableTotal('vine') < vineTarget)
+              throw new Error(`终站燃料准备藤木未采足：${JSON.stringify({ target: vineTarget, now: spendableTotal('vine'), vineGather })}`);
+          }
+          if (!furnace) {
+            const candidates = [];
+            for (let y = 2; y < s.map.h - 2; y++) for (let x = 2; x < s.map.w - 2; x++) {
+              const d = Math.hypot(x - site.x, y - site.y), i = y * s.map.w + x;
+              if (d < 6 || d > 12 || s.map.get(x, y) !== 0 || !s.map.isWalk(x, y) || s.map.occBuild[i] || s.map.occWalk[i]
+                || (s.map.blight && s.map.blight[i] > 0)) continue;
+              const path = game.__path(Math.floor(s.player.x), Math.floor(s.player.y), x, y);
+              if (path) candidates.push({ x, y, d, path: path.length });
+            }
+            candidates.sort((a, b) => a.path - b.path || a.d - b.d || a.y - b.y || a.x - b.x);
+            const spot = candidates[0];
+            if (!spot) throw new Error('终站附近没有远离信标且可达的熔炉建造位');
+            furnacePlace = await placeLocalDefense('furnace', 'prod', spot.x, spot.y);
+            furnace = s.buildings.find((b) => b.type === 'furnace' && b.x === spot.x && b.y === spot.y && !b.site);
+            if (!furnace) throw new Error(`远离信标的营地熔炉未建成：${JSON.stringify(furnacePlace)}`);
+          }
+          if (spendableTotal('ore') < batchesNeeded)
+            throw new Error(`终站燃料补产辉髓不足：${spendableTotal('ore')}/${batchesNeeded}`);
+          if (!(furnace.fuel > 0) && spendableTotal('vine') < 1)
+            throw new Error(`营地熔炉熄火且藤木不足，无法补燃：${JSON.stringify({ fuel: before, vine: spendableTotal('vine') })}`);
+          const stationStands = [];
+          for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+            if (!dx && !dy) continue;
+            const x = furnace.x + dx, y = furnace.y + dy;
+            if (!s.map.isWalk(x, y) || s.map.occWalk[y * s.map.w + x]) continue;
+            const path = game.__path(Math.floor(s.player.x), Math.floor(s.player.y), x, y);
+            if (!path) continue;
+            const beaconDistance = Math.hypot(x + 0.5 - (site.x + 0.5), y + 0.5 - (site.y + 0.5));
+            stationStands.push({ x, y, path: path.length, beaconDistance });
+          }
+          stationStands.sort((a, b) => a.path - b.path || a.y - b.y || a.x - b.x);
+          const stand = stationStands.find((p) => p.beaconDistance > 1.7) || stationStands[0] || closestStand(furnace.x, furnace.y);
+          if (!stand) throw new Error('终站燃料补产时熔炉旁没有可达站位');
+          moveTo(stand.x, stand.y, 1800);
+          let cdGuard = 0;
+          while ((s.interactCd || 0) > 0 && cdGuard++ < 90) step(1);
+          await hover(furnace.x, furnace.y);
+          const action = game.__resolve();
+          if (action?.kind !== 'station' || action.b !== furnace)
+            throw new Error(`终站燃料补产没有指向真实熔炉：${JSON.stringify({ action: action?.kind, stand,
+              furnace: { x: furnace.x, y: furnace.y }, site: { x: site.x, y: site.y }, stationStands })}`);
+          key('KeyE', 12);
+          if (s.activePanel !== 'furnace' || !(furnace.fuel > 0))
+            throw new Error(`终站燃料补产未能真实点炉：${JSON.stringify({ panel: s.activePanel, furnaceFuel: furnace.fuel })}`);
+          const batches = [];
+          for (let i = 0; i < batchesNeeded; i++) {
+            const once = game.document.querySelector('#panel [data-act="once"]');
+            if (!once) throw new Error('熔炉 UI 未显示真实炼油按钮');
+            const ore0 = spendableTotal('ore'), fuel0 = spendableTotal('fuel');
+            once.click(); step(2);
+            batches.push({ ore: [ore0, spendableTotal('ore')], fuel: [fuel0, spendableTotal('fuel')], fire: furnace.fuel });
+            if (ore0 - spendableTotal('ore') !== 1 || spendableTotal('fuel') - fuel0 !== 2)
+              throw new Error(`终站燃料补产账本异常：${JSON.stringify(batches.at(-1))}`);
+          }
+          key('Escape'); if (s.activePanel) key('Escape');
+          if (s.activePanel) throw new Error(`终站燃料补产后熔炉面板未关闭：${s.activePanel}`);
+          if (spendableTotal('fuel') < required)
+            throw new Error(`终站预约燃料经真实生产后仍不足：${JSON.stringify({ before, required, batches, fuel: spendableTotal('fuel') })}`);
+          setCheckpoint('tundraFuelReady');
+          emit('R4-B tide-time fuel reserve topped up at real furnace', { before, required, batchesNeeded, batches,
+            furnacePlace, furnace: { x: furnace.x, y: furnace.y }, oreGather, vineGather,
+            after: spendableTotal('fuel'), oreLeft: spendableTotal('ore'), vineLeft: spendableTotal('vine'),
+            day: s.day, t: +s.t.toFixed(2) });
+        } else {
+          setCheckpoint('tundraFuelReady');
+          emit('R4-B tide-time fuel reserve already sufficient', { before, required, day: s.day, t: +s.t.toFixed(2) });
+        }
+      }
+
+      // R4-B Phase 18–19: 以信标格实时光值预约标准蚀潮，并报告玩家提灯/营地/建筑的独立贡献。
+      if (!parent.__r4aAccessCheckpoints?.tundraTrialComplete) {
+        const site = s.resonance?.sites?.third;
+        const beacon = s.buildings.find((b) => b.type === 'resonanceBeacon' && b.resonanceSiteId === 'third'
+          && b.x === site?.x && b.y === site?.y && !b.site);
+        if (!site || site.status !== 'built' || !beacon) throw new Error(`终站预约前信标未建成：${JSON.stringify({ site, beacon })}`);
+        game.__quick(true);
+        let waitFrames = 0;
+        if (s.t < 300) {
+          waitFrames = Math.ceil((300 - s.t) * 60);
+          game.__steps(waitFrames);
+        }
+        await new Promise((resolve) => game.requestAnimationFrame(resolve));
+        game.__quick(false); step(2);
+        const lighting = game.__resonance().lighting;
+        const lightAtAnchor = s.light[site.y * s.map.w + site.x] || 0;
+        const appointmentStands = [];
+        const dp = s.deathPack;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue;
+          const x = site.x + dx, y = site.y + dy, i = y * s.map.w + x;
+          if (!s.map.isWalk(x, y) || s.map.occWalk[i]) continue;
+          const path = game.__path(Math.floor(s.player.x), Math.floor(s.player.y), x, y);
+          if (!path) continue;
+          const packClearance = !dp || dp.layerId !== s.layerId || Math.hypot(x + 0.5 - dp.x, y + 0.5 - dp.y) > 1.5;
+          appointmentStands.push({ x, y, path: path.length, packClearance });
+        }
+        appointmentStands.sort((a, b) => a.path - b.path || a.y - b.y || a.x - b.x);
+        const stand = appointmentStands.find((p) => p.packClearance) || appointmentStands[0] || closestStand(site.x, site.y);
+        if (!stand) throw new Error('终站信标周围没有可达预约站位');
+        moveTo(stand.x, stand.y, 1800); await hover(site.x, site.y);
+        let cooldownGuard = 0;
+        while ((s.interactCd || 0) > 0 && cooldownGuard++ < 90) step(1);
+        const windowAt = { day: s.day | 0, t: +s.t.toFixed(2), waitFrames, hp: s.playerHp };
+        const action = game.__resolve(), fuelBefore = spendableTotal('fuel'), nightBefore = spendableTotal('night');
+        if (lightAtAnchor < 1 || action?.kind !== 'resonance' || action.b !== beacon)
+          throw new Error(`终站预约格未满足真实人工光/E交互条件：${JSON.stringify({ lightAtAnchor, lighting,
+            action: action?.kind, targetSite: action?.b?.resonanceSiteId, hp: s.playerHp, player: { ...s.player },
+            cursor: s.cursor, deathPack: dp && { x: dp.x, y: dp.y, layerId: dp.layerId }, stand, appointmentStands })}`);
+        if (r6eMode) {
+          const prompt = document.querySelector('#r6e-input') || document.createElement('p'); prompt.id='r6e-input';
+          prompt.textContent='R6-E 终站就绪：在游戏画布按 E 预约'; document.body.prepend(prompt);
+          emit('R6-E awaiting actual browser E input', {day:s.day,t:s.t,stand,site:{x:site.x,y:site.y},fuelBefore,nightBefore});
+          await awaitBrowserE();
+          prompt.textContent='R6-E 已接收 E，正在守潮';
+        } else key('KeyE', 12);
+        const trial = s.resonance?.trial;
+        const reservation = { action: action.kind, status: trial?.status, siteId: trial?.siteId, targetDay: trial?.targetDay,
+          attempts: trial?.attempts, fuel: [fuelBefore, spendableTotal('fuel')], night: [nightBefore, spendableTotal('night')],
+          lightAtAnchor, lighting, windowAt };
+        const expectedTargetDay = windowAt.day + (windowAt.t >= 320 ? 1 : 0);
+        if (trial?.status !== 'reserved' || trial.siteId !== 'third' || trial.targetDay !== expectedTargetDay
+          || fuelBefore - spendableTotal('fuel') !== 4 || nightBefore - spendableTotal('night') !== 1)
+          throw new Error(`终站真实 E 预约账本/日期不符：${JSON.stringify(reservation)}`);
+        setCheckpoint('tundraTrialReserved');
+        emit('R4-B third-site standard tide reserved; source attribution captured', reservation);
+        game.__quick(true);
+        const start = { day: s.day | 0, t: +s.t.toFixed(2), hp: s.playerHp, beaconHp: beacon.hp };
+        const samples = [];
+        let simulatedFrames = 0, maxEnemies = 0;
+        while (simulatedFrames < 30000 && site.status !== 'complete' && trial?.status !== 'failed') {
+          const batch = Math.min(300, 30000 - simulatedFrames);
+          game.__steps(batch); simulatedFrames += batch;
+          const alive = (s.enemies || []).filter((e) => e.alive).length;
+          maxEnemies = Math.max(maxEnemies, alive);
+          if (simulatedFrames % 600 === 0) {
+            if (trial?.status === 'active') key('Space', 1);
+            const light = game.__resonance().lighting;
+            const sample = { day: s.day | 0, t: +s.t.toFixed(1), hp: s.playerHp, dead: !!s.playerDead,
+              beaconHp: beacon.hp, aliveEnemies: alive, trial: trial?.status, site: site.status,
+              lighting: light.loaded ? { gridValue: light.gridValue, allSources: light.counterfactual.allSources,
+                playerOnly: light.counterfactual.playerOnly, campOnly: light.counterfactual.campOnly,
+                buildingsOnly: light.counterfactual.buildingsOnly, nonPlayerSources: light.counterfactual.nonPlayerSources,
+                sourceCounts: { playerLamp: Number(light.sources.playerLamp.active), camp: light.sources.campLights.length,
+                  placed: light.sources.placedLights.length, graves: light.sources.graves.length } } : light };
+            samples.push(sample);
+            emit('R4-B 终站潮夜进度', { simulatedFrames, ...sample });
+            await new Promise((resolve) => game.requestAnimationFrame(resolve));
+          }
+        }
+        game.__quick(false);
+        const trialResult = { site: site.status, trial: trial?.status, day: s.day | 0, t: +s.t.toFixed(2),
+          hp: s.playerHp, dead: !!s.playerDead, beaconHp: beacon.hp, maxEnemies, simulatedFrames, samples };
+        if (site.status !== 'complete' || trial?.status !== 'complete')
+          throw new Error(`终站未能守到黎明或试炼被中断：${JSON.stringify(trialResult)}`);
+        setCheckpoint('tundraTrialComplete');
+        emit('R4-B third-site tide completed', { start, trialResult, reservation,
+          finalLighting: game.__resonance().lighting });
+      }
+    } catch (error) {
+      emit('R4-B access subgate failed', String(error && error.stack || error));
+      if (game) {
+        try {
+          parent.__r4aAccessCheckpoints ||= {};
+          parent.__r4aAccessCheckpoints.failed = {
+            phase: parent.__r4aAccessCheckpoints.phase || 'r3',
+            error: String(error && error.message || error),
+            day: game.__state?.day,
+            layer: game.__state?.layerId,
+            chunk: [game.__state?.chunkX, game.__state?.chunkY],
+          };
+        } catch (_) { }
+      }
+      resume.hidden = false;
+    } finally {
+      if (r6eMode && game) game.__quick(true);
+      if (game && originalRandom) game.Math.random = originalRandom;
+      const unchanged = Object.fromEntries(keys.map((k) => [k, localStorage.getItem(k) === storageBefore[k]]));
+      if (!Object.values(unchanged).every(Boolean)) {
+        for (const k of keys) storageBefore[k] == null ? localStorage.removeItem(k) : localStorage.setItem(k, storageBefore[k]);
+      }
+      emit('game storage unchanged/restored', unchanged);
+      out.dataset.done = 'true'; busy = false;
+    }
+  };
+  resume.addEventListener('click', () => run());
+  window.__r4aAccessRun = run;
+  run();
+})();
+</script>
+</body>
+</html>

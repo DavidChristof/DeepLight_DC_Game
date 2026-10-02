@@ -13,6 +13,7 @@ import { actLabel, ACT_COLOR } from '../ui/inspect.js';
 import { pnow, pmark } from '../core/perf.js';
 import { WORLD, VISUAL } from '../data/visual.js';
 import { SURVIVAL } from '../data/survival.js';
+import { sprite, specOf } from '../core/assets.js';
 
 const DARK = WORLD.dark;
 const FLOOR_C = WORLD.floor;          // 蚀苔地
@@ -33,10 +34,43 @@ const speck = (a, b, i) => {              // 确定性伪随机 0..1（无分配
   return x - Math.floor(x);
 };
 const col = (c) => `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;   // 颜色转 CSS 串（烘培用）
+const rgbaOf = (c, a) => Array.isArray(c)
+  ? `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${Number(a).toFixed(2)})`
+  : c;
+
+// V8 静态素材统一入口：尺寸、帧序和锚点都来自 sprites.js，不在渲染分支里猜。
+function drawSpriteV8(ctx, key, x, y, frameName = 'default', flash = false) {
+  const img = sprite(key), spec = specOf(key);
+  if (!img || !spec) return false;
+  const frames = Array.isArray(spec.frames) && spec.frames.length ? spec.frames : ['default'];
+  const frame = frames.indexOf(frameName) >= 0 ? frames.indexOf(frameName) : 0;
+  const fw = spec.frameW || spec.pxW || 32, fh = spec.frameH || spec.pxH || 32;
+  const ax = spec.anchor && Number.isFinite(spec.anchor.x) ? spec.anchor.x : fw / 2;
+  const ay = spec.anchor && Number.isFinite(spec.anchor.y) ? spec.anchor.y : fh;
+  const naturalW = Number.isFinite(img.naturalWidth) ? img.naturalWidth : 0;
+  const naturalH = Number.isFinite(img.naturalHeight) ? img.naturalHeight : 0;
+  const multiFrame = frames.length > 1 || spec.kind === 'spritesheet';
+  // 单帧 V8 图只能原尺寸直绘；尺寸漂移时回退，禁止把错误尺寸默默裁切进画面。
+  if (!multiFrame && naturalW > 0 && naturalH > 0 && (naturalW !== fw || naturalH !== fh)) return false;
+  const dx = Math.round(x - ax), dy = Math.round(y - ay);
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  // 单帧 PNG 已在初始化阶段校验尺寸；直接绘制可避免每帧重复裁切/缩放。
+  // 只有人物 spritesheet 等多帧资源才走九参数裁切路径。
+  const direct = !multiFrame && frame === 0;
+  if (direct) ctx.drawImage(img, dx, dy);
+  else ctx.drawImage(img, frame * fw, 0, fw, fh, dx, dy, fw, fh);
+  if (flash) {
+    ctx.globalCompositeOperation = 'source-atop';
+    ctx.fillStyle = 'rgba(255,255,255,0.78)'; ctx.fillRect(dx, dy, fw, fh);
+  }
+  ctx.restore();
+  return true;
+}
 
 // W16-E V1：24×24 静态像素人。用少量矩形表达头发、脸、外套和背包，
 // 方向由实体的 face/facing 提供；没有方向字段时默认面向镜头，保证旧存档兼容。
-function drawPixelHuman(ctx, x, y, face = 'down', coat = '#dfe9ff', trim = '#ffd27a', tool = null, flash = false) {
+function drawPixelHuman(ctx, x, y, face = 'down', coat = '#dfe9ff', trim = '#ffd27a', tool = null, flash = false, appearance = 'crew') {
   const d = face === 'up' || face === 'down' || face === 'left' || face === 'right' ? face : 'down';
   const sx = d === 'left' ? -1 : 1;
   const side = d === 'left' || d === 'right';
@@ -44,8 +78,11 @@ function drawPixelHuman(ctx, x, y, face = 'down', coat = '#dfe9ff', trim = '#ffd
   const hair = flash ? '#ffffff' : '#43344b';
   const px = Math.round(x - 12), py = Math.round(y - 12);
   ctx.save(); ctx.imageSmoothingEnabled = false;
-  // 阴影让人物从同色地块中脱出
-  ctx.fillStyle = 'rgba(3,6,12,0.55)'; ctx.fillRect(px + 5, py + 20, 14, 3);
+  // 阴影先于人物贴图绘制：脚底压住椭圆，不会形成横条或盖住人物。
+  ctx.fillStyle = 'rgba(18,23,30,0.72)';
+  ctx.beginPath();
+  ctx.ellipse(Math.round(x), Math.round(y + 8), 7, 2.2, 0, 0, Math.PI * 2);
+  ctx.fill();
   // 背包/披肩：背向镜头时更宽，侧向时只留一条轮廓
   ctx.fillStyle = '#263b50';
   if (d === 'up') ctx.fillRect(px + 4, py + 7, 16, 10);
@@ -77,13 +114,171 @@ function drawPixelHuman(ctx, x, y, face = 'down', coat = '#dfe9ff', trim = '#ffd
   ctx.restore();
 }
 
+const V8_FACE_INDEX = Object.freeze({ down: 0, left: 1, right: 2, up: 3 });
+const V8_HUMAN_LAYERS = Object.freeze(['legs', 'face', 'hair', 'torso', 'gear']);
+
+// 只要某一层素材到货，就按登记表的帧尺寸和脚底锚点叠加；其余层继续显示程序化回退。
+// 这样美术可以逐层交付，不会因为缺一张 PNG 让整个人物消失。
+function drawHumanLayerV8(ctx, key, x, y, face, flash) {
+  const img = sprite(key), spec = specOf(key);
+  if (!img || !spec) return false;
+  const frames = Array.isArray(spec.frames) ? spec.frames : ['default'];
+  const frame = frames.length === 4 ? (V8_FACE_INDEX[face] ?? 0) : 0;
+  const fw = spec.frameW || spec.pxW || 32, fh = spec.frameH || spec.pxH || 48;
+  const cached = !!spec.renderImg && img === spec.renderImg;
+  const sourceW = cached && Number.isFinite(spec.runtimeFrameW) ? spec.runtimeFrameW : fw;
+  const sourceH = cached && Number.isFinite(spec.runtimeFrameH) ? spec.runtimeFrameH : fh;
+  const drawW = Number.isFinite(spec.renderW) ? spec.renderW : fw;
+  const drawH = Number.isFinite(spec.renderH) ? spec.renderH : fh;
+  const anchor = spec.renderAnchor || spec.anchor;
+  const ax = anchor && Number.isFinite(anchor.x) ? anchor.x : drawW / 2;
+  const ay = anchor && Number.isFinite(anchor.y) ? anchor.y : drawH;
+  const sourceMap = Array.isArray(spec.sourceFrameMap) ? spec.sourceFrameMap : null;
+  const sourceIndex = cached ? frame : (Number.isInteger(sourceMap && sourceMap[frame]) ? sourceMap[frame] : frame);
+  const mirrored = !cached && Array.isArray(spec.mirrorFrames) && !!spec.mirrorFrames[frame];
+  const crop = !cached && spec.sourceCrop && Number.isFinite(spec.sourceCrop.x) && Number.isFinite(spec.sourceCrop.y)
+    && Number.isFinite(spec.sourceCrop.w) && Number.isFinite(spec.sourceCrop.h) ? spec.sourceCrop : null;
+  const sourceX = cached ? sourceIndex * sourceW : sourceIndex * fw + (crop ? crop.x : 0);
+  const sourceY = cached ? 0 : (crop ? crop.y : 0);
+  const sourceDrawW = cached ? sourceW : (crop ? crop.w : sourceW);
+  const sourceDrawH = cached ? sourceH : (crop ? crop.h : sourceH);
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  const dx = Math.round(x - ax), dy = Math.round(y - ay);
+  if (mirrored) {
+    ctx.translate(dx + drawW, dy);
+    ctx.scale(-1, 1);
+    ctx.drawImage(img, sourceX, sourceY, sourceDrawW, sourceDrawH, 0, 0, drawW, drawH);
+  } else {
+    ctx.drawImage(img, sourceX, sourceY, sourceDrawW, sourceDrawH, dx, dy, drawW, drawH);
+  }
+  if (flash) {
+    ctx.globalCompositeOperation = 'source-atop';
+    ctx.fillStyle = 'rgba(255,255,255,0.78)';
+    if (mirrored) ctx.fillRect(0, 0, drawW, drawH);
+    else ctx.fillRect(dx, dy, drawW, drawH);
+  }
+  ctx.restore();
+  return true;
+}
+
+// W19-V V8：32×48 模块化像素人程序化回退。
+// 图像素材到货后由同一锚点替换；现在先让预览主题拥有可玩的高分辨率轮廓，
+// 并把头发 / 面部 / 躯干 / 腿 / 装备拆成独立绘制段，保证缺一层也不会整个人消失。
+function drawPixelHumanV8(ctx, x, y, face = 'down', coat = '#dfe9ff', trim = '#ffd27a', tool = null, flash = false, appearance = 'crew') {
+  const d = face === 'up' || face === 'down' || face === 'left' || face === 'right' ? face : 'down';
+  const sx = d === 'left' ? -1 : 1;
+  const side = d === 'left' || d === 'right';
+  const skin = flash ? '#ffffff' : '#f2c2a2';
+  const hair = flash ? '#ffffff' : '#2a2636';
+  const boot = flash ? '#ffffff' : '#202a39';
+  const px = Math.round(x - VISUAL.anchors.humanCenterX), py = Math.round(y - VISUAL.anchors.humanFootY);
+  ctx.save(); ctx.imageSmoothingEnabled = false;
+
+  // 椭圆阴影先画、人物贴图后画；玩家和拓荒者共用同一层次规则。
+  ctx.fillStyle = 'rgba(18,23,30,0.72)';
+  ctx.beginPath();
+  ctx.ellipse(Math.round(x), Math.round(y + 2), 7, 2.2, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 当前阶段玩家与拓荒者共用同一张整体四向小人；差异继续由职业色、姓名、血条和任务标记表达。
+  // 图片可大于逻辑格，但脚底仍落在相同逻辑坐标；碰撞、寻路和存档均不读取视觉尺寸。
+  const fullArt = VISUAL.humanFullArt || (appearance === 'player' ? VISUAL.playerFullArt : null);
+  if (fullArt && drawHumanLayerV8(ctx, fullArt, x, y, d, flash)) {
+    ctx.restore();
+    return;
+  }
+
+  // 腿部层：背面仍保留鞋底读法，侧面通过错位表达朝向。
+  ctx.fillStyle = boot;
+  if (side) {
+    ctx.fillRect(px + (sx > 0 ? 12 : 8), py + 31, 6, 12);
+    ctx.fillRect(px + (sx > 0 ? 17 : 5), py + 34, 6, 10);
+  } else {
+    ctx.fillRect(px + 8, py + 31, 6, 12);
+    ctx.fillRect(px + 18, py + 31, 6, 12);
+  }
+  ctx.fillStyle = flash ? '#ffffff' : '#526275';
+  ctx.fillRect(px + 8, py + 41, 6, 3);
+  ctx.fillRect(px + 18, py + 41, 6, 3);
+
+  // 背包层：向上时完整可见，侧向时只留侧袋。
+  ctx.fillStyle = flash ? '#ffffff' : '#263a4d';
+  if (d === 'up') ctx.fillRect(px + 6, py + 17, 20, 17);
+  else if (side) ctx.fillRect(px + (sx > 0 ? 5 : 21), py + 18, 6, 15);
+  else ctx.fillRect(px + 7, py + 19, 18, 13);
+  ctx.fillStyle = flash ? '#ffffff' : '#7890a5';
+  if (d === 'up') ctx.fillRect(px + 9, py + 19, 14, 2);
+  else if (!side) ctx.fillRect(px + 9, py + 21, 14, 2);
+
+  // 躯干层：外套、领口与职业色带。
+  const bodyX = side ? (sx > 0 ? 10 : 6) : 6;
+  const bodyW = side ? 12 : 20;
+  ctx.fillStyle = flash ? '#ffffff' : coat;
+  ctx.fillRect(px + bodyX, py + 18, bodyW, 15);
+  ctx.fillStyle = flash ? '#ffffff' : trim;
+  ctx.fillRect(px + bodyX + 2, py + 19, bodyW - 4, 3);
+  ctx.fillStyle = flash ? '#ffffff' : '#1f2b3b';
+  ctx.fillRect(px + bodyX + Math.max(2, (bodyW / 2) | 0), py + 23, 2, 8);
+
+  // 面部层：背面只画发顶，侧面只留一个轮廓眼点。
+  ctx.fillStyle = d === 'up' ? hair : skin;
+  if (side) ctx.fillRect(px + (sx > 0 ? 11 : 6), py + 7, 12, 12);
+  else ctx.fillRect(px + 8, py + 7, 16, 12);
+  ctx.fillStyle = flash ? '#ffffff' : hair;
+  if (d === 'up') ctx.fillRect(px + 7, py + 6, 18, 8);
+  else if (side) ctx.fillRect(px + (sx > 0 ? 10 : 5), py + 6, 14, 6);
+  else ctx.fillRect(px + 7, py + 6, 18, 5);
+  if (d === 'down') {
+    ctx.fillStyle = flash ? '#ffffff' : '#263449';
+    ctx.fillRect(px + 11, py + 14, 2, 2); ctx.fillRect(px + 19, py + 14, 2, 2);
+  } else if (side) {
+    ctx.fillStyle = flash ? '#ffffff' : '#263449';
+    ctx.fillRect(px + (sx > 0 ? 21 : 7), py + 14, 2, 2);
+  }
+
+  // 装备层：工具不再是小方块，提灯单独用暖色轮廓表达。
+  if (tool) {
+    const tc = RES_COLOR[tool] || '#cfe0f0';
+    const handX = side ? (sx > 0 ? px + 23 : px + 3) : px + 24;
+    ctx.fillStyle = flash ? '#ffffff' : '#765640';
+    ctx.fillRect(handX, py + 23, 3, 15);
+    ctx.fillStyle = flash ? '#ffffff' : tc;
+    if (tool === 'pick') {
+      ctx.fillRect(handX - (sx < 0 ? 4 : 0), py + 19, 11, 3);
+      ctx.fillRect(handX + (sx < 0 ? 5 : 1), py + 17, 3, 8);
+    } else {
+      ctx.fillRect(handX - (sx < 0 ? 2 : 0), py + 20, 6, 6);
+    }
+  }
+  if (tool === 'lamp' || tool === 'fuel') {
+    ctx.fillStyle = flash ? '#ffffff' : '#fff0b0';
+    ctx.fillRect(px + (side ? (sx > 0 ? 22 : 4) : 23), py + 26, 4, 5);
+  }
+  // 整体模板缺图时才回退到原有程序化/模块化层，保证素材加载失败不会让单位消失。
+  const isPlayer = appearance === 'player';
+  const sharedTemplate = typeof VISUAL.humanFullArt === 'string';
+  const layers = sharedTemplate ? (VISUAL.playerLayers || []) : (isPlayer ? (VISUAL.playerLayers || []) : V8_HUMAN_LAYERS);
+  const art = sharedTemplate ? (VISUAL.playerHumanArt || {}) : (isPlayer ? (VISUAL.playerHumanArt || {}) : (VISUAL.humanArt || {}));
+  // 已到货图层覆盖对应部位；未到货层保留上面的程序化绘制。
+  for (const layer of layers) {
+    const key = art[layer] || `v8_human_${layer}`;
+    drawHumanLayerV8(ctx, key, x, y, d, flash);
+  }
+  ctx.restore();
+}
+
 function drawCrewMarker(ctx, w, x, y) {
   const accent = VISUAL.colonist[w && w.crew && w.crew.palette] || VISUAL.colonist.fallback;
   const letter = String(w && w.name || '拓').slice(-1);
-  ctx.fillStyle = 'rgba(5,8,14,0.8)'; ctx.fillRect(x - 6, y - 24, 12, 7);
-  ctx.fillStyle = accent; ctx.fillRect(x - 5, y - 23, 10, 5);
+  // V8 人物脚底锚点仍在逻辑格中心，但头顶从 12px 提升到 24px；
+  // 标记必须跟随视觉高度，否则会压住头发或躯干。
+  const lift = settings.visualTheme === 'legacy' ? 24 : 50;
+  ctx.fillStyle = 'rgba(5,8,14,0.8)'; ctx.fillRect(x - 6, y - lift, 12, 7);
+  ctx.fillStyle = accent; ctx.fillRect(x - 5, y - lift + 1, 10, 5);
   ctx.fillStyle = '#111925'; ctx.font = 'bold 6px ui-monospace, monospace'; ctx.textAlign = 'center';
-  ctx.fillText(letter, x, y - 19);
+  ctx.fillStyle = '#111925';
+  ctx.fillText(letter, x, y - lift + 5);
 }
 
 function drawCreature(ctx, x, y, r, kind, fill, outline, flash = false) {
@@ -100,6 +295,58 @@ function drawCreature(ctx, x, y, r, kind, fill, outline, flash = false) {
   } else { ctx.arc(x, y, s, 0, 7); }
   ctx.closePath(); ctx.fill(); ctx.stroke();
   ctx.fillStyle = outline; ctx.fillRect(Math.round(x - 2), Math.round(y - 2), 4, 4);
+}
+
+// W19-V V8-4：蚀兽专属像素剪影。只改变形状和局部识别点，不触碰半径、碰撞或 AI。
+function drawCreatureV8(ctx, x, y, r, kind, fill, outline, flash = false) {
+  const c = flash ? '#ffffff' : fill;
+  const s = Math.max(5, r);
+  const edge = flash ? '#ffffff' : outline;
+  const artSpec = VISUAL.enemyArt[kind] || VISUAL.enemyArt.bud;
+  const mark = flash ? '#ffffff' : (artSpec.mark || edge);
+  const core = flash ? '#ffffff' : (artSpec.core || mark);
+  const eye = flash ? '#ffffff' : (artSpec.eye || '#263449');
+  ctx.save();
+  if (drawSpriteV8(ctx, artSpec.spriteKey || `v8_enemy_${kind}`, x, y, 'default', flash)) {
+    ctx.restore();
+    return;
+  }
+  ctx.fillStyle = c; ctx.strokeStyle = edge; ctx.lineWidth = Math.max(1.2, r * 0.12); ctx.lineJoin = 'miter';
+  const poly = (pts) => { ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]); ctx.closePath(); ctx.fill(); ctx.stroke(); };
+  if (kind === 'bud') {
+    poly([[x, y - s], [x + s * .45, y - s * .35], [x + s * .88, y - s * .05], [x + s * .42, y + s * .20], [x + s * .30, y + s], [x - s * .30, y + s], [x - s * .42, y + s * .20], [x - s * .88, y - s * .05], [x - s * .45, y - s * .35]]);
+    ctx.fillStyle = edge; ctx.fillRect(x - 1, y - s * .35, 2, s * .95);
+  } else if (kind === 'charger') {
+    poly([[x - s, y + s * .18], [x - s * .62, y - s * .42], [x - s * .14, y - s * .72], [x + s * .54, y - s * .50], [x + s, y], [x + s * .52, y + s * .58], [x - s * .15, y + s * .72], [x - s * .68, y + s * .52]]);
+    ctx.fillStyle = edge; ctx.beginPath(); ctx.moveTo(x + s * .35, y - s * .36); ctx.lineTo(x + s * .95, y - s * .82); ctx.lineTo(x + s * .74, y - s * .12); ctx.closePath(); ctx.fill();
+  } else if (kind === 'shell' || kind === 'bomber' || kind === 'warden') {
+    poly([[x, y - s], [x + s * .72, y - s * .55], [x + s, y + s * .25], [x + s * .52, y + s], [x - s * .52, y + s], [x - s, y + s * .25], [x - s * .72, y - s * .55]]);
+    ctx.strokeStyle = mark; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, y - s * .72); ctx.lineTo(x, y + s * .78); ctx.moveTo(x - s * .62, y - s * .35); ctx.lineTo(x + s * .62, y + s * .35); ctx.stroke();
+    if (kind === 'bomber') { ctx.fillStyle = core; ctx.fillRect(x - 1, y - s * .85, 2, 3); }
+    if (kind === 'warden') { ctx.fillStyle = core; ctx.fillRect(x - 2, y - s * 1.25, 4, 5); }
+  } else if (kind === 'moth' || kind === 'spitter') {
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - s * 1.15, y - s * .85); ctx.lineTo(x - s * .72, y + s * .12); ctx.lineTo(x - s * 1.05, y + s * .84); ctx.lineTo(x, y + s * .42); ctx.lineTo(x + s * 1.05, y + s * .84); ctx.lineTo(x + s * .72, y + s * .12); ctx.lineTo(x + s * 1.15, y - s * .85); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = mark; ctx.fillRect(x - 2, y - s * .32, 4, s * .72);
+    if (kind === 'spitter') { ctx.fillStyle = core; ctx.fillRect(x - 1, y + s * .28, 2, 4); }
+  } else if (kind === 'owl') {
+    poly([[x, y - s], [x + s * .88, y - s * .25], [x + s * .64, y + s], [x, y + s * .56], [x - s * .64, y + s], [x - s * .88, y - s * .25]]);
+    ctx.fillStyle = mark; ctx.fillRect(x - s * .62, y - s * .38, s * .38, s * .30); ctx.fillRect(x + s * .24, y - s * .38, s * .38, s * .30);
+    ctx.fillStyle = eye; ctx.fillRect(x - s * .49, y - s * .30, 2, 3); ctx.fillRect(x + s * .36, y - s * .30, 2, 3);
+  } else if (kind === 'blind') {
+    poly([[x - s, y - s * .25], [x - s * .35, y - s], [x + s * .62, y - s * .66], [x + s, y + s * .10], [x + s * .42, y + s], [x - s * .55, y + s * .72]]);
+    ctx.fillStyle = mark; ctx.fillRect(x - s * .18, y - s * .22, s * .70, 3);
+    ctx.fillStyle = eye; ctx.fillRect(x + s * .42, y - 1, 3, 3);
+  } else if (kind === 'core') {
+    poly([[x, y - s], [x + s * .65, y - s * .45], [x + s, y], [x + s * .62, y + s * .58], [x, y + s], [x - s * .62, y + s * .58], [x - s, y], [x - s * .65, y - s * .45]]);
+    ctx.strokeStyle = mark; ctx.lineWidth = Math.max(1.5, r * .16); ctx.beginPath(); ctx.arc(x, y, s * .48, 0, 7); ctx.stroke();
+    ctx.fillStyle = core; ctx.fillRect(x - 2, y - 2, 4, 4);
+  } else {
+    ctx.restore();
+    drawCreature(ctx, x, y, r, kind, fill, outline, flash);
+    return;
+  }
+  ctx.restore();
 }
 
 // —— 地形烘焙（W13-C 性能）：整块地表连材质细节烤进离屏画布，每帧只 blit 可见部分 ——
@@ -247,7 +494,581 @@ function drawLightMask(ctx, m, light, lightMax, amb, terr, dx, dy, vw, vh, x0, y
   ctx.drawImage(maskCv, 0, 0, vw, vh, dx, dy, vw * TILE, vh * TILE);
 }
 
-// —— 建造范围预览（W13-E）：放下之前先看见"会发生什么" ——
+// W19-V V8-2：地表先以 2×2 逻辑格的 32px 视觉块完整铺底，再叠加节点/建筑。
+// 旧版曾只给“四格全是普通地面”的块铺图，资源或岩壁附近会露出程序化底图，形成棋盘格断层。
+// V8 只接管有 biome 的地表；深层和熔岩保留原有材质，避免把未重制区域错误盖成苔原。
+function drawV8TerrainPatches(ctx, m, ox, oy, x0, y0, x1, y1) {
+  if (settings.visualTheme === 'legacy' || !m.biome) return;
+  // 每个群系优先使用自己的 albedo 样板；素材缺失时继续走下方程序化回退。
+  const biome = m.biome || 'tundra';
+  const art = VISUAL.biomeArt[biome] || VISUAL.biomeArt.tundra;
+  const terrainKey = art.terrainKey || (biome === 'vineMist' ? 'v8_terrain_vineMist' : biome === 'shaleRise' ? 'v8_terrain_shaleRise' : 'v8_terrain_tundra');
+  const terrainKeys = Array.isArray(art.terrainKeys) && art.terrainKeys.length ? art.terrainKeys : [terrainKey];
+  const terrainImages = terrainKeys.map((key) => sprite(key));
+  const terrainFallback = sprite(terrainKey);
+  const coversAllSurfaceBlocks = VISUAL.materialRules && VISUAL.materialRules.terrainCoverage === 'all-surface-blocks';
+  const tx0 = Math.max(0, x0 & ~1), ty0 = Math.max(0, y0 & ~1);
+  const tx1 = Math.min(m.w - 2, x1 | 0), ty1 = Math.min(m.h - 2, y1 | 0);
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  for (let ty = ty0; ty <= ty1; ty += 2) {
+    for (let tx = tx0; tx <= tx1; tx += 2) {
+      const i = ty * m.w + tx;
+      const block = [m.tiles[i], m.tiles[i + 1], m.tiles[i + m.w], m.tiles[i + m.w + 1]];
+      // 熔岩还没有 V8 albedo，保留其原有危险色；其余地表块必须先由 V8 底材完整覆盖。
+      if (block.includes(T.LAVA)) continue;
+      if (!coversAllSurfaceBlocks && block.some((tile) => tile !== T.FLOOR)) continue;
+      const px = tx * TILE - ox, py = ty * TILE - oy;
+      if (px < -32 || py < -32 || px > VIEW_W || py > VIEW_H) continue;
+      const terrainVariant = Math.min(terrainImages.length - 1, Math.floor(speck(tx, ty, 35) * terrainImages.length));
+      const terrain = terrainImages[terrainVariant] || terrainFallback;
+      if (terrain) {
+        if ((!Number.isFinite(terrain.naturalWidth) || terrain.naturalWidth === 32)
+          && (!Number.isFinite(terrain.naturalHeight) || terrain.naturalHeight === 32)) ctx.drawImage(terrain, px, py);
+        else ctx.drawImage(terrain, px, py, 32, 32);
+        continue;
+      }
+      const base = art.base || [52, 72, 68];
+      const detail = art.detail || [150, 232, 190];
+      ctx.fillStyle = `rgba(${base[0]},${base[1]},${base[2]},0.20)`;
+      ctx.fillRect(px + 1, py + 1, 30, 30);
+      const k = speck(tx, ty, 31);
+      ctx.fillStyle = `rgba(${detail[0]},${detail[1]},${detail[2]},${(0.055 + k * 0.035).toFixed(3)})`;
+      ctx.fillRect(px + 2 + ((k * 17) | 0), py + 4 + ((speck(tx, ty, 32) * 19) | 0), 4, 2);
+      ctx.fillStyle = 'rgba(10,22,28,0.14)';
+      ctx.fillRect(px + 1, py + 1, 30, 1);
+      ctx.fillRect(px + 1, py + 30, 30, 1);
+      ctx.fillStyle = 'rgba(150,194,170,0.08)';
+      ctx.fillRect(px + 8 + ((speck(tx, ty, 33) * 14) | 0), py + 17 + ((speck(tx, ty, 34) * 10) | 0), 2, 2);
+    }
+  }
+  ctx.restore();
+}
+
+// 资源节点的 V8 程序化样板：轮廓先于细节，确保在低光下仍能区分采集目标。
+// 所有颜色都在光照遮罩之前绘制；这里不产生额外光照，也不改变节点数量。
+function drawV8TerrainNodes(ctx, m, ox, oy, x0, y0, x1, y1) {
+  if (settings.visualTheme === 'legacy') return;
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  for (let ty = y0; ty <= y1; ty++) {
+    for (let tx = x0; tx <= x1; tx++) {
+      const tile = m.tiles[ty * m.w + tx];
+      if (tile !== T.ROCK && tile !== T.ORE && tile !== T.VINE && tile !== T.RELIC && tile !== T.MOTHER) continue;
+      const px = tx * TILE - ox, py = ty * TILE - oy;
+      if (px < -28 || py < -28 || px > VIEW_W + 12 || py > VIEW_H + 12) continue;
+      const k = speck(tx, ty, 41);
+      const nodeKey = tile === T.ROCK ? 'rock' : tile === T.ORE ? 'ore' : tile === T.VINE ? 'vine' : tile === T.RELIC ? 'relic' : 'mother';
+      const art = VISUAL.nodeArt[nodeKey];
+      const nodeSprite = art && art.spriteKey;
+      if (nodeSprite && drawSpriteV8(ctx, nodeSprite, px + 8, py + 16)) continue;
+      if (tile === T.ROCK) {
+        ctx.fillStyle = art.base; ctx.fillRect(px - 3, py - 3, 22, 22);
+        ctx.fillStyle = art.detail; ctx.fillRect(px - 1, py - 1, 16, 2); ctx.fillRect(px - 1, py - 1, 2, 14);
+        ctx.fillStyle = art.shadow; ctx.fillRect(px + 2, py + 16, 17, 2); ctx.fillRect(px + 17, py + 2, 2, 16);
+        ctx.fillStyle = art.hi; ctx.fillRect(px + 5 + ((k * 7) | 0), py + 6, 4, 2);
+      } else if (tile === T.ORE) {
+        ctx.fillStyle = art.base; ctx.fillRect(px - 2, py - 2, 20, 20);
+        ctx.fillStyle = art.detail;
+        ctx.beginPath(); ctx.moveTo(px + 3, py + 13); ctx.lineTo(px + 6, py + 4); ctx.lineTo(px + 9, py + 12); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = art.hi; ctx.fillRect(px + 6, py + 5, 3, 7);
+        ctx.fillStyle = art.shadow; ctx.fillRect(px + 11, py + 9, 3, 6); ctx.fillRect(px + 14, py + 5, 2, 5);
+      } else if (tile === T.VINE) {
+        ctx.fillStyle = art.base; ctx.fillRect(px + 2, py - 3, 12, 22);
+        ctx.fillStyle = art.detail; ctx.fillRect(px + 4, py - 1, 3, 17);
+        ctx.fillStyle = art.shadow;
+        ctx.fillRect(px - 1, py + 2 + ((k * 7) | 0), 6, 3); ctx.fillRect(px + 10, py + 5, 7, 3);
+        ctx.fillStyle = art.hi; ctx.fillRect(px + 1, py + 10, 4, 2); ctx.fillRect(px + 12, py + 13, 3, 2);
+      } else if (tile === T.RELIC) {
+        ctx.fillStyle = art.base; ctx.fillRect(px + 1, py - 3, 15, 21);
+        ctx.fillStyle = art.detail; ctx.fillRect(px + 3, py - 1, 11, 2);
+        ctx.strokeStyle = art.hi; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.moveTo(px + 8, py + 3); ctx.lineTo(px + 8, py + 14); ctx.moveTo(px + 4, py + 7); ctx.lineTo(px + 12, py + 7); ctx.moveTo(px + 5, py + 12); ctx.lineTo(px + 11, py + 4); ctx.stroke();
+      } else if (tile === T.MOTHER) {
+        ctx.fillStyle = art.base; ctx.fillRect(px - 2, py + 5, 20, 13);
+        ctx.fillStyle = art.detail;
+        ctx.beginPath(); ctx.moveTo(px + 1, py + 14); ctx.lineTo(px + 5, py + 1); ctx.lineTo(px + 9, py + 13); ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(px + 8, py + 15); ctx.lineTo(px + 13, py + 3); ctx.lineTo(px + 17, py + 14); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = art.hi; ctx.fillRect(px + 5, py + 4, 2, 7); ctx.fillRect(px + 13, py + 6, 2, 6);
+      }
+    }
+  }
+  ctx.restore();
+}
+
+// V8-5：群系只改变视觉语言，不改地块、资源或光照数值。
+function drawV8BiomeDecor(ctx, m, ox, oy, x0, y0, x1, y1) {
+  if (settings.visualTheme === 'legacy') return;
+  const id = m.biome || 'tundra';
+  const art = VISUAL.biomeArt[id] || VISUAL.biomeArt.tundra;
+  ctx.save(); ctx.imageSmoothingEnabled = false;
+  const tx0 = Math.max(0, x0 & ~1), ty0 = Math.max(0, y0 & ~1);
+  const tx1 = Math.min(m.w - 2, x1 | 0), ty1 = Math.min(m.h - 2, y1 | 0);
+  for (let ty = ty0; ty <= ty1; ty += 2) {
+    for (let tx = tx0; tx <= tx1; tx += 2) {
+      const i = ty * m.w + tx;
+      if (m.tiles[i] !== T.FLOOR || m.tiles[i + 1] !== T.FLOOR || m.tiles[i + m.w] !== T.FLOOR || m.tiles[i + m.w + 1] !== T.FLOOR) continue;
+      const px = tx * TILE - ox, py = ty * TILE - oy;
+      if (px < -32 || py < -32 || px > VIEW_W || py > VIEW_H) continue;
+      const k = speck(tx, ty, 61);
+      const decorKeys = Array.isArray(art.decorKeys) && art.decorKeys.length ? art.decorKeys : [art.decorKey];
+      const variantK = speck(tx, ty, 63);
+      const variant = Math.min(decorKeys.length - 1, Math.floor(variantK * decorKeys.length));
+      const decorKey = decorKeys[variant] || art.decorKey;
+      const decorRate = Number.isFinite(art.decorRate) ? art.decorRate : 0;
+      if (k < decorRate) {
+        // 变体 → 基础装饰 → 程序化回退；让 drawSpriteV8 自己完成唯一一次素材查询。
+        const variantDrawn = decorKey && drawSpriteV8(ctx, decorKey, px + 16, py + 32);
+        const baseDrawn = !variantDrawn && art.decorKey && art.decorKey !== decorKey
+          && drawSpriteV8(ctx, art.decorKey, px + 16, py + 32);
+        if (variantDrawn || baseDrawn) continue;
+      }
+      if (art.motif === 'mistVine') {
+        ctx.strokeStyle = art.shadow; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(px + 1, py + 23 - k * 8); ctx.quadraticCurveTo(px + 12, py + 8 + k * 7, px + 30, py + 12 + k * 5); ctx.stroke();
+        ctx.strokeStyle = art.accent; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(px + 4, py + 28); ctx.quadraticCurveTo(px + 10, py + 18, px + 7, py + 4); ctx.moveTo(px + 21, py + 29); ctx.quadraticCurveTo(px + 25, py + 18, px + 29, py + 6); ctx.stroke();
+        ctx.fillStyle = art.accent; ctx.fillRect(px + 5 + ((k * 17) | 0), py + 5 + ((speck(tx, ty, 62) * 20) | 0), 2, 2);
+      } else if (art.motif === 'shaleCrack') {
+        ctx.strokeStyle = art.shadow; ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.moveTo(px + 2, py + 5 + k * 4); ctx.lineTo(px + 12, py + 14); ctx.lineTo(px + 8, py + 28); ctx.moveTo(px + 21, py + 1); ctx.lineTo(px + 17, py + 12); ctx.lineTo(px + 29, py + 24); ctx.stroke();
+        ctx.fillStyle = art.accent;
+        ctx.fillRect(px + 4 + ((k * 19) | 0), py + 7 + ((speck(tx, ty, 63) * 20) | 0), 3, 2);
+        ctx.fillRect(px + 19 + ((speck(tx, ty, 64) * 7) | 0), py + 18 + ((speck(tx, ty, 65) * 8) | 0), 2, 2);
+      }
+    }
+  }
+  ctx.restore();
+}
+
+// V8-5：普通地面与岩壁/资源节点的边缘过渡。只画 albedo 装饰，
+// 不改 tile、碰撞、采集或光照；用确定性 speck 选择少量角石/藤边变体，避免每块地面同一笔画。
+function drawV8BiomeEdges(ctx, m, ox, oy, x0, y0, x1, y1) {
+  if (settings.visualTheme === 'legacy') return;
+  const id = m.biome || 'tundra';
+  const art = VISUAL.biomeArt[id] || VISUAL.biomeArt.tundra;
+  ctx.save(); ctx.imageSmoothingEnabled = false;
+  const edge = art.edge || {};
+  const edgeCol = edge.stroke || art.shadow || 'rgba(22,31,38,0.42)';
+  const hiCol = edge.highlight || art.accent || 'rgba(174,196,184,0.22)';
+  const edgeWidth = Number.isFinite(edge.width) ? edge.width : 1.25;
+  const accentRate = Number.isFinite(edge.accentRate) ? Math.max(0, Math.min(1, edge.accentRate)) : 0.25;
+  ctx.lineWidth = edgeWidth; ctx.lineCap = 'square';
+  for (let ty = y0; ty <= y1; ty++) {
+    for (let tx = x0; tx <= x1; tx++) {
+      const i = ty * m.w + tx;
+      if (m.tiles[i] !== T.FLOOR) continue;
+      const px = tx * TILE - ox, py = ty * TILE - oy;
+      if (px < -TILE || py < -TILE || px > VIEW_W || py > VIEW_H) continue;
+      const north = ty <= 0 || m.tiles[i - m.w] !== T.FLOOR;
+      const east = tx >= m.w - 1 || m.tiles[i + 1] !== T.FLOOR;
+      const south = ty >= m.h - 1 || m.tiles[i + m.w] !== T.FLOOR;
+      const west = tx <= 0 || m.tiles[i - 1] !== T.FLOOR;
+      if (!(north || east || south || west)) continue;
+      ctx.strokeStyle = edgeCol;
+      ctx.beginPath();
+      if (north) { ctx.moveTo(px + 0.5, py + 0.5); ctx.lineTo(px + TILE - 0.5, py + 0.5); }
+      if (east) { ctx.moveTo(px + TILE - 0.5, py + 0.5); ctx.lineTo(px + TILE - 0.5, py + TILE - 0.5); }
+      if (south) { ctx.moveTo(px + TILE - 0.5, py + TILE - 0.5); ctx.lineTo(px + 0.5, py + TILE - 0.5); }
+      if (west) { ctx.moveTo(px + 0.5, py + TILE - 0.5); ctx.lineTo(px + 0.5, py + 0.5); }
+      ctx.stroke();
+      if (speck(tx, ty, 71) >= accentRate) continue;
+      const variant = (speck(tx, ty, 72) * 4) | 0;
+      ctx.fillStyle = hiCol;
+      if (variant === 0 && north) ctx.fillRect(px + 3, py + 1, 2, 1);
+      else if (variant === 1 && west) ctx.fillRect(px + 1, py + 5, 1, 3);
+      else if (variant === 2 && east) ctx.fillRect(px + 13, py + 8, 2, 1);
+      else if (variant === 3 && south) ctx.fillRect(px + 8, py + 14, 3, 1);
+    }
+  }
+  ctx.restore();
+}
+
+// V8-3 的首批交互建筑视觉：主体、工作状态和状态条分层绘制。
+// 返回 true 表示已接管该建筑，false 则继续走旧版程序化分支。
+function drawV8Station(ctx, b, bx, by, f) {
+  const x = bx - 8, y = by - 8;
+  const litc = (base) => {
+    const c = mix(DARK, base, 0.38 + f * 0.62);
+    return `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
+  };
+  const bar = (frac, color) => {
+    const v = Math.max(0, Math.min(1, frac || 0));
+    ctx.fillStyle = 'rgba(0,0,0,0.62)'; ctx.fillRect(x + 3, y + 27, 26, 3);
+    ctx.fillStyle = color; ctx.fillRect(x + 3, y + 27, Math.max(1, (26 * v) | 0), 3);
+  };
+  // V8-3 独立 PNG 只替换静态主体；工作、燃料、治疗和解析状态仍由覆盖层表达。
+  let imageKey = VISUAL.buildingArt && VISUAL.buildingArt[b.type] || null;
+  // 农田/菌床的静态图只在长出可识别主体后接管；幼苗仍用原状态绘制。
+  if ((b.type === 'farm' || b.type === 'mycobed') && (b.growth || 0) <= 0.08) imageKey = null;
+  const imageFootY = imageKey === 'v8_purifier' ? by + 16 : by + 24;
+  if (imageKey && sprite(imageKey) && drawSpriteV8(ctx, imageKey, bx + 8, imageFootY)) {
+    if (b.type === 'bench' && b.craft) bar((b.craft.t || 0) / (b.craft.sec || 1), '#bfe0c0');
+    if (b.type === 'furnace' || b.type === 'smelter') {
+      const hot = !b.off && (b.fuel || 0) > 0;
+      if (hot) {
+        const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 220 + b.x * 3);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = `rgba(255,150,70,${(0.25 + 0.28 * pulse).toFixed(2)})`;
+        ctx.fillRect(x + 11, y + 21, 10, 3);
+        ctx.globalCompositeOperation = 'source-over';
+      }
+      if (b.type === 'smelter' && b.prog > 0) bar((b.prog || 0) / 4, '#ffcf8a');
+    }
+    if (b.type === 'clinic' && b.medicalWorker) {
+      bar((b.medicalWorker.medicalT || 0) / SURVIVAL.RESCUE.MEDICAL_SECS, '#9fe8d5');
+      const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 180 + b.x);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = `rgba(159,232,213,${(0.18 + 0.24 * pulse).toFixed(2)})`;
+      ctx.beginPath(); ctx.arc(x + 23, y + 7, 2 + pulse, 0, 7); ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    if (b.type === 'analyzer' && (state.relicTotal || 0) > 0) {
+      const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 520 + b.x);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = `rgba(216,198,255,${(0.10 + 0.14 * pulse).toFixed(2)})`;
+      ctx.beginPath(); ctx.arc(x + 18, y + 12, 7, 0, 7); ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    if (b.type === 'purifier') {
+      const fuel = (b.fuel || 0) > 0;
+      if (fuel) {
+        const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 300 + b.x * 3);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.strokeStyle = `rgba(210,184,255,${(0.18 + 0.22 * pulse).toFixed(2)})`;
+        ctx.beginPath(); ctx.arc(bx + 8, by + 5, 5 + pulse * 2, 0, 7); ctx.stroke();
+        ctx.globalCompositeOperation = 'source-over';
+      }
+      const lvP = b.level == null ? 1 : b.level;
+      for (let k = 0; k <= lvP; k++) { ctx.fillStyle = fuel ? '#d8c6ff' : '#596275'; ctx.fillRect(bx + 1 + k * 4, by + 17, 2, 2); }
+    }
+    if (b.type === 'towerGlow') {
+      const lv = state.light ? state.light[b.y * state.map.w + b.x] : 0;
+      const live = lv >= 3.2;
+      const nMod = (b.mods || []).length;
+      if (live) {
+        const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 260 + b.x + b.y);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.strokeStyle = `rgba(159,232,255,${(0.24 + 0.24 * pulse).toFixed(2)})`;
+        ctx.beginPath(); ctx.arc(bx + 8, by + 8, 7 + pulse, 0, 7); ctx.stroke();
+        ctx.globalCompositeOperation = 'source-over';
+      }
+      for (let k = 0; k < Math.min(nMod, 3); k++) { ctx.fillStyle = live ? '#cdf6ff' : '#5b6270'; ctx.fillRect(bx + 1 + k * 3, by + 1, 2, 2); }
+    }
+    if (b.type === 'towerShock') {
+      const lv = state.light ? state.light[b.y * state.map.w + b.x] : 0;
+      const live = lv >= 3.2;
+      if (live) {
+        const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 240 + b.x + b.y);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.strokeStyle = `rgba(216,198,255,${(0.22 + 0.24 * pulse).toFixed(2)})`;
+        ctx.beginPath(); ctx.arc(bx + 8, by + 9, 7 + pulse, 0, 7); ctx.stroke();
+        ctx.globalCompositeOperation = 'source-over';
+      }
+      ctx.fillStyle = live ? '#d8c6ff' : '#5b6270'; ctx.fillRect(bx + 5, by + 1, 6, 2);
+    }
+    if (b.type === 'towerChain') {
+      const lv = state.light ? state.light[b.y * state.map.w + b.x] : 0;
+      const live = lv >= 3.2;
+      if (live) {
+        const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 260 + b.x * 2);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.strokeStyle = `rgba(255,224,160,${(0.20 + 0.24 * pulse).toFixed(2)})`;
+        ctx.beginPath(); ctx.arc(bx + 8, by + 8, 8 + pulse, 0, 7); ctx.stroke();
+        ctx.globalCompositeOperation = 'source-over';
+      }
+      ctx.fillStyle = live ? '#ffe0a0' : '#5b6270'; ctx.fillRect(bx + 5, by + 1, 6, 2);
+    }
+    if (b.type === 'farm') {
+      const growth = Math.max(0, Math.min(1, b.growth || 0));
+      bar(growth, growth >= 1 ? '#d9f3a6' : '#9ed89e');
+      if (growth >= 1) { ctx.fillStyle = '#d9f3a6'; ctx.fillRect(x + 24, y + 5, 3, 3); }
+    }
+    if (b.type === 'shaft') {
+      ctx.fillStyle = b.entry ? '#a9f2ff' : '#ffe0a0';
+      ctx.fillRect(x + 13, y + 24, 6, 2);
+    }
+    if (b.type === 'decoy' || b.type === 'cache') {
+      const decoy = b.type === 'decoy', cap = decoy ? (BUILD.decoy.maxFuel || 20) : (BUILD.cache.maxFuel || 20);
+      const used = b.fuel || 0;
+      const frac = Math.max(0, Math.min(1, used / cap));
+      bar(frac, decoy ? '#9fc3e0' : '#ffcf8a');
+      if (decoy) {
+        ctx.save(); ctx.setLineDash([2, 2]); ctx.strokeStyle = 'rgba(170,200,230,0.72)'; ctx.strokeRect(x + 1, y + 5, 30, 24); ctx.restore();
+      } else if (used > 0) {
+        const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 320 + b.x);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = `rgba(255,207,138,${(0.10 + 0.12 * pulse).toFixed(2)})`;
+        ctx.beginPath(); ctx.arc(x + 20, y + 10, 4 + pulse, 0, 7); ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
+      }
+    }
+    if (b.type === 'prism') {
+      const on = b.relayHop != null;
+      if (on) {
+        const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 340 + b.x * 2);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = `rgba(220,248,255,${(0.18 + 0.22 * pulse).toFixed(2)})`;
+        ctx.beginPath(); ctx.arc(bx + 8, by + 4, 3 + pulse, 0, 7); ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
+      }
+      if (b.hp != null) {
+        const frac = Math.max(0, Math.min(1, b.hp / (BUILD.prism.hp || 22)));
+        if (frac < 1) bar(frac, frac > 0.5 ? '#9ef7d8' : '#ffb3a0');
+      }
+    }
+    return true;
+  }
+  if (b.type === 'bench') {
+    ctx.fillStyle = 'rgba(3,6,12,0.48)'; ctx.fillRect(x + 3, y + 25, 26, 4);
+    ctx.fillStyle = litc([125, 94, 62]); ctx.fillRect(x + 2, y + 8, 28, 16);
+    ctx.fillStyle = litc([174, 132, 82]); ctx.fillRect(x + 2, y + 6, 28, 5);
+    ctx.fillStyle = '#4a3428'; ctx.fillRect(x + 4, y + 21, 4, 7); ctx.fillRect(x + 24, y + 21, 4, 7);
+    ctx.fillStyle = '#c8d6e2'; ctx.fillRect(x + 8, y + 3, 3, 10); ctx.fillRect(x + 6, y + 4, 8, 2);
+    ctx.fillStyle = '#d6aa68'; ctx.fillRect(x + 20, y + 3, 2, 10); ctx.fillRect(x + 18, y + 3, 7, 2);
+    ctx.strokeStyle = 'rgba(36,25,18,0.85)'; ctx.lineWidth = 1; ctx.strokeRect(x + 1.5, y + 5.5, 29, 19);
+    if (b.craft) {
+      const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 90 + b.x);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = `rgba(255,220,140,${(0.30 + 0.35 * pulse).toFixed(2)})`;
+      ctx.fillRect(x + 14, y + 12, 3, 3); ctx.fillRect(x + 18, y + 10, 2, 2);
+      ctx.globalCompositeOperation = 'source-over';
+      bar((b.craft.t || 0) / (b.craft.sec || 1), '#bfe0c0');
+    }
+    return true;
+  }
+  if (b.type === 'furnace' || b.type === 'smelter') {
+    const hot = !b.off && (b.fuel || 0) > 0;
+    ctx.fillStyle = 'rgba(3,6,12,0.48)'; ctx.fillRect(x + 4, y + 26, 24, 4);
+    ctx.fillStyle = litc(hot ? [142, 96, 76] : [84, 82, 88]); ctx.fillRect(x + 3, y + 2, 26, 26);
+    ctx.fillStyle = hot ? '#9d6d58' : '#666975';
+    ctx.fillRect(x + 5, y + 4, 22, 2); ctx.fillRect(x + 5, y + 9, 22, 2);
+    ctx.fillStyle = '#332622'; ctx.fillRect(x + 7, y + 19, 18, 7);
+    ctx.fillStyle = hot ? '#ff9b50' : '#6f737e'; ctx.fillRect(x + 10, y + 21, 12, 3);
+    ctx.strokeStyle = 'rgba(32,24,24,0.88)'; ctx.lineWidth = 1; ctx.strokeRect(x + 2.5, y + 1.5, 27, 27);
+    if (hot) {
+      const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 220 + b.x * 3);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = `rgba(255,150,70,${(0.28 + 0.32 * pulse).toFixed(2)})`;
+      ctx.fillRect(x + 10, y + 20, 12, 3);
+      ctx.globalCompositeOperation = 'source-over';
+      for (let k = 0; k < 2; k++) {
+        const t = ((performance.now() / 1100 + k * 0.5 + b.x * 0.3) % 1);
+        ctx.fillStyle = `rgba(180,180,190,${(0.20 * (1 - t)).toFixed(2)})`;
+        ctx.beginPath(); ctx.arc(x + 15 + Math.sin(t * 6 + k) * 3, y + 2 - t * 8, 1.2 + t, 0, 7); ctx.fill();
+      }
+    }
+    if (b.type === 'smelter' && b.prog > 0) bar((b.prog || 0) / 4, '#ffcf8a');
+    return true;
+  }
+  if (b.type === 'clinic') {
+    ctx.fillStyle = 'rgba(3,6,12,0.46)'; ctx.fillRect(x + 3, y + 26, 26, 4);
+    ctx.fillStyle = litc([86, 146, 142]); ctx.fillRect(x + 2, y + 5, 28, 21);
+    ctx.fillStyle = '#d7ece8'; ctx.fillRect(x + 7, y + 9, 18, 9);
+    ctx.fillStyle = '#eef8f3'; ctx.fillRect(x + 8, y + 7, 7, 4);
+    ctx.fillStyle = '#6eb7b1'; ctx.fillRect(x + 14, y + 10, 4, 8); ctx.fillRect(x + 12, y + 12, 8, 4);
+    ctx.strokeStyle = 'rgba(34,64,66,0.80)'; ctx.lineWidth = 1; ctx.strokeRect(x + 1.5, y + 4.5, 29, 22);
+    if (b.medicalWorker) {
+      const frac = (b.medicalWorker.medicalT || 0) / SURVIVAL.RESCUE.MEDICAL_SECS;
+      bar(frac, '#9fe8d5');
+      const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 180 + b.x);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = `rgba(159,232,213,${(0.22 + 0.30 * pulse).toFixed(2)})`;
+      ctx.beginPath(); ctx.arc(x + 24, y + 7, 2 + pulse, 0, 7); ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    return true;
+  }
+  if (b.type === 'analyzer') {
+    const relics = state.relicTotal || 0;
+    ctx.fillStyle = 'rgba(3,6,12,0.46)'; ctx.fillRect(x + 3, y + 26, 26, 4);
+    ctx.fillStyle = litc(relics > 0 ? [138, 116, 176] : [98, 100, 118]); ctx.fillRect(x + 2, y + 8, 28, 18);
+    ctx.fillStyle = relics > 0 ? '#d8c6ff' : '#a8adba';
+    ctx.beginPath(); ctx.moveTo(x + 6, y + 17); ctx.lineTo(x + 22, y + 7); ctx.lineTo(x + 25, y + 13); ctx.lineTo(x + 9, y + 22); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#6c568f'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x + 11, y + 18); ctx.lineTo(x + 20, y + 12); ctx.moveTo(x + 13, y + 19); ctx.lineTo(x + 22, y + 13); ctx.stroke();
+    ctx.strokeStyle = 'rgba(42,34,60,0.85)'; ctx.strokeRect(x + 1.5, y + 7.5, 29, 19);
+    if (relics > 0) {
+      const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 520 + b.x);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = `rgba(216,198,255,${(0.10 + 0.14 * pulse).toFixed(2)})`;
+      ctx.beginPath(); ctx.arc(x + 18, y + 12, 7, 0, 7); ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    return true;
+  }
+  if (b.type === 'lamp') {
+    // 空灯也使用同一套 32px 轮廓，避免燃料耗尽后突然退回小方块。
+    const fuel = (b.fuel || 0) > 0;
+    const lv = b.level == null ? 1 : b.level;
+    ctx.fillStyle = 'rgba(3,6,12,0.48)'; ctx.fillRect(x + 7, y + 31, 18, 4);
+    ctx.fillStyle = litc(fuel ? [112, 150, 174] : [70, 76, 88]); ctx.fillRect(x + 12, y + 13, 8, 17);
+    ctx.fillStyle = litc(fuel ? [176, 215, 224] : [102, 108, 120]);
+    ctx.fillRect(x + 9, y + 10, 14, 4); ctx.fillRect(x + 11, y + 7, 10, 4);
+    ctx.fillStyle = fuel ? '#f7e5b0' : '#6d7787'; ctx.fillRect(x + 14, y + 11, 4, 5);
+    ctx.strokeStyle = 'rgba(24,35,44,0.86)'; ctx.lineWidth = 1; ctx.strokeRect(x + 8.5, y + 6.5, 15, 25);
+    for (let k = 0; k <= lv; k++) { ctx.fillStyle = fuel ? '#bfe9ff' : '#56606f'; ctx.fillRect(x + 9 + k * 4, y + 31, 2, 2); }
+    if (fuel) {
+      const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 260 + b.x);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = `rgba(255,226,150,${(0.16 + 0.22 * pulse).toFixed(2)})`;
+      ctx.beginPath(); ctx.arc(x + 16, y + 12, 4 + pulse * 2, 0, 7); ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    return true;
+  }
+  if (b.type === 'purifier') {
+    const fuel = (b.fuel || 0) > 0;
+    const c = litc(fuel ? [166, 137, 212] : [72, 76, 96]);
+    ctx.fillStyle = 'rgba(3,6,12,0.48)'; ctx.fillRect(x + 5, y + 28, 22, 4);
+    ctx.fillStyle = c; ctx.fillRect(x + 8, y + 8, 16, 21);
+    ctx.fillStyle = fuel ? '#e1d2ff' : '#788092'; ctx.fillRect(x + 12, y + 4, 8, 7);
+    ctx.fillStyle = fuel ? '#b99bf5' : '#626b7c'; ctx.fillRect(x + 14, y + 1, 4, 5);
+    ctx.strokeStyle = fuel ? 'rgba(224,204,255,0.75)' : 'rgba(120,128,148,0.55)';
+    ctx.lineWidth = 1; ctx.strokeRect(x + 7.5, y + 7.5, 17, 22);
+    if (fuel) {
+      const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 300 + b.x * 3);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = `rgba(210,184,255,${(0.25 + 0.30 * pulse).toFixed(2)})`;
+      ctx.beginPath(); ctx.arc(x + 16, y + 6, 5 + pulse * 2, 0, 7); ctx.stroke();
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    const lvP = b.level == null ? 1 : b.level;
+    for (let k = 0; k <= lvP; k++) { ctx.fillStyle = fuel ? '#d8c6ff' : '#596275'; ctx.fillRect(x + 8 + k * 4, y + 31, 2, 2); }
+    return true;
+  }
+  if (b.type === 'farm' || b.type === 'mycobed') {
+    const g = Math.max(0, Math.min(1, b.growth || 0));
+    const fungus = b.type === 'mycobed';
+    ctx.fillStyle = 'rgba(3,6,12,0.48)'; ctx.fillRect(x + 2, y + 27, 28, 4);
+    ctx.fillStyle = litc(fungus ? [76, 61, 92] : [92, 72, 54]); ctx.fillRect(x + 2, y + 5, 28, 23);
+    ctx.strokeStyle = fungus ? 'rgba(174,140,216,0.55)' : 'rgba(182,142,92,0.55)'; ctx.strokeRect(x + 2.5, y + 5.5, 27, 22);
+    const grow = fungus ? [186, 133, 226] : [108, 193, 117];
+    ctx.fillStyle = `rgb(${grow[0]},${grow[1]},${grow[2]})`;
+    const n = 2 + Math.floor(g * 4);
+    for (let k = 0; k < n; k++) {
+      const px = x + 5 + k * 4;
+      const h = 3 + g * (5 + (k % 2) * 2);
+      ctx.fillRect(px, y + 25 - h, 2, h);
+      if (fungus) ctx.fillRect(px - 1, y + 24 - h, 4, 2);
+    }
+    if (g >= 1) { ctx.fillStyle = fungus ? '#e2c8ff' : '#d9f3a6'; ctx.fillRect(x + 23, y + 8, 3, 3); }
+    return true;
+  }
+  if (b.type === 'shaft') {
+    const entry = !!b.entry;
+    const base = entry ? [90, 188, 218] : [218, 166, 86];
+    ctx.fillStyle = 'rgba(3,6,12,0.5)'; ctx.fillRect(x + 4, y + 27, 24, 4);
+    ctx.fillStyle = litc(base); ctx.fillRect(x + 4, y + 6, 24, 22);
+    ctx.strokeStyle = entry ? 'rgba(200,245,255,0.85)' : 'rgba(255,222,150,0.85)'; ctx.lineWidth = 1.5;
+    ctx.strokeRect(x + 3.5, y + 5.5, 25, 23);
+    ctx.beginPath(); ctx.arc(x + 16, y + 17, 6, 0, 7); ctx.stroke();
+    ctx.beginPath();
+    if (entry) { ctx.moveTo(x + 12, y + 15); ctx.lineTo(x + 16, y + 11); ctx.lineTo(x + 20, y + 15); }
+    else { ctx.moveTo(x + 12, y + 19); ctx.lineTo(x + 16, y + 23); ctx.lineTo(x + 20, y + 19); }
+    ctx.stroke();
+    ctx.fillStyle = entry ? '#baf3ff' : '#ffe0a0'; ctx.fillRect(x + 14, y + 16, 4, 3);
+    return true;
+  }
+  if (b.type === 'towerGlow' || b.type === 'towerShock' || b.type === 'towerChain') {
+    const shock = b.type === 'towerShock', chain = b.type === 'towerChain';
+    const lv = state.light ? state.light[b.y * state.map.w + b.x] : 0;
+    const live = lv >= 3.2;
+    const base = shock ? [150, 120, 210] : chain ? [226, 190, 88] : [108, 196, 224];
+    ctx.fillStyle = 'rgba(3,6,12,0.5)'; ctx.fillRect(x + 3, y + 28, 26, 4);
+    ctx.fillStyle = litc(live ? base : [70, 74, 84]); ctx.fillRect(x + 4, y + 7, 24, 21);
+    ctx.strokeStyle = live ? (shock ? '#d7c2ff' : chain ? '#fff0b0' : '#c9f6ff') : '#5d6676'; ctx.lineWidth = 1;
+    ctx.strokeRect(x + 3.5, y + 6.5, 25, 22);
+    ctx.fillStyle = live ? (shock ? '#d7c2ff' : chain ? '#fff0b0' : '#cdf6ff') : '#5b6270';
+    if (chain) { ctx.beginPath(); ctx.moveTo(x + 16, y + 10); ctx.lineTo(x + 22, y + 16); ctx.lineTo(x + 16, y + 22); ctx.lineTo(x + 10, y + 16); ctx.closePath(); ctx.fill(); }
+    else { ctx.beginPath(); ctx.arc(x + 16, y + 16, 5, 0, 7); ctx.fill(); }
+    if (live) { ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.35 + 0.2 * Math.sin(performance.now() / 260 + b.x + b.y); ctx.strokeStyle = 'white'; ctx.beginPath(); ctx.arc(x + 16, y + 16, 9, 0, 7); ctx.stroke(); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; }
+    return true;
+  }
+  if (b.type === 'prism') {
+    const on = b.relayHop != null;
+    ctx.fillStyle = 'rgba(3,6,12,0.5)'; ctx.fillRect(x + 4, y + 28, 24, 4);
+    ctx.fillStyle = litc(on ? [170, 226, 255] : [88, 96, 110]);
+    ctx.beginPath(); ctx.moveTo(x + 16, y + 4); ctx.lineTo(x + 26, y + 25); ctx.lineTo(x + 6, y + 25); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = on ? '#e0f8ff' : '#8792a3'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = on ? '#f0fdff' : '#626d7f'; ctx.fillRect(x + 14, y + 12, 4, 9);
+    if (on) { ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = 'rgba(210,245,255,0.5)'; ctx.beginPath(); ctx.arc(x + 16, y + 7, 5, 0, 7); ctx.fill(); ctx.globalCompositeOperation = 'source-over'; }
+    return true;
+  }
+  if (b.type === 'decoy' || b.type === 'store' || b.type === 'cache') {
+    const decoy = b.type === 'decoy', cache = b.type === 'cache';
+    const fuel = (b.fuel || 0) > 0;
+    ctx.fillStyle = 'rgba(3,6,12,0.5)'; ctx.fillRect(x + 3, y + 28, 26, 4);
+    ctx.fillStyle = litc(decoy ? [94, 126, 154] : cache ? [156, 112, 62] : [150, 124, 88]); ctx.fillRect(x + 3, y + 8, 26, 19);
+    ctx.fillStyle = decoy ? '#b9d2e5' : '#e2c48a'; ctx.fillRect(x + 5, y + 10, 22, 2); ctx.fillRect(x + 5, y + 18, 22, 1);
+    ctx.strokeStyle = decoy ? 'rgba(170,200,230,0.8)' : 'rgba(232,204,156,0.8)'; ctx.lineWidth = 1; ctx.strokeRect(x + 2.5, y + 7.5, 27, 20);
+    if (decoy) { ctx.setLineDash([2, 2]); ctx.strokeStyle = 'rgba(170,200,230,0.7)'; ctx.strokeRect(x + 1.5, y + 6.5, 29, 22); ctx.setLineDash([]); }
+    const cap = cache ? (BUILD.cache.maxFuel || 20) : decoy ? (BUILD.decoy.maxFuel || 20) : (BUILD.store.store || 60);
+    const used = b.stock ? Object.keys(b.stock).reduce((a, k) => a + (b.stock[k] || 0), 0) : (b.fuel || 0);
+    const frac = Math.max(0, Math.min(1, used / cap));
+    ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(x + 5, y + 29, 22, 2);
+    ctx.fillStyle = !decoy && !cache && frac >= 1 ? '#ff8f6e' : cache ? '#ffcf8a' : '#9fc3e0'; ctx.fillRect(x + 5, y + 29, Math.max(1, (22 * frac) | 0), 2);
+    if (fuel && cache) { ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = 'rgba(255,207,138,0.22)'; ctx.beginPath(); ctx.arc(x + 16, y + 9, 6, 0, 7); ctx.fill(); ctx.globalCompositeOperation = 'source-over'; }
+    return true;
+  }
+  return false;
+}
+
+// V8-3：施工状态也使用 32px 视觉边界；仅表达“将来会是什么”和工期，不改变建造逻辑。
+function drawV8Construction(ctx, b, bx, by, f, frac, def) {
+  const x = bx - 8, y = by - 8;
+  const tint = def && def.color ? def.color : '#9fe8ff';
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = 'rgba(3,6,12,0.48)'; ctx.fillRect(x + 3, y + 27, 26, 4);
+  ctx.fillStyle = `rgba(120,152,186,${(0.12 + f * 0.12).toFixed(2)})`;
+  ctx.fillRect(x + 3, y + 5, 26, 22);
+  ctx.strokeStyle = tint; ctx.globalAlpha = 0.72; ctx.lineWidth = 1.2; ctx.setLineDash([3, 2]);
+  ctx.strokeRect(x + 1.5, y + 2.5, 29, 26); ctx.setLineDash([]);
+  ctx.globalAlpha = 0.46;
+  // 轮廓剪影：让玩家不用读文字也能分辨灯、箱、墙和工作站。
+  if (b.type === 'lamp' || b.type === 'purifier') {
+    ctx.fillStyle = tint; ctx.fillRect(x + 14, y + 7, 4, 18); ctx.fillRect(x + 10, y + 6, 12, 3);
+  } else if (b.type === 'wall' || b.type === 'stoneWall' || b.type === 'gate' || b.type === 'barricade') {
+    ctx.fillStyle = tint; ctx.fillRect(x + 2, y + 13, 28, 8);
+    ctx.beginPath(); ctx.moveTo(x + 5, y + 13); ctx.lineTo(x + 13, y + 21); ctx.moveTo(x + 25, y + 13); ctx.lineTo(x + 17, y + 21); ctx.stroke();
+  } else if (b.type === 'farm' || b.type === 'mycobed') {
+    ctx.fillStyle = tint; for (let k = 0; k < 4; k++) ctx.fillRect(x + 7 + k * 5, y + 15 - (k % 2) * 3, 2, 9);
+  } else {
+    ctx.fillStyle = tint; ctx.fillRect(x + 6, y + 10, 20, 15); ctx.fillRect(x + 10, y + 6, 12, 3);
+  }
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = 'rgba(0,0,0,0.68)'; ctx.fillRect(x + 3, y + 29, 26, 3);
+  ctx.fillStyle = frac >= 1 ? '#9ef7d8' : '#ffd76e';
+  ctx.fillRect(x + 3, y + 29, Math.max(1, (26 * Math.max(0, Math.min(1, frac))) | 0), 3);
+  ctx.restore();
+  return true;
+}
+
+function drawV8DamageOverlay(ctx, b, bx, by) {
+  const def = BUILD[b.type];
+  if (!def || b.site || b.hp == null || !(def.hp > 0)) return;
+  const frac = Math.max(0, Math.min(1, b.hp / def.hp));
+  if (frac >= 0.92) return;
+  const severity = 1 - frac;
+  const x = bx - 8, y = by - 8;
+  ctx.save();
+  ctx.strokeStyle = `rgba(255,${Math.max(84, (174 - severity * 70) | 0)},${Math.max(76, (118 - severity * 42) | 0)},${(0.40 + severity * 0.44).toFixed(2)})`;
+  ctx.lineWidth = 1 + severity;
+  ctx.beginPath();
+  ctx.moveTo(x + 7, y + 3); ctx.lineTo(x + 12, y + 12); ctx.lineTo(x + 9, y + 21);
+  ctx.moveTo(x + 23, y + 6); ctx.lineTo(x + 18, y + 16); ctx.lineTo(x + 24, y + 27);
+  if (severity > 0.45) { ctx.moveTo(x + 3, y + 22); ctx.lineTo(x + 10, y + 27); }
+  ctx.stroke();
+  if (b.type !== 'prism') {
+    ctx.fillStyle = 'rgba(0,0,0,0.68)'; ctx.fillRect(x + 3, y + 29, 26, 3);
+    ctx.fillStyle = frac > 0.45 ? '#ffb38f' : '#ff6b6b';
+    ctx.fillRect(x + 3, y + 29, Math.max(1, (26 * frac) | 0), 3);
+  }
+  ctx.restore();
+}
+
+// —— 建造范围预览（W13-E）：放下之前先看见“会发生什么” ——
 // 光照圈 / 塔射程 / 棱镜接力 / 净化圈 / 补给范围 / 农田的当场光照值
 // 只在建造模式里跑（每帧几个 stroke），不影响性能
 function drawBuildPreview(ctx, def, gx, gy, ox, oy, amb) {
@@ -386,6 +1207,10 @@ export function draw(ctx) {
   const dx = sx - ox, dy = sy - oy;
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(terr.cv, sx, sy, vw * TILE, vh * TILE, dx, dy, vw * TILE, vh * TILE);
+  drawV8TerrainPatches(ctx, m, ox, oy, x0, y0, x1, y1);
+  drawV8BiomeDecor(ctx, m, ox, oy, x0, y0, x1, y1);
+  drawV8BiomeEdges(ctx, m, ox, oy, x0, y0, x1, y1);
+  drawV8TerrainNodes(ctx, m, ox, oy, x0, y0, x1, y1);
   drawLightMask(ctx, m, light, lightMax, amb, terr, dx, dy, vw, vh, x0, y0, x1, y1);
 
   // --- 蚀痕：黑暗腐蚀出的紫黑结晶（白天也看得见，提示"该清理了"） ---
@@ -393,12 +1218,36 @@ export function draw(ctx) {
   const tBlight = pnow();
   const blight = m.blight;
   if (blight) {
+    const blightArt = VISUAL.blightArt || {};
+    const blightMaxStage = Number.isFinite(blightArt.maxStage) ? blightArt.maxStage : 3;
     for (let ty = y0; ty <= y1; ty++) {
       for (let tx = x0; tx <= x1; tx++) {
         const ii = ty * m.w + tx;
         const lvl = blight[ii];
         if (!lvl) continue;
         const px = tx * TILE - ox, py = ty * TILE - oy;
+        if (settings.visualTheme !== 'legacy') {
+          const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 320 + tx * 1.7 + ty * 0.9);
+          const blightSpriteDrawn = blightArt.spriteKey && drawSpriteV8(ctx, blightArt.spriteKey, px + 8, py + 16);
+          if (!blightSpriteDrawn) {
+            ctx.fillStyle = rgbaOf(blightArt.base || [42, 18, 58], 0.28 + 0.10 * lvl);
+            ctx.fillRect(px - 1, py - 1, TILE + 2, TILE + 2);
+            ctx.strokeStyle = rgbaOf(blightArt.crack || [121, 65, 163], 0.34 + 0.10 * lvl);
+            ctx.lineWidth = 1.2;
+            ctx.beginPath(); ctx.moveTo(px + 2, py + 13); ctx.lineTo(px + 7, py + 8); ctx.lineTo(px + 9, py + 3); ctx.moveTo(px + 8, py + 14); ctx.lineTo(px + 13, py + 10); ctx.stroke();
+            ctx.fillStyle = rgbaOf(blightArt.crystal || [196, 124, 238], 0.28 + 0.09 * lvl);
+            ctx.beginPath(); ctx.moveTo(px + 4, py + 12); ctx.lineTo(px + 6, py + 5); ctx.lineTo(px + 8, py + 12); ctx.closePath(); ctx.fill();
+          }
+          if (lvl >= 2) {
+            ctx.fillStyle = rgbaOf(blightArt.pulse || [228, 167, 255], 0.24 + 0.18 * pulse);
+            ctx.fillRect(px + 11, py + 4, 2, 5); ctx.fillRect(px + 13, py + 7, 2, 3);
+          }
+          if (lvl >= blightMaxStage) {
+            ctx.strokeStyle = rgbaOf(blightArt.border || [236, 170, 255], 0.42 + 0.35 * pulse);
+            ctx.lineWidth = 1.8; ctx.strokeRect(px + 1, py + 1, TILE - 2, TILE - 2);
+          }
+          continue;
+        }
         const a = 0.20 + 0.16 * lvl;
         ctx.fillStyle = `rgba(58,18,86,${a.toFixed(2)})`;
         ctx.fillRect(px, py, TILE, TILE);
@@ -449,6 +1298,7 @@ export function draw(ctx) {
   pmark('draw.beacons', tTerr);
   {
     const ft = performance.now();
+    const beaconSprite = settings.visualTheme !== 'legacy' ? sprite('v8_campfire') : null;
     for (const b of state.beacons) {
       const cx = Math.round((b.x + 0.5) * TILE - ox), cy = Math.round((b.y + 0.5) * TILE - oy);
       if (cx < -TILE * 2 || cy < -TILE * 2 || cx > VIEW_W + TILE * 2 || cy > VIEW_H + TILE * 2) continue;
@@ -469,6 +1319,17 @@ export function draw(ctx) {
       ctx.fillStyle = pool;
       ctx.beginPath(); ctx.ellipse(cx, cy + 1.2, 12, 8, 0, 0, 7); ctx.fill();
       ctx.globalCompositeOperation = 'source-over';
+      if (beaconSprite) {
+        // V8 样板图只替代静态石圈/柴堆/火焰；暖光池仍由代码绘制，
+        // 因而主题切换、熄灭和动态光照不会被素材的固定亮度绑死。
+        drawSpriteV8(ctx, 'v8_campfire', cx, cy + 16);
+        if (b.hp != null && b.hp < (b.maxHp || 300)) {
+          const w = 18, hw = (w * Math.max(0, b.hp / (b.maxHp || 300))) | 0;
+          ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(cx - 9, cy - 18, w, 3);
+          ctx.fillStyle = '#ff9de0'; ctx.fillRect(cx - 9, cy - 18, hw, 3);
+        }
+        continue;
+      }
       ctx.fillStyle = 'rgba(34,24,17,0.20)';                       // 柴堆正下方那一点点焦痕
       ctx.beginPath(); ctx.ellipse(cx, cy + 4.2, 3.6, 1.6, 0, 0, 7); ctx.fill();
       ctx.fillStyle = '#544b42';                                   // 围石
@@ -499,6 +1360,21 @@ export function draw(ctx) {
     }
   }
 
+  // 已发现的共鸣地点用地面标记提示；不占逻辑格，不改变光照或碰撞。
+  const revealedSite = state.resonance && state.resonance.sites
+    ? Object.values(state.resonance.sites).find((site) => site.status === 'revealed'
+      && site.x != null && state.chunkX === site.chunkX && state.chunkY === site.chunkY) : null;
+  if (revealedSite && state.layerId === 'surface') {
+    const mx = revealedSite.x * TILE - ox, my = revealedSite.y * TILE - oy;
+    const pulse = 0.58 + 0.22 * Math.sin(performance.now() / 380);
+    ctx.save();
+    ctx.strokeStyle = `rgba(255,226,161,${pulse})`; ctx.lineWidth = 1.6;
+    ctx.setLineDash([3, 2]); ctx.strokeRect(mx + 2, my + 2, TILE - 4, TILE - 4); ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(255,226,161,0.9)'; ctx.beginPath();
+    ctx.moveTo(mx + 8, my + 4); ctx.lineTo(mx + 12, my + 8); ctx.lineTo(mx + 8, my + 12); ctx.lineTo(mx + 4, my + 8); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
   // --- 玩家建造物（木墙 / 灯柱 / 熔炉） ---
   const tBuild = pnow();
   const lit = (i) => {
@@ -513,6 +1389,7 @@ export function draw(ctx) {
       const sdef = BUILD[b.type] || {};
       const need = workOf(b.type);
       const frac = Math.max(0, Math.min(1, (b.work || 0) / need));
+      if (settings.visualTheme !== 'legacy' && drawV8Construction(ctx, b, bx, by, f, frac, sdef)) continue;
       ctx.save();
       ctx.strokeStyle = 'rgba(148,178,208,0.5)';
       ctx.setLineDash([3, 3]);
@@ -537,6 +1414,96 @@ export function draw(ctx) {
       ctx.restore();
       continue;
     }
+    if (b.type === 'resonanceBeacon') {
+      // 首站信标尚无独立图像素材；用一眼可辨的琥珀晶体做轻量程序化回退。
+      ctx.save(); ctx.globalAlpha = 0.7 + f * 0.3;
+      ctx.fillStyle = '#292f3a'; ctx.fillRect(bx + 2, by + 10, 12, 5);
+      ctx.fillStyle = '#65707b'; ctx.fillRect(bx + 4, by + 11, 8, 2);
+      ctx.strokeStyle = '#ffe2a1'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(bx + 8, by + 2); ctx.lineTo(bx + 12, by + 7); ctx.lineTo(bx + 8, by + 11); ctx.lineTo(bx + 4, by + 7); ctx.closePath(); ctx.stroke();
+      ctx.fillStyle = '#f6cb78'; ctx.beginPath(); ctx.moveTo(bx + 8, by + 3); ctx.lineTo(bx + 10, by + 7); ctx.lineTo(bx + 8, by + 9); ctx.lineTo(bx + 6, by + 7); ctx.closePath(); ctx.fill();
+      ctx.restore();
+      continue;
+    }
+    if (b.type === 'lamp' && settings.visualTheme !== 'legacy' && b.fuel > 0) {
+      const lampKey = (VISUAL.buildingArt && VISUAL.buildingArt.lamp) || 'v8_lamp';
+      const lampSprite = sprite(lampKey);
+      if (lampSprite) {
+        // 灯柱的视觉主体允许高出逻辑占地；脚底仍锁在当前逻辑格中心。
+        drawSpriteV8(ctx, lampKey, bx + 8, by + 16);
+        const frac = Math.max(0, Math.min(1, (b.fuel || 0) / (BUILD.lamp.maxFuel || 30)));
+        ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(bx - 5, by + 13, 26, 3);
+        ctx.fillStyle = '#bfe9ff'; ctx.fillRect(bx - 5, by + 13, Math.max(1, (26 * frac) | 0), 3);
+        const lv = b.level == null ? 1 : b.level;
+        for (let k = 0; k <= lv; k++) { ctx.fillStyle = '#d5f5ff'; ctx.fillRect(bx - 4 + k * 4, by + 17, 2, 2); }
+        continue;
+      }
+    }
+    if (b.type === 'store' && settings.visualTheme !== 'legacy') {
+      const storeKey = (VISUAL.buildingArt && VISUAL.buildingArt.store) || 'v8_store';
+      const storeSprite = sprite(storeKey);
+      if (storeSprite) {
+        drawSpriteV8(ctx, storeKey, bx + 8, by + 24);
+        const cap = BUILD.store.store || 60;
+        const used = b.stock ? Object.keys(b.stock).reduce((a, k) => a + (b.stock[k] || 0), 0) : 0;
+        const frac = Math.max(0, Math.min(1, used / cap));
+        ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(bx - 5, by + 13, 26, 3);
+        ctx.fillStyle = frac >= 1 ? '#ff8f6e' : '#e0c48a';
+        ctx.fillRect(bx - 5, by + 13, Math.max(1, (26 * frac) | 0), 3);
+        continue;
+      }
+    }
+    if (settings.visualTheme !== 'legacy' && b.type === 'bunk') {
+      const bunkKey = (VISUAL.buildingArt && VISUAL.buildingArt.bunk) || 'v8_bunk';
+      if (sprite(bunkKey) && drawSpriteV8(ctx, bunkKey, bx + 8, by + 24)) continue;
+      // 铺位是 1 格逻辑占地，但视觉主体扩成 2×1 格，读起来更像一张床。
+      ctx.fillStyle = 'rgba(3,6,12,0.48)'; ctx.fillRect(bx - 6, by + 10, 28, 5);
+      ctx.fillStyle = `rgb(${(84 + f * 58) | 0},${(70 + f * 48) | 0},${(56 + f * 38) | 0})`;
+      ctx.fillRect(bx - 8, by - 3, 32, 17);
+      ctx.fillStyle = `rgb(${(108 + f * 70) | 0},${(100 + f * 64) | 0},${(86 + f * 50) | 0})`;
+      ctx.fillRect(bx - 5, by - 1, 26, 10);
+      ctx.fillStyle = `rgb(${(188 + f * 34) | 0},${(192 + f * 32) | 0},${(198 + f * 24) | 0})`;
+      ctx.fillRect(bx - 3, by, 8, 5);
+      ctx.fillStyle = 'rgba(42,50,66,0.72)'; ctx.fillRect(bx + 5, by + 1, 1, 8);
+      ctx.strokeStyle = 'rgba(218,190,150,0.8)'; ctx.lineWidth = 1;
+      ctx.strokeRect(bx - 8.5, by - 3.5, 33, 18);
+      ctx.fillStyle = '#d7b58a'; ctx.fillRect(bx - 5, by + 13, 4, 2); ctx.fillRect(bx + 17, by + 13, 4, 2);
+      continue;
+    }
+    if (settings.visualTheme !== 'legacy' && (b.type === 'wall' || b.type === 'stoneWall' || b.type === 'gate' || b.type === 'barricade')) {
+      const structureKey = (VISUAL.buildingArt && VISUAL.buildingArt[b.type]) || null;
+      if (structureKey && !(b.type === 'gate' && b.open) && sprite(structureKey) && drawSpriteV8(ctx, structureKey, bx + 8, by + 16)) continue;
+      if (b.type === 'gate' && b.open) {
+        // 开门保留两根门柱与顶部横梁，中心留空，让“可通行”一眼可读。
+        const cc = mix(DARK, [162, 126, 82], 0.42 + f * 0.55);
+        ctx.fillStyle = `rgb(${cc[0] | 0},${cc[1] | 0},${cc[2] | 0})`;
+        ctx.fillRect(bx - 7, by + 1, 4, 14); ctx.fillRect(bx + 21, by + 1, 4, 14); ctx.fillRect(bx - 7, by + 1, 32, 3);
+        ctx.strokeStyle = 'rgba(224,194,142,0.72)'; ctx.lineWidth = 1; ctx.strokeRect(bx - 7.5, by + 0.5, 33, 15);
+        continue;
+      }
+      const stone = b.type === 'stoneWall';
+      const wood = b.type === 'barricade' ? [136, 92, 58] : b.type === 'gate' ? [150, 112, 70] : stone ? [112, 122, 136] : [112, 78, 52];
+      const cc = mix(DARK, wood, 0.42 + f * 0.55);
+      ctx.fillStyle = `rgb(${cc[0] | 0},${cc[1] | 0},${cc[2] | 0})`;
+      ctx.fillRect(bx - 8, by + 1, 32, 13);
+      ctx.strokeStyle = stone ? 'rgba(190,204,220,0.48)' : 'rgba(42,28,20,0.78)';
+      ctx.lineWidth = 1;
+      if (b.type === 'barricade') {
+        ctx.beginPath(); ctx.moveTo(bx - 5, by + 1); ctx.lineTo(bx + 21, by + 14); ctx.moveTo(bx + 21, by + 1); ctx.lineTo(bx - 5, by + 14); ctx.stroke();
+      } else if (b.type === 'gate') {
+        ctx.beginPath(); ctx.moveTo(bx - 3, by + 3); ctx.lineTo(bx + 19, by + 13); ctx.moveTo(bx + 19, by + 3); ctx.lineTo(bx - 3, by + 13); ctx.stroke();
+        ctx.strokeStyle = 'rgba(226,196,144,0.58)'; ctx.beginPath(); ctx.moveTo(bx - 7, by + 5); ctx.lineTo(bx + 25, by + 5); ctx.stroke();
+      } else {
+        for (let row = 0; row < 2; row++) {
+          const yy = by + 5 + row * 5;
+          ctx.beginPath(); ctx.moveTo(bx - 7, yy); ctx.lineTo(bx + 23, yy); ctx.stroke();
+          if (stone) { ctx.beginPath(); ctx.moveTo(bx + (row ? 5 : 1), yy - 4); ctx.lineTo(bx + (row ? 5 : 1), yy); ctx.stroke(); }
+        }
+      }
+      ctx.strokeStyle = 'rgba(20,14,8,0.72)'; ctx.strokeRect(bx - 8.5, by + 0.5, 33, 14);
+      continue;
+    }
+    if (settings.visualTheme !== 'legacy' && drawV8Station(ctx, b, bx, by, f)) continue;
     if (b.type === 'wall' || b.type === 'stoneWall' || b.type === 'gate' || b.type === 'barricade') {
       if (b.type === 'gate' && b.open) {
         ctx.strokeStyle = `rgba(215,181,138,${(0.45 + 0.35 * f).toFixed(2)})`;
@@ -871,6 +1838,15 @@ export function draw(ctx) {
       }
     }
   }
+  if (settings.visualTheme !== 'legacy') {
+    // 统一的 V8 损坏覆盖层放在所有建筑主体之后，避免各建筑分支漏掉裂纹反馈。
+    for (const b of state.buildings) {
+      if (b.layerId && b.layerId !== state.layerId) continue;
+      const bx = b.x * TILE - ox, by = b.y * TILE - oy;
+      if (bx < -TILE * 2 || by < -TILE * 2 || bx > VIEW_W + TILE * 2 || by > VIEW_H + TILE * 2) continue;
+      drawV8DamageOverlay(ctx, b, bx, by);
+    }
+  }
   // --- 光路（棱镜接力链）：让玩家一眼看懂光是从哪接过来的 ---
   pmark('draw.buildings', tBuild);
   const tPrism = pnow();
@@ -1051,7 +2027,8 @@ export function draw(ctx) {
       ctx.beginPath(); ctx.arc(px, py, rr, 0, 7); ctx.stroke();
     }
   }
-  drawPixelHuman(ctx, px, py, pl.face || pl.facing || 'down', state.burning > 0 ? '#ffb27a' : '#dfe9ff', state.burning > 0 ? '#ff7a3c' : '#ffd27a', state.equip && state.equip.held, false);
+  const humanDraw = settings.visualTheme === 'legacy' ? drawPixelHuman : drawPixelHumanV8;
+  humanDraw(ctx, px, py, pl.face || pl.facing || 'down', state.burning > 0 ? '#ffb27a' : '#dfe9ff', state.burning > 0 ? '#ff7a3c' : '#ffd27a', state.equip && state.equip.held, false, 'player');
   // 第 5 步 5b：背上的结构体 —— 一圈“背包”轮廓（塔本体在 buildings 里按玩家坐标画，自然就在脚下）
   if (state.carried) {
     ctx.strokeStyle = 'rgba(158,247,216,0.85)';
@@ -1135,7 +2112,8 @@ export function draw(ctx) {
     ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(ex, ey, r * 2.4, 0, 7); ctx.fill();
     ctx.globalCompositeOperation = 'source-over';
     // 躯干：按兵种使用尖芽、硬壳、飞翼等剪影，不再全部是圆形。
-    drawCreature(ctx, ex, ey + bob, r, e.ekind, '#251a22', def.color, e.flash > 0);
+    const creatureDraw = settings.visualTheme === 'legacy' ? drawCreature : drawCreatureV8;
+    creatureDraw(ctx, ex, ey + bob, r, e.ekind, '#251a22', def.color, e.flash > 0);
     if (def.boss) {                                   // Boss：旋转外环 + 尖刺
       const t = performance.now() / 600;
       ctx.strokeStyle = `rgba(${def.glow},0.55)`;
@@ -1207,10 +2185,29 @@ export function draw(ctx) {
       ctx.fillRect(bx + 6, by + 3, 2, 2); ctx.fillRect(bx + 9, by + 3, 2, 2);
     }
     // 潮穴：地面裂缝，喷发时脉动（并短暂吸引蚀兽）
+    const ventArt = VISUAL.ventArt || {};
+    const ventMaxBurst = Number.isFinite(ventArt.maxBurst) ? ventArt.maxBurst : 1;
     for (const v of ops.vents) {
       const vx = v.x * TILE - ox, vy = v.y * TILE - oy;
       if (vx < -TILE || vy < -TILE || vx > VIEW_W || vy > VIEW_H) continue;
-      const hot = Math.min(1, v.burst);
+      const hot = Math.min(ventMaxBurst, v.burst);
+      if (settings.visualTheme !== 'legacy') {
+        const ventSpriteDrawn = ventArt.spriteKey && drawSpriteV8(ctx, ventArt.spriteKey, vx + 8, vy + 16);
+        if (!ventSpriteDrawn) {
+          ctx.fillStyle = rgbaOf(ventArt.base || [22, 12, 31], 0.92);
+          ctx.beginPath(); ctx.moveTo(vx + 2, vy + 11); ctx.lineTo(vx + 5, vy + 4); ctx.lineTo(vx + 12, vy + 3); ctx.lineTo(vx + 15, vy + 9); ctx.lineTo(vx + 11, vy + 14); ctx.lineTo(vx + 4, vy + 14); ctx.closePath(); ctx.fill();
+          ctx.strokeStyle = hot > 0 ? rgbaOf(ventArt.hot || [255, 174, 222], 0.62 + 0.30 * hot) : rgbaOf(ventArt.crack || [140, 92, 172], 0.72);
+          ctx.lineWidth = 1.4;
+          ctx.beginPath(); ctx.moveTo(vx + 4, vy + 11); ctx.lineTo(vx + 8, vy + 7); ctx.lineTo(vx + 9, vy + 4); ctx.moveTo(vx + 8, vy + 11); ctx.lineTo(vx + 13, vy + 8); ctx.stroke();
+        }
+        if (hot > 0) {
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.fillStyle = rgbaOf(ventArt.pulse || [255, 170, 224], 0.22 + 0.28 * hot);
+          ctx.beginPath(); ctx.arc(vx + 8, vy + 8, 5 + 8 * (1 - hot), 0, 7); ctx.fill();
+          ctx.globalCompositeOperation = 'source-over';
+        }
+        continue;
+      }
       ctx.fillStyle = `rgba(20,10,30,0.85)`;
       ctx.fillRect(vx + 3, vy + 4, TILE - 6, TILE - 8);
       ctx.fillStyle = hot > 0 ? `rgba(255,150,220,${(0.5 + 0.5 * hot).toFixed(2)})` : 'rgba(120,80,160,0.5)';
@@ -1249,7 +2246,9 @@ export function draw(ctx) {
 
   // 玩家遗落包：不会像潮穴掉落一样自动消失，直到回到原层回收。
   const dp = state.deathPack;
-  if (dp && dp.layerId === state.layerId) {
+  if (dp && dp.layerId === state.layerId
+    && (dp.chunkX == null || (dp.chunkX | 0) === (state.chunkX | 0))
+    && (dp.chunkY == null || (dp.chunkY | 0) === (state.chunkY | 0))) {
     const dx = dp.x * TILE - ox, dy = dp.y * TILE - oy;
     if (dx >= -TILE && dy >= -TILE && dx <= VIEW_W + TILE && dy <= VIEW_H + TILE) {
       const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 260);
@@ -1304,7 +2303,7 @@ export function draw(ctx) {
       ctx.fillStyle = '#ffcf8a';
       ctx.font = 'bold 9px ui-monospace, monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(`救援 ${Math.ceil(w.downT || 0)}s`, wx, wy - 12);
+      ctx.fillText(`救援 ${Math.ceil(w.downT || 0)}s`, wx, wy - (settings.visualTheme === 'legacy' ? 12 : 48));
       continue;
     }
     if (w.hollow) {                                     // 蚀化者：被黑暗认领的人
@@ -1318,21 +2317,24 @@ export function draw(ctx) {
     }
     const mood = w.morale < 25 ? '#ff6b6b' : w.morale < 55 ? '#ffd166' : '#7dffb0';
     const sanC = sanityTier(w.sanity == null ? 100 : w.sanity).color;
+    const hudLift = settings.visualTheme === 'legacy' ? 15 : 48;
     if (w.rescueState === 'escort' && w.rescueBed) {
       const bx = (w.rescueBed.x + 0.5) * TILE - ox, by = (w.rescueBed.y + 0.5) * TILE - oy;
       ctx.strokeStyle = 'rgba(158,247,216,0.8)'; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(wx, wy); ctx.lineTo(bx, by); ctx.stroke();
-      ctx.fillStyle = '#9ef7d8'; ctx.font = 'bold 9px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.fillText('护送', wx, wy - 15);
+      ctx.fillStyle = '#9ef7d8'; ctx.font = 'bold 9px ui-monospace, monospace'; ctx.textAlign = 'center';
+      ctx.fillText('护送', wx, wy - (settings.visualTheme === 'legacy' ? 15 : 48));
     }
-    drawPixelHuman(ctx, wx, wy, w.face || w.facing || 'down', w.flash > 0 ? '#ffffff' : '#c8d8ea', mood, w.tool, w.flash > 0);
+    const humanDraw = settings.visualTheme === 'legacy' ? drawPixelHuman : drawPixelHumanV8;
+    humanDraw(ctx, wx, wy, w.face || w.facing || 'down', w.flash > 0 ? '#ffffff' : '#c8d8ea', mood, w.tool, w.flash > 0);
     // 血 / 饱食 / 士气 / 心志 四条细线
     const hw = 12, hpw = (hw * Math.max(0, w.hp / w.maxHp)) | 0;
-    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(wx - 6, wy - 15, hw, 2);
-    ctx.fillStyle = '#ff9d9d'; ctx.fillRect(wx - 6, wy - 15, hpw, 2);
-    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(wx - 6, wy - 12, hw, 2);
-    ctx.fillStyle = mood; ctx.fillRect(wx - 6, wy - 12, (hw * w.morale / 100) | 0, 2);
-    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(wx - 6, wy - 9, hw, 2);
-    ctx.fillStyle = sanC; ctx.fillRect(wx - 6, wy - 9, (hw * (w.sanity == null ? 100 : w.sanity) / 100) | 0, 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(wx - 6, wy - hudLift, hw, 2);
+    ctx.fillStyle = '#ff9d9d'; ctx.fillRect(wx - 6, wy - hudLift, hpw, 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(wx - 6, wy - hudLift + 3, hw, 2);
+    ctx.fillStyle = mood; ctx.fillRect(wx - 6, wy - hudLift + 3, (hw * w.morale / 100) | 0, 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(wx - 6, wy - hudLift + 6, hw, 2);
+    ctx.fillStyle = sanC; ctx.fillRect(wx - 6, wy - hudLift + 6, (hw * (w.sanity == null ? 100 : w.sanity) / 100) | 0, 2);
   }
 
   // --- 移动路径引导线 ---

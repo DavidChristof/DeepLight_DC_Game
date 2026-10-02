@@ -23,8 +23,9 @@ import { bondLevel } from '../systems/mind.js';
 import { LAYER_NAMES } from '../data/layers.js';
 import { MODS, payloadStats } from '../data/payload.js';
 import { TYPE_NAME } from '../data/combat.js';
+import { THEMES } from '../data/night.js';
 
-const ACT_LABEL = { mine: '采集', bloom: '采摭', refine: '炼油', refuel: '加油', harvest: '采收', shaft: '竖井', soothe: '安抚', revive: '复苏', build: '施工', container: '打开容器', station: '打开制造台', payload: '装配载荷' };
+const ACT_LABEL = { mine: '采集', bloom: '采摭', refine: '炼油', refuel: '加油', harvest: '采收', shaft: '竖井', soothe: '安抚', revive: '复苏', build: '施工', container: '打开容器', station: '打开制造台', payload: '装配载荷', resonance: '预约共鸣' };
 
 const TILE_NAME = {
   [T.FLOOR]: '蚀苔地',
@@ -53,6 +54,25 @@ function describeBuilding(state, b) {
     };
   }
   const rows = [];
+  if (b.type === 'resonanceBeacon') {
+    const id = b.resonanceSiteId || 'first';
+    const site = state.resonance?.sites?.[id];
+    const globalTrial = state.resonance && state.resonance.trial || {};
+    const trial = site?.trial || (globalTrial.siteId === id || id === 'first' ? globalTrial : {});
+    const place = ({ first: '藤雾林', second: '碎岩台地', third: '苔原' })[id] || '未知群系';
+    const stage = ({ first: '首座', second: '二座', third: '终座' })[id] || '共鸣';
+    rows.push(['地点', `${place} · 已建立`]);
+    if (trial.status === 'reserved') rows.push(['仪式', `已预约 · 第 ${trial.targetDay} 天蚀潮`]);
+    else if (trial.status === 'active') rows.push(['仪式', `反冲夜 · 第 ${trial.activeDay} 天 · ${(THEMES[trial.themeId] || {}).name || '主题已锁'}`]);
+    else if (trial.status === 'complete') rows.push(['仪式', `已完成 · 第 ${trial.completedDay} 天`]);
+    else if (trial.status === 'failed') rows.push(['上次结果', `中断：${trial.failureReason || '可重试'}`]);
+    else rows.push(['仪式', '待预约']);
+    const tip = trial.status === 'complete' ? `${stage}共鸣已封存` : trial.status === 'active'
+      ? '守住信标至黎明 · 离区、断光或信标被毁即失败'
+      : trial.status === 'reserved' ? `第 ${trial.targetDay} 天蚀潮 · 留在本区块，守住灯光`
+        : '按 E 预约净光 · 亮度需达 1 · 费用：燃料 4、夜髓 1';
+    return { title: def.name, kind: 'building', rows, tip, build: b.type };
+  }
   if (def.maxFuel && b.type !== 'smelter' && b.type !== 'furnace') rows.push(['燃料', `${Math.round(b.fuel || 0)} / ${def.maxFuel}`]);
   if (def.power && !def.fireMat) {          // 炉子的“亮度”由火种决定，不用灯柱那套档位行
     const lv = LIGHT_LEVELS[b.level == null ? 1 : b.level] || LIGHT_LEVELS[1];
@@ -157,6 +177,14 @@ export function inspectTile(state, tx, ty) {
 
   const b = buildingAt(state, tx, ty);
   if (b) return describeBuilding(state, b);
+
+  const resonanceSite = state.resonance && state.resonance.sites
+    ? Object.values(state.resonance.sites).find((site) => site.status === 'revealed') : null;
+  if (resonanceSite && resonanceSite.status === 'revealed' && state.layerId === 'surface'
+      && state.chunkX === resonanceSite.chunkX && state.chunkY === resonanceSite.chunkY
+      && tx === resonanceSite.x && ty === resonanceSite.y) {
+    return { title: '共鸣地点', kind: 'objective', rows: [['目标', '共鸣信标']], tip: '选择「共鸣信标」并在此处施工' };
+  }
 
   const t = m.tiles[i];
   const rows = [];

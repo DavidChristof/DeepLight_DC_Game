@@ -4,7 +4,7 @@
 // 两者都只从容器账本扣除，不能在蚀兽贴脸时当作瞬时治疗药。
 import { SURVIVAL } from '../data/survival.js';
 import { BUILD } from '../data/buildings.js';
-import { withdraw } from './storage.js';
+import { withdraw, spendableOf } from './storage.js';
 import { isTide } from '../core/time.js';
 import { sfx } from '../core/audio.js';
 
@@ -46,13 +46,14 @@ export function hurtPlayer(state, amount) {
 }
 
 function mealError(state, hot) {
+  const have = spendableOf(state);
   if (state.playerDead) return '倒下时不能进食';
   if (!playerSafe(state)) return '蚀兽太近 · 先退回光里';
   if (state.playerHunger >= P.HUNGER_MAX && state.playerHp >= state.playerMaxHp && !(state.playerInjury > 0)) {
     return hot ? '现在不需要热食' : '现在不需要口粮';
   }
-  if ((state.res.food || 0) < (hot ? P.HOT_MEAL.FOOD : P.RATION.FOOD)) return '食物不足 · 种幽菌田';
-  if (hot && (state.res.fuel || 0) < P.HOT_MEAL.FUEL) return '燃料不足 · 先炼油';
+  if ((have.food || 0) < (hot ? P.HOT_MEAL.FOOD : P.RATION.FOOD)) return '食物不足 · 种幽菌田';
+  if (hot && (have.fuel || 0) < P.HOT_MEAL.FUEL) return '燃料不足 · 先炼油';
   if (hot && !warmthAt(state)) return '靠近营地火或点燃的炉子';
   return null;
 }

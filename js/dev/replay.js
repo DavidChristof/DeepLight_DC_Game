@@ -21,6 +21,11 @@
 //   · 不许写存档：回放期间 `settings.autosave` 由调用方关掉（main.js 的 __replay 里做了）。
 import { BUILD, canAfford } from '../data/buildings.js';
 import { EXPEDITION } from '../data/expedition.js';
+import { ENDGAME } from '../data/endgame.js';
+import { BOSS, tideOf } from '../data/combat.js';
+import { themeIdOf, wavesInWindow } from '../data/night.js';
+import { isTide } from '../core/time.js';
+import { enemyCapOf } from '../systems/spawnBudget.js';
 
 // —— 确定性随机源（LCG；数值取自 Numerical Recipes）——
 export function makeRng(seed) {
@@ -81,10 +86,82 @@ function blightL3Of(state) {
   return n;
 }
 
+// R6-C：只观察标准波次，不把 HUD 的“预计波数”误称为全夜总量上限。
+// 同屏 cap 控制是否尝试一批；一批可能跨过 cap，所以另记实测峰值。
+function markKnownEnemies(state, seen) {
+  const mark = (list) => { for (const e of list || []) if (e && typeof e === 'object') seen.add(e); };
+  mark(state.enemies);
+  mark(state.layers && state.layers.surface && state.layers.surface.enemies);
+  for (const chunk of Object.values(state.chunkStore || {})) mark(chunk && chunk.enemies);
+}
+function nightCapOf(state) {
+  return enemyCapOf(state);
+}
+function finishNightMetric(night, state, ended) {
+  if (!night) return null;
+  return {
+    ...night,
+    sourceCounts: { ...night.sourceCounts },
+    kindCounts: { ...night.kindCounts },
+    waveKindCounts: { ...night.waveKindCounts },
+    birthFrameCounts: { ...night.birthFrameCounts },
+    waveBatchCounts: { ...night.waveBatchCounts },
+    ended,
+    endAt: { day: state.day | 0, t: +(+state.t || 0).toFixed(2) },
+  };
+}
+
 // —— 打法（策略）——
 // 每个策略是 `(state, api, ctx) => void`，由 runReplay 每 N 步调一次。
 // ctx = { day, step, steps, deaths, inTide }（只给"决定"用，不许影响随机性之外的时序）
 export const POLICIES = {
+  // W20-R R3：固定种子首胜回放。集中维护一盏灯和辉光塔群，
+  // 熔炉持续炼油；Boss 靠近时才光爆，贴脸则后撤。参数只读数据表。
+  firstBoss(state, api, ctx) {
+    const cfg = ENDGAME.FIRST_BOSS_REPLAY;
+    const bs = state.buildings || [];
+    const p = state.player;
+    const lamps = bs.filter((b) => !b.site && b.type === 'lamp');
+    const towers = bs.filter((b) => !b.site && b.type === 'towerGlow');
+    const furnaces = bs.filter((b) => !b.site && b.type === 'furnace');
+
+    if (state.t < 300) {
+      if (!furnaces.length && ctx.ready('firstBoss.furnace', cfg.furnaceCooldown)) {
+        const spot = api.ringSpot(p, cfg.furnaceSpotMin, cfg.furnaceSpotMax);
+        if (spot && !api.place('furnace', spot.tx, spot.ty)) api.finish(spot.tx, spot.ty);
+      }
+      if (lamps.length < cfg.maxLamps && ctx.ready('firstBoss.lamp', 5)) {
+        const spot = api.ringSpot(p, cfg.lampSpotMin, cfg.lampSpotMax);
+        if (spot && !api.place('lamp', spot.tx, spot.ty)) api.finish(spot.tx, spot.ty);
+      }
+      for (const f of furnaces) {
+        if ((f.fuel || 0) <= 0 && state.res.vine > 0) api.addFire(f, 4);
+        api.setRecipe(f, 'fuel');
+        if ((f.fuel || 0) > 0 && ctx.ready('firstBoss.craft', cfg.craftCooldown)) api.workOnce(f);
+      }
+      if (towers.length < cfg.maxGlowTowers && ctx.ready('firstBoss.tower', 2)) {
+        const spot = api.towerSpot(state, lamps, cfg.towerSpotMin, cfg.towerSpotMax);
+        if (spot && !api.place('towerGlow', spot.tx, spot.ty)) api.finish(spot.tx, spot.ty);
+      }
+      for (const lamp of lamps) {
+        if ((lamp.fuel || 0) < cfg.lampRefuelBelow && state.res.fuel > 0
+            && ctx.ready(`firstBoss.refuel.${lamp.x}.${lamp.y}`, cfg.refuelCooldown)) api.refuel(lamp);
+      }
+    }
+
+    const core = (state.enemies || []).find((e) => e.alive && e.def?.boss);
+    if (core) {
+      const d = Math.hypot(core.x - p.x, core.y - p.y);
+      if (d < cfg.kiteRange && ctx.ready('firstBoss.kite', cfg.kiteCooldown)) {
+        const len = Math.max(0.1, d);
+        const tx = Math.round(p.x + ((p.x - core.x) / len) * cfg.kiteDistance);
+        const ty = Math.round(p.y + ((p.y - core.y) / len) * cfg.kiteDistance);
+        api.goto(Math.max(2, Math.min(state.map.w - 3, tx)), Math.max(2, Math.min(state.map.h - 3, ty)));
+      } else if (d <= cfg.pulseRange && state.skillCd <= 0 && state.res.fuel > 0) api.pulse();
+    } else if ((state.enemies || []).some((e) => e.alive
+        && Math.hypot(e.x - p.x, e.y - p.y) <= cfg.normalPulseRange)
+        && state.skillCd <= 0 && state.res.fuel > 0) api.pulse();
+  },
   // 守家型：把营地照亮、在光里建塔、夜里有怪就开光爆；血少了就封灯撤退
   home(state, api, ctx) {
     const bs = state.buildings || [];
@@ -243,6 +320,10 @@ export function runReplay(opts, api) {
   const rng = makeRng((o.seed ^ 0x9e3779b9) >>> 0);
   const rows = [];
   const days = [];
+  const nights = [];
+  const visitedChunks = new Set();
+  const seenEnemies = new WeakSet();
+  let activeNight = null;
   const cd = new Map();                           // 策略自己的冷却（step 计数）
   const stats = {};                               // 动作计数（回放台的可观测性："为什么没建成"先看这里）
   const ctx = {
@@ -258,10 +339,16 @@ export function runReplay(opts, api) {
     const S = api.state();
     lastDay = S.day;
     prevHp = S.playerHp;
+    markKnownEnemies(S, seenEnemies);
+    visitedChunks.add(`${S.chunkX | 0},${S.chunkY | 0}`);
     rows.push(curveRow(S));
     while (S.day <= o.days && steps < o.maxSteps) {
+      // 先把区块切换前已经存在的实体标记为“旧实体”，避免远征进入休眠区块时
+      // 把存档恢复的蚀兽误算作本夜新生成。
+      markKnownEnemies(S, seenEnemies);
       api.step(o.dt);
       steps += 1;
+      visitedChunks.add(`${S.chunkX | 0},${S.chunkY | 0}`);
       if (S.playerDead && !wasDead) deaths += 1;   // 阵亡计数（游戏会复活，所以要看边沿）
       wasDead = !!S.playerDead;
       // ⚠️`playerDead` 在同一帧内就会被 handleDeath 清掉（死亡结算与复活同帧），所以再加一道兜底：
@@ -270,6 +357,73 @@ export function runReplay(opts, api) {
       prevHp = S.playerHp;
       // 每帧采样最低血（“跨天那一刻的血”是幸存者偏差：夜里被打到 20% 又回血就看不见了）
       if (S.playerHp < minHpEver) { minHpEver = S.playerHp; minHpDay = S.day; }
+      if (isTide(S)) {
+        if (!activeNight || activeNight.day !== (S.day | 0)) {
+          if (activeNight) nights.push(finishNightMetric(activeNight, S, 'day-change'));
+          const trial = S.resonance && S.resonance.trial;
+          activeNight = {
+            day: S.day | 0,
+            tide: tideOf(S),
+            bossNight: (S.day | 0) % BOSS.EVERY === 0,
+            themeId: S.nightTheme || (trial && trial.themeId) || themeIdOf(S),
+            trialStatus: trial && trial.status || 'none',
+            trialSiteId: trial && trial.siteId || null,
+            spawnCap: nightCapOf(S),
+            forecastIntervals: wavesInWindow(S),
+            lightPressure: Math.round((S.nightLightPressure || 0) * 100) / 100,
+            challengeMul: Math.round((S.nightChallengeMul || 1) * 1000) / 1000,
+            spawned: 0,
+            waveSpawned: 0,
+            ventSpawned: 0,
+            nonWaveSpawned: 0,
+            bossSpawns: 0,
+            sourceCounts: {},
+            kindCounts: {},
+            waveKindCounts: {},
+            birthFrameCounts: {},
+            waveBatchCounts: {},
+            peakAlive: 0,
+            spawnBudget: S.nightSpawnBudget | 0,
+            budgetUsed: S.nightSpawnUsed | 0,
+          };
+        }
+        const surfaceEnemies = S.layers && S.layers.surface && S.layers.surface.enemies || S.enemies || [];
+        const birthFrame = {};
+        let waveBatch = 0;
+        for (const enemy of surfaceEnemies) {
+          if (!enemy || typeof enemy !== 'object' || seenEnemies.has(enemy)) continue;
+          seenEnemies.add(enemy);
+          const source = enemy._r6SpawnSource || 'unattributed';
+          activeNight.spawned += 1;
+          activeNight.sourceCounts[source] = (activeNight.sourceCounts[source] || 0) + 1;
+          birthFrame[source] = (birthFrame[source] || 0) + 1;
+          if (source === 'wave') {
+            activeNight.waveSpawned += 1;
+            waveBatch += 1;
+          } else {
+            activeNight.nonWaveSpawned += 1;
+            if (source === 'vent') activeNight.ventSpawned += 1;
+          }
+          if (enemy.def && enemy.def.boss) activeNight.bossSpawns += 1;
+          const kind = enemy.ekind || 'unknown';
+          activeNight.kindCounts[kind] = (activeNight.kindCounts[kind] || 0) + 1;
+          if (source === 'wave') activeNight.waveKindCounts[kind] = (activeNight.waveKindCounts[kind] || 0) + 1;
+        }
+        for (const [source, count] of Object.entries(birthFrame)) {
+          activeNight.birthFrameCounts[source] ||= {};
+          activeNight.birthFrameCounts[source][count] = (activeNight.birthFrameCounts[source][count] || 0) + 1;
+        }
+        if (waveBatch) activeNight.waveBatchCounts[waveBatch] = (activeNight.waveBatchCounts[waveBatch] || 0) + 1;
+        let alive = 0;
+        for (const enemy of surfaceEnemies) if (enemy && enemy.alive) alive += 1;
+        activeNight.peakAlive = Math.max(activeNight.peakAlive, alive);
+        activeNight.budgetUsed = S.nightSpawnUsed | 0;
+        const trial = S.resonance && S.resonance.trial;
+        activeNight.trialStatus = trial && trial.status || activeNight.trialStatus;
+      } else if (activeNight) {
+        nights.push(finishNightMetric(activeNight, S, 'dawn'));
+        activeNight = null;
+      }
       if (steps % o.everySteps === 0) policy(S, api, ctx);
       if (S.day !== lastDay) {                     // 跨天：记一行（day 字段已是新的一天）
         lastDay = S.day;
@@ -280,11 +434,11 @@ export function runReplay(opts, api) {
         rows.push(row);
       }
     }
+    if (activeNight) nights.push(finishNightMetric(activeNight, S, 'replay-end'));
     const last = rows[rows.length - 1];
     const minHp = Math.round(minHpEver === Infinity ? last.hp : minHpEver);
     const lightPressureMax = rows.reduce((n, row) => Math.max(n, row.lightPressure || 0), 0);
     const challengeMulMax = rows.reduce((n, row) => Math.max(n, row.challengeMul || 1), 1);
-    const chunks = new Set(rows.map((row) => `${row.chunkX},${row.chunkY}`));
     return {
       seed: o.seed, diff: o.diff, policy: typeof o.policy === 'string' ? o.policy : 'custom', days: o.days,
       ranDays: last.day, steps, secs: Math.round(steps * o.dt), ms: Math.round(performance.now() - t0),
@@ -292,7 +446,8 @@ export function runReplay(opts, api) {
       workersStart: rows[0].workers, workersEnd: last.workers, gravesEnd: last.graves,
       blightEnd: last.blight, blightL3End: last.blightL3, litEnd: last.lit, towersEnd: last.towers,
       fuelEnd: last.fuel, foodEnd: last.food, kills: last.kills, sealDay: last.sealUsed,
-      lightPressureMax, challengeMulMax, chunksVisited: Array.from(chunks),
+      lightPressureMax, challengeMulMax, chunksVisited: Array.from(visitedChunks),
+      nights,
       expedition: ctx.memo.expedition ? {
         phase: ctx.memo.expedition.phase,
         remote: ctx.memo.expedition.remote ? { ...ctx.memo.expedition.remote } : null,

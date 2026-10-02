@@ -1,22 +1,22 @@
 // main.js —— 启动 / 游戏循环 / 摄像机 / 调度
 import { TILE, VIEW_W, VIEW_H, state } from './core/state.js';
-import { genMap, mulberry } from './world/gen.js';
+import { genMap, mulberry, surfaceChunkMapSeed, surfaceChunkNightOpsSeed } from './world/gen.js';
 import { compute, lightDirty } from './world/light.js';
 import { findPath } from './world/pathfinding.js';
 import { Colonist } from './entities/colonist.js';
 import { bindInput, axis, held, pointer, takeWheel, takeDrag, takePress } from './systems/input.js';
 import { updateTime, phaseInfo, ambientOf, TIDE_START, TIDE_END, DUSK_START, isDawn, isTide } from './core/time.js';
-import { saveGame, loadGame, clearSave, migrateLegacy } from './core/save.js';
+import { snapshot, saveGame, loadGame, clearSave, migrateLegacy } from './core/save.js';
 import { settings, loadSettings } from './core/settings.js';
 import { DIFFICULTY } from './data/difficulty.js';
 import { createFirstSlice, firstSliceReport, normalizeFirstSlice } from './data/firstSlice.js';
 import { setupScreens, openScreen, closeScreens, backScreen, screenOpen, screenTop, screenClick, screenChange, screenInput, screenHover, applyArt } from './ui/screens.js';
 import { draw } from './systems/render.js';
-import { BUILD, LIGHT_LEVELS, workOf, CATEGORIES, canAfford, TOWER_LV, towerHp } from './data/buildings.js';
+import { BUILD, LIGHT_LEVELS, workOf, CATEGORIES, TOWER_LV, towerHp } from './data/buildings.js';
 import { loadError, normalizeMods, MAX_SLOTS } from './data/payload.js';   // W14-A 第 2 步：塔的载荷
 import { burnSecOf } from './data/fire.js';
 import { placeError, reservedTileError, tryPlace, demolish, buildingAt, advanceBuild, undoPlace, lockedByResearch, UNDO_SECS, upgradeBuilding } from './systems/building.js';
-import { ensureStorage, syncRes, migrateResToBeacon, storageStats, deposit, withdrawOne, allContainers, usedOf, withdraw } from './systems/storage.js';
+import { ensureStorage, syncRes, migrateResToBeacon, storageStats, deposit, withdrawOne, allContainers, usedOf, withdraw, canWithdraw, spendableOf } from './systems/storage.js';
 import { PACK_CAP, RES_NAME, RES_COLOR } from './data/storage.js';
 import { minimapHit } from './systems/minimap.js';
 import { PANELS, TAB_PANEL_IDS, togglePanel, closePanel, renderPanelHost, panelClick, setupPanelUI, setupStoreDrag, setPanelQuery, clearPanelQuery, applyPanelFilter, openStorePanel, openStationPanel, openPayloadPanel, panelHoverAt, panelConfirm, panelFocusInfo, resetPanelQueries } from './ui/panels.js';
@@ -24,6 +24,7 @@ import { resolveInteract, resolveInteractAt, tick, actionCooldown } from './syst
 import { inspectTile, inspectEnemy, inspectEnemyNear, inspectMapPoint, actLabel, workerTip, moraleTier, JOB_COLOR } from './ui/inspect.js';
 import { icon, resIcon, buildIcon, CAT_ICON } from './ui/icons.js';
 import { updateWaves } from './systems/waves.js';
+import { aliveEnemyCount, enemyCapOf } from './systems/spawnBudget.js';
 import { updatePlayerSkill, handleDeath, applyDamage } from './systems/combat.js';
 import { updateEnemies } from './entities/enemy.js';
 import { Enemy } from './entities/enemy.js';
@@ -36,7 +37,7 @@ import { expeditionHud, tickExpeditionGuide } from './systems/expedition.js';
 import { updateNightOps, ensureNightOps, inPatrolSector, patrolActive } from './systems/nightops.js';
 import { updateMind, ensureMind, graveStats, soothe, bondLevel } from './systems/mind.js';
 import { updateHazard } from './systems/hazard.js';
-import { updateLogistics, cacheStats } from './systems/logistics.js';
+import { updateLogistics, burnBuildingFuel, cacheStats } from './systems/logistics.js';
 import { updateCraft, addFire, setRecipe, workOnce, craftError } from './systems/craft.js';
 import { updateSmelt } from './systems/smelt.js';
 import { equipTool, unequipTool, heldTool } from './systems/tools.js';
@@ -48,11 +49,11 @@ import { rollTraits, sanityTier, SANITY_MAX, SOOTHE as SOOTHE_CFG } from './data
 import { ORDER_NAME } from './data/nightops.js';
 import { updateTowers } from './systems/towers.js';
 import { separateEntities, overlapStats } from './systems/collide.js';
-import { unlockTech, lampBurnMul, smeltBurnMul, costOf, sectOpen, knowSeenId, slotsOf } from './systems/research.js';
+import { unlockTech, lampBurnMul, costOf, sectOpen, knowSeenId, slotsOf } from './systems/research.js';
 import { checkHints, maybeHint, seenStats, HINTS } from './systems/hints.js';
 import { grantRelic, relicTotal, seriesGot } from './systems/relics.js';
 import { useShaft, bindLayer, ensureLayer, layerName } from './systems/layer.js';
-import { combatTable, waveReport, dpsReport, labReport, abilityReport, survivalReport, expeditionReport, ecologyReport, visualReport, crewReport } from './dev/observe.js';   // W14-A/W15-B/C/D/E：观测台
+import { combatTable, waveReport, dpsReport, labReport, abilityReport, survivalReport, expeditionReport, ecologyReport, visualReport, crewReport, resonanceReport, resonanceLightReport } from './dev/observe.js';   // W14-A/W15/W20-R：观测台
 import { runReplay } from './dev/replay.js';                                                     // W14-A 第 8 步：标准局回放台
 import { nightHud, spawnInterval, segAtRel } from './data/night.js';                                                     // W14-A 第 4/7 步：一夜三段 + 主题夜 + 刷怪节奏
 import { updateCarry, mount, unmount, mountError, unmountError, carryable } from './systems/carry.js';       // W14-A 第 5 步 5b：结构装载体
@@ -69,7 +70,9 @@ import { registerSprites } from './data/sprites.js';
 import { COLONISTS, ensureCrewCard, recordCrewEvent } from './data/colonists.js';
 import { restoreTask, restoreDirective, taskBoardStats } from './systems/taskBoard.js';
 import { installSelfTest, selfTestTick } from './dev/selftest.js';   // 开发期不变量检测器（W13-N）
-import { ensureSurfaceChunk, bindSurfaceChunk, tryCrossSurfaceExit, outpostReport, updateOutpostTravel, updateOutpostSettlement } from './world/chunks.js';
+import { ensureSurfaceChunk, bindSurfaceChunk, tryCrossSurfaceExit, outpostReport, updateOutpostTravel, updateOutpostSettlement, restoreSurfaceTerrain } from './world/chunks.js';
+import { initResonance, isResonanceSiteId, liveResonanceStatus } from './systems/resonance.js';
+import { createRunStats, normalizeRunStats, normalizeEndingRecord, restoreLegacyEnding } from './systems/ending.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -79,8 +82,11 @@ canvas.height = VIEW_H;
 
 // 画布 CSS 尺寸（跟随设置：自适应窗口 / 固定倍率）
 function fitCanvas() {
+  const fitRaw = Math.min(window.innerWidth / VIEW_W, window.innerHeight / VIEW_H);
+  // 像素画面优先使用整数倍率，避免自适应窗口产生 1.41×/2.11× 这类非均匀像素。
+  // 极小窗口仍允许降到小数倍率，否则画布会完全溢出；正常桌面窗口走 1×/2×/3×。
   const sc = settings.scale === 'fit'
-    ? Math.min(window.innerWidth / VIEW_W, window.innerHeight / VIEW_H) * 0.94
+    ? (fitRaw >= 1 ? Math.max(1, Math.floor(fitRaw)) : fitRaw)
     : Number(settings.scale);
   const w = Math.max(200, Math.round(VIEW_W * sc));
   const h = Math.round(w / (VIEW_W / VIEW_H));
@@ -174,7 +180,8 @@ function newGame(seed, diffKey = 'normal') {
   state.leakT = 0;
   state._blightDay = -1;
   state.seed = seed;
-  const surfMap = genMap(96, 72, seed, 'tundra');
+  const surfMap = genMap(96, 72, surfaceChunkMapSeed(seed, 0, 0), 'tundra');
+  surfMap._baseTiles = surfMap.tiles.slice();
   const cx0 = surfMap.w / 2, cy0 = surfMap.h / 2;
   // 分层世界：每层各持一份 map/建筑/光源/敌人，state 指向当前层
   state.layers = {
@@ -194,7 +201,7 @@ function newGame(seed, diffKey = 'normal') {
   state.chunkX = 0; state.chunkY = 0;
   state.lastShaft = null;
   bindLayer(state, 'surface');
-  ensureNightOps(state.layers.surface, seed);            // 夜行节点（夜辉草点位 / 潮穴）
+  ensureNightOps(state.layers.surface, surfaceChunkNightOpsSeed(seed, 0, 0)); // 夜行节点（夜辉草点位 / 潮穴）
   placeNaturalShaft(state);                              // 天然竖井（B37）：地表唯一的下深渊入口
   state.res = Object.assign({ ore: 0, vine: 0, fuel: 0, data: 0, core: 0, food: 0 }, diff.start);
   state.res.night = 0;
@@ -243,6 +250,10 @@ function newGame(seed, diffKey = 'normal') {
   state.playerDead = false;
   state.kills = 0;
   state.spawnT = 0;
+  state._legacyCapGrace = false;
+  state.nightSpawnDay = 0;
+  state.nightSpawnBudget = 0;
+  state.nightSpawnUsed = 0;
   state.wasTide = false;
   state.wasDawn = false;
   state.nightLightPressure = 0;
@@ -282,6 +293,10 @@ function newGame(seed, diffKey = 'normal') {
   state.sealT = 0;
   state.sealPrompt = null;
   state.milestone = { bossDefeated: false, bossDay: 7, clearedDay: 0 };
+  initResonance(state);
+  state.runStats = createRunStats();
+  state.ending = null;
+  state._endingPending = false;
   // 新局先锁定第 1 天，避免从上一局重开时身份/经历记录继承旧日数。
   state.day = 1;
   state.t = 0;
@@ -365,12 +380,32 @@ function clearGeneratedBuildings(state) {
   state.buildings.length = 0;
 }
 
+function restoreEnemies(list, map) {
+  if (!Array.isArray(list)) return null;
+  const restored = [];
+  for (const d of list) {
+    if (!d || typeof d.kind !== 'string' || !Number.isFinite(d.x) || !Number.isFinite(d.y)
+        || !map || d.x < 0 || d.y < 0 || d.x >= map.w || d.y >= map.h) continue;
+    try {
+      const e = new Enemy(d.kind, d.x, d.y, Number.isFinite(d.wob) ? d.wob : null);
+      for (const key of ['hp', 'maxHp', 'dmg', 'fuelDmg', 'atkT', 'wob', 'flash', 'slowT', 'stuck', 'summonT', 'tier', 'windT', 'dashT', 'dashVX', 'dashVY', 'fuseT', 'auraT', 'bossPhase', 'dawnA', '_bvx', '_bvy']) {
+        if (Number.isFinite(d[key])) e[key] = d[key];
+      }
+      if (d.leaked != null) e.leaked = !!d.leaked;
+      restored.push(e);
+    } catch (_) { /* 未知/损坏的敌人记录不应阻止整份旧档载入 */ }
+  }
+  return restored;
+}
+
 function restoreSurfaceChunks(state, list, currentX, currentY) {
   if (!Array.isArray(list) || !state.chunkStore) return;
   const current = ensureSurfaceChunk(state, currentX, currentY);
   for (const d of list) {
     const c = ensureSurfaceChunk(state, d.x | 0, d.y | 0);
     if (d.biome) { c.biome = d.biome; c.map.biome = d.biome; }
+    restoreSurfaceTerrain(c.map, d);
+    if (Array.isArray(d.enemies)) c.enemies = restoreEnemies(d.enemies, c.map);
     if (c === current) {
       if (d.outpost && typeof d.outpost === 'object') c.outpost = {
         nextT: Math.max(0, Number(d.outpost.nextT) || 0), ticks: Math.max(0, d.outpost.ticks | 0),
@@ -389,7 +424,6 @@ function restoreSurfaceChunks(state, list, currentX, currentY) {
     state.layers.surface = c; state.map = c.map; state.buildings = c.buildings; state.beacons = c.beacons; state.enemies = c.enemies; state.discovered = c.discovered;
     restoreBuildings(d.buildings || []);
     c.beacons = (d.beacons || []).map((b) => ({ ...b }));
-    if (d.nodes) for (let i = 0; i + 1 < d.nodes.length; i += 2) c.map.nodeAmt[d.nodes[i]] = d.nodes[i + 1];
     if (d.blight && d.blight.length) { const bl = c.map.blight || (c.map.blight = new Uint8Array(c.map.w * c.map.h)); for (let i = 0; i + 1 < d.blight.length; i += 2) bl[d.blight[i]] = d.blight[i + 1]; }
     if (d.fronts && d.fronts.length) { c.map.blightFronts = d.fronts.map((f) => ({ ...f, cells: Array.isArray(f.cells) ? f.cells.slice() : [] })); }
     if (Array.isArray(d.patches)) c.ecoPatches = d.patches.map((p) => ({ ...p }));
@@ -447,7 +481,7 @@ function restoreBuildings(list) {
       work: site ? (b.work || 0) : 0,
       hp: site ? 0 : hpAfterLoad(d, b),   // 旧存档没有 hp 字段 → 按满血；塔还要按**等级**算上限（第 6 步，Lv3 的 216 不能被子基础 120 砍掉）；没有结构概念的建筑（灯柱/工作台）保持原样
       fuel: b.fuel || 0, level: b.level == null ? 1 : b.level,
-      burnT: 0, cd: 0, growth: b.growth || 0, purifyT: 0,
+      burnT: Number.isFinite(b.burnT) ? Math.max(0, b.burnT) : 0, cd: 0, growth: b.growth || 0, purifyT: 0,
       prog: b.prog || 0, made: b.made || 0, off: !!b.off,
       recipe: b.recipe || d.recipe || null,                     // 配方站：存档旧实例时补默认配方
       fireMat: b.fireMat || d.fireMat || null,                   // 火种：烧什么由玩家定（旧档补默认）
@@ -459,6 +493,7 @@ function restoreBuildings(list) {
       //   ② 原本那口井会变成可拆（拆了就下不去深渊，首潜又自锁）
       natural: !!b.natural, entry: !!b.entry,
       open: d.gate ? b.open !== false : undefined,
+      resonanceSiteId: b.type === 'resonanceBeacon' && isResonanceSiteId(b.resonanceSiteId) ? b.resonanceSiteId : null,
       mounted,                                             // 背在身上的结构体（第 5 步 5b）
     });
   }
@@ -628,7 +663,7 @@ function renderHotbar() {
     const t = list[i];
     if (!t) continue;
     const lock = lockedByResearch(state, t);
-    const cls = `hslot${state.building === t ? ' on' : ''}${lock ? ' lock' : (canAfford(state.res, t) ? '' : ' poor')}`;
+    const cls = `hslot${state.building === t ? ' on' : ''}${lock ? ' lock' : (canWithdraw(state, (BUILD[t] || {}).cost) ? '' : ' poor')}`;
     if (slots[i].className !== cls) slots[i].className = cls;
   }
 }
@@ -697,6 +732,13 @@ function loadFromData(s) {
   state.firstSlice = normalizeFirstSlice(s.firstSlice, !state._replayMode, state.day, state.t);
   restoreBuildings(s.buildings || []);
   restoreSurfaceChunks(state, s.chunks, state.chunkX || 0, state.chunkY || 0);
+  // restoreSurfaceChunks 临时切到地表逐区恢复数据，结束时回到地表；深潜存档需重新绑定原层。
+  // 旧档没有 activeEnemies 时保留该层按种子生成的守卫，避免虚构它们过去的战斗状态。
+  if (s.layerId && s.layerId !== 'surface') bindLayer(state, s.layerId);
+  if (Array.isArray(s.activeEnemies)) state.enemies = restoreEnemies(s.activeEnemies, state.map);
+  state.bossRef = (state.enemies || []).find((e) => e.alive && e.def && e.def.boss) || null;
+  state._legacyCapGrace = !Number.isFinite(s.nightSpawnBudget) && isTide(state)
+    && aliveEnemyCount(state.enemies) > enemyCapOf(state);
   // 第 5 步 5b：读档后重建“背上的结构体”（存档只存 mounted 标记，不存引用）
   //   只在**当前层**找：它总是跟着玩家的层走（bindLayer 会把它搬过来）。多座就当数据异常，只认第一座。
   state.carried = null;
@@ -786,7 +828,7 @@ function loadFromData(s) {
     } : null,
   })) : [];
   state.reviveCount = Math.max(0, Math.min(SURVIVAL.REVIVE.MAX_USES, s.reviveCount | 0));
-  state.deathPack = s.deathPack ? { x: s.deathPack.x, y: s.deathPack.y, layerId: s.deathPack.layerId || state.layerId, stock: Object.assign({}, s.deathPack.stock || {}), held: s.deathPack.held || null, day: s.deathPack.day || state.day } : null;
+  state.deathPack = s.deathPack ? { x: s.deathPack.x, y: s.deathPack.y, layerId: s.deathPack.layerId || state.layerId, chunkX: Number.isInteger(s.deathPack.chunkX) ? s.deathPack.chunkX : (s.chunkX | 0), chunkY: Number.isInteger(s.deathPack.chunkY) ? s.deathPack.chunkY : (s.chunkY | 0), stock: Object.assign({}, s.deathPack.stock || {}), held: s.deathPack.held || null, day: s.deathPack.day || state.day } : null;
   state.rescue = null;
   state.medicalQueue = [];
   if (s.rescue && s.rescue.worker) {
@@ -835,8 +877,16 @@ function loadFromData(s) {
   state.nightLightPressure = s.nightLightPressure || 0;
   state.nightChallengeMul = s.nightChallengeMul || 1;
   state.bossSpawnedThisNight = !!s.bossSpawnedThisNight;
+  state.nightSpawnDay = s.nightSpawnDay | 0;
+  state.nightSpawnBudget = Number.isFinite(s.nightSpawnBudget) ? Math.max(0, s.nightSpawnBudget | 0) : 0;
+  state.nightSpawnUsed = Number.isFinite(s.nightSpawnUsed) ? Math.max(0, s.nightSpawnUsed | 0) : 0;
   state.lastSealDay = s.lastSealDay | 0;      // 第 7 步：封灯冷却起点（读档不该刷新冷却）
   if (s.milestone) state.milestone = s.milestone;
+  initResonance(state, s.resonance || null);                // 旧档无此字段：Boss 已倒时补发一次首站线索
+  state.runStats = normalizeRunStats(s.runStats);           // 旧档未记录的历史指标保持未知
+  state.ending = normalizeEndingRecord(s.ending);
+  state._endingPending = false;
+  if (!state.ending) restoreLegacyEnding(state);            // 仅从三站持久完成事实补建旧档结局，不猜历史数据
   if (s.playerMaxHp) state.playerMaxHp = s.playerMaxHp;
   if (s.pulseMul) state.pulseMul = s.pulseMul;
   if (s.kills != null) state.kills = s.kills;
@@ -1163,8 +1213,13 @@ function frame(now) {
   const tFrame = pnow();
   if (dt > 0.05) dt = 0.05;
   update(dt);                            // 暂停时内部直接返回
+  pmark('frame.update', tFrame);
+  const tMusic = pnow();
   updateMusic(state, dt);                // 音乐不随暂停停（菜单里也该有主题曲），所以放在这
+  pmark('frame.music', tMusic);
+  const tHover = pnow();
   updateHover();                         // 悬停信息 + E 目标高亮（暂停时也刷新）
+  pmark('frame.hover', tHover);
   const tDraw = pnow();
   draw(ctx);                             // 无论是否暂停都渲染（画面不冻结）
   pmark('draw', tDraw);
@@ -1454,18 +1509,7 @@ function simStep(dt) {
     }
   }
 
-  const L = BUILD.lamp;                               // 烧火的建筑：节奏看【火种】（档位越亮耗得越快）
-  for (const b of state.buildings) {
-    const def = BUILD[b.type];
-    if (!def || !def.burnSec || !(b.fuel > 0)) continue;
-    if (b.off) continue;                              // 熄火的自动熔炉：不发光也不烧火种
-    const lv = LIGHT_LEVELS[b.level == null ? 1 : b.level] || LIGHT_LEVELS[1];
-    const fireMul = def.fireMat ? smeltBurnMul(state) : 1;             // 知识「省料炉膛」只作用于炉火
-    const burnSec = burnSecOf(b, def) * lampBurnMul(state) * fireMul / lv.burn;   // 火的节奏看烧的是什么
-    b.burnT = (b.burnT || 0) + dt;
-    while (b.burnT >= burnSec) { b.burnT -= burnSec; b.fuel--; }
-    if (b.fuel <= 0) b.fuel = 0;
-  }
+  burnBuildingFuel(state.buildings, state, dt);
 
   for (const f of state.floaties) f.t += dt;          // 飘字计时
   state.floaties = state.floaties.filter((f) => f.t < f.life);
@@ -1514,7 +1558,17 @@ function simStep(dt) {
 function update(dt) {
   if (state.paused || !state.started) { drawHud(); return; }   // 暂停/菜单：不推进模拟，但 HUD 照常刷新
   acc = Math.min(acc + dt, MAX_ACC);
-  while (acc >= STEP) { acc -= STEP; simStep(STEP); } // 固定步推进
+  while (acc >= STEP && !state.paused) {
+    acc -= STEP;
+    simStep(STEP);
+    if (state._endingPending) {
+      state._endingPending = false;
+      if (settings.autosave) saveGame(state, 'auto');
+      openScreen('ending');
+      acc = 0;
+      break;
+    }
+  }
   mouseDuties();
   stepFirstNote(dt);
   const slicePhaseBefore = state.firstSlice && state.firstSlice.phase;
@@ -1736,7 +1790,7 @@ function drawHud() {
   let colony = null;
   if (nearHollow) colony = `${nearHollow.name} 蚀化了 · 按住 E 安抚（${SOOTHE_CFG.fuel} 燃料）`;
   else if (hollowW) colony = `${hollowW.name} 蚀化了 · 去安抚她，或用净光柱（8）照 ${SOOTHE_CFG.autoSec} 秒`;
-  else if (ws0.length && !state.res.food) colony = '断粮 · 7 建幽菌田（需光照）';
+  else if (ws0.length && !(spendableOf(state).food || 0)) colony = '断粮 · 7 建幽菌田（需光照）';
   else if ((state.playerRestT || 0) > 0) colony = `休整中 · 还需 ${Math.ceil(state.playerRestT)}s`;
   else if (state.playerInjury > 0) colony = `${injuryName(state.playerInjury)} · 靠营地火按 Z 吃热食`;
   else if ((state.playerHunger || 0) <= SURVIVAL.PLAYER.LOW_HUNGER) colony = '饱食偏低 · 按 Z 吃口粮';
@@ -1828,7 +1882,7 @@ function costText(cost, full) {
 }
 
 function resRow(state, r, dim) {
-  const v = state.res[r.k] || 0;
+  const v = spendableOf(state)[r.k] || 0;
   return `<div class="sb-res ${r.cls}${dim ? ' dim' : ''}"><span class="ricon">${resIcon(r.k, 13)}</span><i>${r.name}</i><b data-live="res-${r.k}">${v}</b></div>`;
 }
 
@@ -1836,8 +1890,9 @@ function resRow(state, r, dim) {
 function refreshResLive() {
   if (!sidebarEl) return;
   const set = (el, v) => { if (el && el.textContent !== v) el.textContent = v; };
-  for (const r of RES_ROWS) set(sidebarEl.querySelector(`[data-live="res-${r.k}"]`), String(state.res[r.k] || 0));
-  for (const r of RES_ROWS_DEEP) set(sidebarEl.querySelector(`[data-live="res-${r.k}"]`), String(state.res[r.k] || 0));
+  const available = spendableOf(state);
+  for (const r of RES_ROWS) set(sidebarEl.querySelector(`[data-live="res-${r.k}"]`), String(available[r.k] || 0));
+  for (const r of RES_ROWS_DEEP) set(sidebarEl.querySelector(`[data-live="res-${r.k}"]`), String(available[r.k] || 0));
   const row = sidebarEl.querySelector('[data-live="stg"]');
   if (row) {
     const st = storageStats(state);
@@ -2242,6 +2297,12 @@ window.__abilities = () => abilityReport(state);   // W14-A 第 3 步：四种�
 window.__survival = () => survivalReport(state);   // W15-B 第 0 步：生存资源、人员、死亡与节点基线（只读）
 window.__expedition = () => expeditionReport(state); // W15-B 第 0 步：区块远征基线（只读）
 window.__eco = () => ecologyReport(state);             // W15-C E0：生态/群系/前线观测（只读）
+window.__resonance = () => {
+  const report = resonanceReport(state); // W20-R：资源审计 + 首站运行态
+  report.currentSite = liveResonanceStatus(state);
+  report.lighting = resonanceLightReport(state, report.currentSite);
+  return report;
+};
 window.__slice = () => firstSliceReport(state);         // W17-F0：首局切片进度（只读；F1 起接入事件）
 window.__crew = () => crewReport(state);                // W16-D N0：拓荒者身份/任务/风险/关系观测（只读）
 window.__tasks = () => taskBoardStats(state);           // W16-D N1：任务板预约与调度观测（只读）
@@ -2448,9 +2509,21 @@ window.__rescue = (name, mode = 'down') => {
   return { name: w.name, downed: !!w.downed, rescue: state.rescue ? state.rescue.actor : null };
 };
 window.__screens = { open: openScreen, close: closeScreens, back: backScreen, top: screenTop };  // 调试：界面
+window.__ending = () => state.ending ? JSON.parse(JSON.stringify(state.ending)) : null;
+window.__showEnding = () => { if (!state.ending) return false; openScreen('ending'); return true; };
 window.__newGame = (seed, diff) => { newGame(seed == null ? (Math.random() * 1e9) | 0 : seed, diff || 'normal'); closeScreens(); };  // 调试：直接开新局
 window.__saveSlot = (slot) => saveGame(state, slot || 'auto');     // 调试：存档
 window.__loadSlot = (slot) => { const d = loadGame(slot || 'auto'); if (d) loadFromData(d); closeScreens(); return !!d; };
+// W20-R：场景检查点只在内存导出/恢复，不触碰 localStorage。
+// 终局首胜检查点必须经标准回放实际击破 Boss；此入口不注入里程碑或奖励。
+window.__checkpoint = () => snapshot(state);
+window.__restoreCheckpoint = (data) => { if (!data || typeof data !== 'object') return false; loadFromData(data); closeScreens(); return true; };
+window.__endgameCheckpoint = (opts = {}) => {
+  const result = window.__replay({ seed: 4242, diff: 'normal', days: 7, policy: 'firstBoss', ...opts });
+  if (!state.milestone?.bossDefeated) return { ok: false, reason: '回放未击破首个蚀巢核心', result, checkpoint: null };
+  return { ok: true, provenance: 'runReplay → simStep → onBossDefeated', result,
+    milestone: { ...state.milestone }, checkpoint: snapshot(state) };
+};
 // 调试：从**内存里的存档对象**重建世界（不碰 localStorage）。检测器的 save.roundtrip 用它真跑一遍读档路径 ——
 // 【为什么需要】`__check()` 只跑到“检测项”，不会碰 loadFromData/restoreBuildings；
 //   而这些函数一旦有未定义变量（如缺失的 m），普通游玩看不出来，**只有读档那一刻才崩**。

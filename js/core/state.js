@@ -20,7 +20,7 @@ export const state = {
   rescue: null,      // 当前救援会话（玩家或拓荒者）
   medicalQueue: [],  // 当前活跃区块的医疗站候诊引用（存档只保存拓荒者字段）
   pickups: [],       // 可拾取掉落物 [{x,y,kind,t,life}]
-  deathPack: null,   // 玩家死亡时留下的遗落包 {x,y,layerId,stock,held,day}
+  deathPack: null,   // 玩家死亡时留下的遗落包 {x,y,layerId,chunkX,chunkY,stock,held,day}
   memorial: [],      // 拓荒者死亡履历（有限事件，不保存运行时引用）
   reviveCount: 0,    // N5b：已使用的有限复苏次数
   patrol: null,      // 巡逻令 { dx, dy, day }
@@ -39,6 +39,8 @@ export const state = {
   playerDead: false,
   kills: 0,
   spawnT: 0,         // 波次生成计时
+  nightSpawnDay: 0, nightSpawnBudget: 0, nightSpawnUsed: 0, // 当前潮夜普通敌人总名额账本（不含 Boss 与 Boss 召唤）
+  _legacyCapGrace: false, // 旧版超 cap 潮夜存档仅允许存量敌人自然消退
   wasTide: false,
   wasDawn: false,    // 黎明边沿（黎明提示音/退场飘字只做一次）
   seen: {},          // 首次提示已经说过的那些（键在 systems/hints.js）—— 随存档走
@@ -60,6 +62,10 @@ export const state = {
   sealPrompt: null,
   sealWarnT: 0,              // “为什么现在按不了”的节流（复用 storeWarnTxt 那条警示通道）
   milestone: { bossDefeated: false, bossDay: 7, clearedDay: 0 },
+  resonance: null,        // W20-R：终局共鸣地点与施工状态（与营地 beacons 灯火分离）
+  runStats: null,         // W20-R R5：本局有限统计；旧档缺失时保持未知
+  ending: null,           // W20-R R5：三站完成后封存的一次性结局快照
+  _endingPending: false,  // 结局展示边沿，不进存档
   playerMaxHp: 100,
   pulseMul: 1,               // 光爆威力倍率（里程碑奖励）
   banner: null,              // 中央横幅 { title, sub, t, life }

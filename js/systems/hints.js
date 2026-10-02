@@ -7,6 +7,7 @@
 //   · 只提示"你现在就能做点什么"的事（空燃料、断粮、有人蚀化…）
 //   · 不解释数值、不写公式、不堆破折号（照 docs/COPY.md 的文案规范）
 //   · 状态型判定（资源为 0、有人在蚀化）比"事件型"更好写也更稳 —— 不需要在 8 个模块里埋钩子
+import { spendableOf } from './storage.js';
 
 export const HINTS = {
   fuelEmpty: '燃料空了 · 采辉髓到熔炉炼油，藤木也能直接引火',
@@ -43,8 +44,9 @@ export function maybeHint(state, key, show) {
 // 说明：blight 用 state._blightAny（由 systems/blight.js 第一次累积时点亮）而不是每帧扫地图
 export function checkHints(state, dt, show) {
   if (!state.started || !show) return;
-  if ((state.res.fuel || 0) <= 0) maybeHint(state, 'fuelEmpty', show);
-  if ((state.res.food || 0) <= 0 && (state.workers || []).length) maybeHint(state, 'noFood', show);
+  const have = spendableOf(state);
+  if ((have.fuel || 0) <= 0) maybeHint(state, 'fuelEmpty', show);
+  if ((have.food || 0) <= 0 && (state.workers || []).length) maybeHint(state, 'noFood', show);
   if (state._blightAny) maybeHint(state, 'firstBlight', show);
   if (!state.seen.firstHollow && (state.workers || []).some((w) => w.hollow)) maybeHint(state, 'firstHollow', show);
   // 第 8 步（B18）：挨饿要“先说一声”—— 缓冲期内提示，玩家还有时间反应（而不是只看到墓碑）

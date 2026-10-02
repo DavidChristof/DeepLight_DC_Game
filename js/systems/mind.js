@@ -2,11 +2,12 @@
 // 与士气（分钟级情绪）分工：士气决定"当下干什么"，心志决定"她还是不是一个人"
 import { BOND, GRIEF_DAYS, SOOTHE, SANITY_MAX, sanityTier, graveRadius } from '../data/traits.js';
 import { BUILD } from '../data/buildings.js';
-import { withdrawOne, deposit } from './storage.js';
+import { withdrawOne, deposit, spendableOf } from './storage.js';
 import { purify } from './blight.js';
 import { memoryGain } from './research.js';
 import { isTide, isNight } from '../core/time.js';
 import { COLONISTS, roleIs, personalityIs } from '../data/colonists.js';
+import { recordRunCount } from './ending.js';
 
 // —— 基础查询 ——
 
@@ -132,8 +133,8 @@ export function updateMind(state, dt) {
     const tier = sanityTier(w.sanity);
     if (tier.id === 'prehollow' && !w.symT && (night || tide)) {
       w.symT = 1;                                        // 每天只发作一次
-      if ((state.res.food || 0) > 0 && Math.random() < 0.35) {
-        withdrawOne(state, 'food', 1, w.x, w.y);
+      if ((spendableOf(state).food || 0) > 0 && Math.random() < 0.35
+          && withdrawOne(state, 'food', 1, w.x, w.y) === null) {
         state.floaties.push({ x: w.x, y: w.y - 0.6, txt: `${w.name} 悄悄吃掉了 1 份食物`, color: '#ffb3b3', t: 0, life: 1.6 });
       }
       if (Math.random() < 0.45) {
@@ -183,6 +184,7 @@ export function hollow(state, w) {
   if (w.tool) { deposit(state, w.tool, 1, w.x, w.y); w.tool = null; }   // 人已经不是人了，工具留下
   const mind = ensureMind(state);
   mind.hollowed += 1;
+  recordRunCount(state, 'hollowings');
   state.floaties.push({ x: w.x, y: w.y - 0.7, txt: `${w.name} 的心志碎了…`, color: '#c07bff', t: 0, life: 2.4 });
   state.banner = { title: `${w.name} 蚀化了`, sub: '——她只朝着光走。按住 E 安抚（消耗燃料），或用净光柱照她', t: 0, life: 6 };
   state._sidebarSig = null;
@@ -209,6 +211,7 @@ export function soothe(state, w, gain = SOOTHE.gain, free = false) {
     w.hp = Math.max(w.hp, Math.ceil(w.maxHp * 0.5));
     w.job = 'flee';
     ensureMind(state).soothed += 1;
+    recordRunCount(state, 'soothings');
     const mg = memoryGain(state);                    // 知识「她带回的记忆」：安抚成功后全队心志 +10
     if (mg > 0) {
       for (const o of state.workers || []) {

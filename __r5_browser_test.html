@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>W20-R R5 结局与存档隔离回归</title>
+<body style="margin:16px;background:#101923;color:#e5edf5;font:13px Consolas,monospace">
+<h1>W20-R R5 · 结局、迁移与存档往返</h1>
+<p id="status" style="color:#cbb981">正在备份并隔离正式存档…</p>
+<details><summary>展开回归明细</summary><pre id="out" style="max-height:180px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere">准备测试…</pre></details>
+<iframe id="game" title="R5 隔离游戏实例" style="width:min(960px,96vw);height:min(640px,80vh);border:1px solid #607080"></iframe>
+<script type="module">
+(() => {
+  const officialKeys = ['deep-light-saves-v2', 'deep-light-settings-v1', 'deep-light-ui-v1'];
+  const recoveryKey = '__deep_light_r5_storage_backup_v1';
+  const checkpointKey = '__deep_light_r4a_checkpoints_v1';
+  const out = document.getElementById('out');
+  const status = document.getElementById('status');
+  const frame = document.getElementById('game');
+  const emit = (name, value) => {
+    out.textContent += `\n${name}: ${JSON.stringify(value, null, 2)}`;
+    if (name === 'R5 browser regression result') {
+      status.textContent = value.ok
+        ? `R5 通过 · 80/80 自检 × ${value.states.length} 态 · __srcCheck ${value.source.files}/${value.source.files} · 1200 步 0 类 · 结局存档/继续及新旧档往返通过 · 正式存档未改变`
+        : `R5 未通过 · 请展开回归明细查看原因`;
+      status.style.color = value.ok ? '#91d7ad' : '#ff9c8c';
+    } else if (name === 'R5 browser regression failed') {
+      status.textContent = 'R5 未通过 · 正式存档已尝试恢复，请展开回归明细核对';
+      status.style.color = '#ff9c8c';
+    }
+  };
+  const rawOfficial = () => Object.fromEntries(officialKeys.map((key) => [key, localStorage.getItem(key)]));
+  const restoreOfficial = () => {
+    let backup;
+    try { backup = JSON.parse(localStorage.getItem(recoveryKey) || 'null'); } catch (_) { }
+    if (!backup || !backup.keys) return { restored: false, reason: '缺少 R5 恢复备份，请保留页面并检查' };
+    for (const key of officialKeys) {
+      const raw = backup.keys[key];
+      raw == null ? localStorage.removeItem(key) : localStorage.setItem(key, raw);
+    }
+    const unchanged = Object.fromEntries(officialKeys.map((key) => [key, localStorage.getItem(key) === backup.keys[key]]));
+    localStorage.removeItem(recoveryKey);
+    return { restored: true, unchanged };
+  };
+  // 若上次运行被中断，先恢复其原始值，再创建本轮备份。
+  if (localStorage.getItem(recoveryKey)) emit('recovered stale R5 backup', restoreOfficial());
+  const storageBefore = rawOfficial();
+  try {
+    localStorage.setItem(recoveryKey, JSON.stringify({ version: 1, createdAt: Date.now(), keys: storageBefore }));
+    const settings = storageBefore['deep-light-settings-v1'] ? JSON.parse(storageBefore['deep-light-settings-v1']) : {};
+    localStorage.setItem('deep-light-settings-v1', JSON.stringify({ ...settings, autosave: false }));
+  } catch (error) {
+    emit('setup failed', String(error && error.message || error));
+    return;
+  }
+  window.addEventListener('beforeunload', () => { if (!out.dataset.done) restoreOfficial(); });
+
+  frame.addEventListener('load', async () => {
+    const game = frame.contentWindow;
+    const results = { ok: false, states: [], source: null, watch: null, endingRoundtrip: null, legacy: null };
+    try {
+      // reload 会重读设置；每次载入后的第一条游戏脚本立即关闭自动存档。
+      game.__settings.autosave = false;
+      const check = (state) => {
+        const row = { state, check: game.__check({ includeKnown: true }) };
+        results.states.push(row);
+        if (!row.check?.ok || row.check.fails?.length) throw new Error(`${state} __check 失败：${JSON.stringify(row.check)}`);
+      };
+      check('menu');
+      game.__newGame(4242, 'normal');
+      game.__settings.autosave = false;
+      check('new-game');
+      const roundtrip = game.__check({ includeKnown: true, roundtrip: true });
+      results.states.push({ state: 'save-load-roundtrip', check: roundtrip });
+      if (!roundtrip?.ok || roundtrip.fails?.length) throw new Error(`新局往返 __check 失败：${JSON.stringify(roundtrip)}`);
+      const replay = game.__replay({ seed: 4242, diff: 'normal', days: 3, policy: 'home' });
+      game.__watch(true, 20);
+      game.__steps(1200);
+      results.watch = { classes: game.__testLogRaw().length, summary: game.__testLog() };
+      game.__watch(false);
+      const replayCheck = game.__check({ includeKnown: true });
+      results.states.push({ state: 'three-day-replay', check: replayCheck,
+        replay: { ranDays: replay.ranDays, steps: replay.steps, deaths: replay.deaths, kills: replay.kills } });
+      if (!replayCheck?.ok || replayCheck.fails?.length || results.watch.classes !== 0)
+        throw new Error(`回放或 1200 步观察器失败：${JSON.stringify({ replayCheck, watch: results.watch })}`);
+      results.source = await game.__srcCheck();
+      if (!results.source?.ok || results.source.fails?.length) throw new Error(`__srcCheck 失败：${JSON.stringify(results.source)}`);
+
+      const savedCheckpoint = JSON.parse(localStorage.getItem(checkpointKey) || 'null');
+      if (savedCheckpoint?.schema !== 1 || savedCheckpoint?.seed !== 4242 || !savedCheckpoint.latest)
+        throw new Error(`缺少 R4 已完成三站的真实检查点：${JSON.stringify({ phase: savedCheckpoint?.phase, seed: savedCheckpoint?.seed })}`);
+      const clone = (value) => JSON.parse(JSON.stringify(value));
+      const completedFacts = clone(savedCheckpoint.latest);
+      const completedDays = ['first', 'second', 'third'].map((id) => completedFacts.resonance?.sites?.[id]?.completedDay ?? null);
+      if (JSON.stringify(completedDays) !== JSON.stringify([9, 11, 13])
+        || ['first', 'second', 'third'].some((id) => completedFacts.resonance?.sites?.[id]?.status !== 'complete'))
+        throw new Error(`检查点缺少三站真实完成事实：${JSON.stringify(completedDays)}`);
+
+      const endingApi = await import('/js/systems/ending.js');
+      delete completedFacts.ending;
+      completedFacts._endingPending = false;
+      if (!endingApi.settleResonanceEnding(completedFacts)) throw new Error('三站已完成事实未能生成一次性结局快照');
+      const firstRecord = JSON.stringify(completedFacts.ending);
+      if (completedFacts.ending.legacy || completedFacts.ending.sites?.length !== 3
+        || completedFacts.ending.sites.map((site) => site.completedDay).join(',') !== '9,11,13'
+        || completedFacts.ending.award?.granted !== true || completedFacts._endingPending !== true)
+        throw new Error(`新结局快照事实/一次性标记异常：${firstRecord}`);
+      if (endingApi.settleResonanceEnding(completedFacts) || JSON.stringify(completedFacts.ending) !== firstRecord)
+        throw new Error('重复结算改写结局或重复授予纪念记录');
+
+      if (!game.__restoreCheckpoint(completedFacts)) throw new Error('无法载入新结局快照');
+      game.__settings.autosave = false;
+      const beforeSave = game.__ending();
+      const saved = game.__saveSlot('s3');
+      const stored = JSON.parse(localStorage.getItem('deep-light-saves-v2') || '{}').s3;
+      if (!saved || !stored?.ending) throw new Error('生产存档入口未写入临时结局记录');
+      const loaded = game.__loadSlot('s3');
+      game.__settings.autosave = false;
+      const afterLoad = game.__ending();
+      const stable = loaded && JSON.stringify(beforeSave) === JSON.stringify(afterLoad);
+      results.endingRoundtrip = { saveSlot: 's3 临时槽', loaded, exactRecord: stable,
+        outcome: afterLoad?.id, settledDay: afterLoad?.settledDay, siteDays: afterLoad?.sites?.map((site) => site.completedDay) };
+      if (!stable) throw new Error(`结局存读往返不一致：${JSON.stringify({ beforeSave, afterLoad })}`);
+
+      if (!game.__showEnding()) throw new Error('结局页未打开');
+      await new Promise((resolve) => game.requestAnimationFrame(resolve));
+      const endingCard = game.document.querySelector('#screen .endingcard');
+      const endingText = endingCard?.innerText || '';
+      const rect = endingCard?.getBoundingClientRect();
+      const visual = { visible: !!endingCard && rect.width > 0 && rect.height > 0,
+        title: endingCard?.querySelector('h1')?.textContent || null,
+        hasRoster: endingText.includes('拓荒队'), hasSites: endingText.includes('三座信标'),
+        hasUnknownMetrics: endingText.includes('未记录'), hasContinue: endingText.includes('继续拓荒'),
+        clientHeight: endingCard?.clientHeight || 0, scrollHeight: endingCard?.scrollHeight || 0 };
+      results.endingRoundtrip.visual = visual;
+      if (!visual.visible || !visual.hasRoster || !visual.hasSites || !visual.hasUnknownMetrics || !visual.hasContinue)
+        throw new Error(`结局界面内容缺失或未显示：${JSON.stringify(visual)}`);
+
+      // 走结局页按钮的正式委托事件；自动档写入仍处于隔离备份保护中。
+      const saveEndingButton = game.document.querySelector('#screen [data-act="save-ending"]');
+      saveEndingButton?.click();
+      const autoEnding = JSON.parse(localStorage.getItem('deep-light-saves-v2') || '{}').auto?.ending;
+      const saveToAutosave = !!autoEnding && JSON.stringify(autoEnding) === JSON.stringify(beforeSave);
+      results.endingActions = { saveToAutosave };
+      if (!saveToAutosave) throw new Error('结局页“保存到自动档”按钮没有保存当前结局快照');
+
+      const continueButton = game.document.querySelector('#screen [data-act="continue-ending"]');
+      continueButton?.click();
+      await new Promise((resolve) => game.requestAnimationFrame(resolve));
+      const continued = game.document.getElementById('screen')?.classList.contains('hidden') === true;
+      results.endingActions.continue = continued;
+      if (!continued) throw new Error('结局页“继续拓荒”按钮没有关闭结局并返回游戏');
+
+      const oldSave = clone(savedCheckpoint.latest);
+      delete oldSave.ending; delete oldSave.runStats;
+      if (!game.__restoreCheckpoint(oldSave)) throw new Error('无法载入无 R5 字段的旧版存档快照');
+      game.__settings.autosave = false;
+      const migrated = game.__ending();
+      results.legacy = { migrated: !!migrated?.legacy, outcome: migrated?.id,
+        settledDay: migrated?.settledDay, bossDay: migrated?.bossDay, kills: migrated?.kills,
+        statsUnknown: migrated?.stats === null, rosterUnknown: migrated?.crew === null,
+        siteDays: migrated?.sites?.map((site) => site.completedDay) };
+      if (!migrated?.legacy || migrated.id !== 'afterglow' || migrated.settledDay !== 13
+        || migrated.bossDay !== 7 || migrated.kills !== null || migrated.stats !== null || migrated.crew !== null)
+        throw new Error(`旧存档迁移伪造了缺失历史：${JSON.stringify(results.legacy)}`);
+      if (!game.__showEnding()) throw new Error('旧档结局页未打开');
+      const oldText = game.document.querySelector('#screen .endingcard')?.innerText || '';
+      if (!oldText.includes('旧存档没有完整结算记录') || !oldText.includes('未记录'))
+        throw new Error(`旧档缺失字段没有如实呈现：${oldText}`);
+      const legacyBeforeSave = JSON.stringify(migrated);
+      const legacySaved = game.__saveSlot('s2');
+      const storedLegacy = JSON.parse(localStorage.getItem('deep-light-saves-v2') || '{}').s2;
+      const legacyLoaded = game.__loadSlot('s2');
+      game.__settings.autosave = false;
+      const legacyAfterLoad = game.__ending();
+      const legacyStable = legacyLoaded && JSON.stringify(legacyAfterLoad) === legacyBeforeSave
+        && !!storedLegacy?.ending?.legacy;
+      results.legacy.saveLoadStable = legacyStable;
+      if (!legacySaved || !legacyStable) throw new Error(`旧档迁移后的结局记录未能保存并原样读回：${JSON.stringify({ legacySaved, legacyLoaded, before: migrated, after: legacyAfterLoad })}`);
+      const legacyCheck = game.__check({ includeKnown: true });
+      results.states.push({ state: 'legacy-save-migrated', check: legacyCheck });
+      if (!legacyCheck?.ok || legacyCheck.fails?.length) throw new Error(`旧档迁移态 __check 失败：${JSON.stringify(legacyCheck)}`);
+
+      // 最终将可视页面留在新结局；只在临时槽中写过测试，下一步即恢复正式 storage。
+      game.__restoreCheckpoint(completedFacts);
+      game.__settings.autosave = false;
+      game.__showEnding();
+      const restored = restoreOfficial();
+      results.storageRestored = restored;
+      results.autosaveDisabled = game.__settings.autosave === false;
+      results.ok = results.states.every((row) => row.check?.ok && !row.check.fails?.length)
+        && results.source.ok && results.watch.classes === 0 && results.endingRoundtrip.exactRecord
+        && results.endingRoundtrip.visual.visible && results.endingActions.saveToAutosave
+        && results.endingActions.continue && results.legacy.migrated
+        && restored.restored && Object.values(restored.unchanged).every(Boolean);
+      emit('R5 browser regression result', results);
+      out.dataset.done = 'true'; out.dataset.result = results.ok ? 'passed' : 'failed';
+    } catch (error) {
+      game.__watch(false);
+      results.error = String(error && error.stack || error);
+      const restored = restoreOfficial();
+      results.storageRestored = restored;
+      emit('R5 browser regression failed', results);
+      out.dataset.done = 'true'; out.dataset.result = 'failed';
+    }
+  }, { once: true });
+  frame.src = '/';
+})();
+</script>
+</body>
+</html>

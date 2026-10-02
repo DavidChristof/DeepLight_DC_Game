@@ -24,23 +24,23 @@
 //   · 未覆盖（留给后续步骤）：跨层建筑格校验、存档往返指纹、交互矩阵、面板矩阵
 import { state } from '../core/state.js';
 import { isTide, isDawn, isNight, phaseIndexOf, DAY_SECS, TIDE_START, TIDE_END, DAY_END, DUSK_START, MORNING_SECS, DAWN_T } from '../core/time.js';
-import { allContainers, packContainer, usedOf, deposit, withdrawOne } from '../systems/storage.js';
+import { allContainers, packContainer, usedOf, deposit, withdraw, withdrawOne, canWithdraw } from '../systems/storage.js';
 import { PULSE, TOWER, WAVES, BOSS, TYPES, TYPE_ORDER, TYPE_NAME, armorMul, LIGHT_FEAR_BURN, ABILITY, tideOf, HAND_FIRE, CARRY, RETREAT } from '../data/combat.js';   // W14-A：战斗数值唯一数据源
 import { SURVIVAL } from '../data/survival.js';
 import { MODS, MOD_ORDER, SHAPE_MODS, FUEL_PER_MOD, MAX_SLOTS, SLOT_TECHS, loadError, payloadStats, allLoads, allCombos, towerTypes, dmgMulRange, lvMulRange } from '../data/payload.js';
-import { slotsOf } from '../systems/research.js';
+import { slotsOf, req2Text } from '../systems/research.js';
 import { pulseMul, pulseRangeMul, towerDmgMul, towerRateMul, owlDmgMul } from '../systems/research.js';
 import { blightStats, BLIGHT, BLIGHT_MAX, ensureBlight } from '../systems/blight.js';
 import { STARVE } from '../data/traits.js';
 import { makeRng, curveRow, POLICIES } from './replay.js';
 import { overlapStats } from '../systems/collide.js';
 import { RES_ORDER, RES_NAME, CAMP_CAP, PACK_CAP, STORE_CAP, STORE_ORDER } from '../data/storage.js';
-import { BUILD, CATEGORIES, CATEGORY_OF, TOWER_LV, TOWER_LV_MAX, towerHp, upgradeCostFor, PRISM_LIT, PRISM_MAX_HOPS } from '../data/buildings.js';
+import { BUILD, LIGHT_LEVELS, CATEGORIES, CATEGORY_OF, TOWER_LV, TOWER_LV_MAX, towerHp, upgradeCostFor, PRISM_LIT, PRISM_MAX_HOPS } from '../data/buildings.js';
 import { beamNeighbor } from '../systems/towers.js';
 import { RESEARCH, RESEARCH_ORDER, SECTS } from '../data/research.js';
 import { RECIPES, TOOLS, TOOL_ORDER, recipesOf, canFire } from '../data/tools.js';
 import { canMineRock, mineTimeMul } from '../systems/tools.js';
-import { placeError } from '../systems/building.js';
+import { advanceBuild, buildCostOf, lockedByResearch, placeError, removeBuilding, tryPlace, undoPlace } from '../systems/building.js';
 import { resolveInteract, resolveInteractAt, E_REACH } from '../systems/interact.js';
 import { CODEX, weakTextOf } from '../data/codex.js';
 import { VISUAL, visualSpec } from '../data/visual.js';
@@ -49,13 +49,16 @@ import { HINTS } from '../systems/hints.js';
 import { SRC_FILES } from './filelist.js';
 import { KEY_ACTIONS } from '../data/keymap.js';
 import { SFX_DEFS } from '../data/sfx.js';
-import { FUELS, FUEL_ORDER } from '../data/fire.js';
+import { FUELS, FUEL_ORDER, burnSecOf } from '../data/fire.js';
+import { NIGHTBLOOM } from '../data/nightops.js';
 import { ENEMIES, KINDS, kindFor, bandOf } from '../data/enemies.js';
-import { SEGMENTS, THEMES, NIGHT, TIDE_SECS, themeIdOf, themeOf, signatureOf, planNight, nightPlan, mainKindOf, nightHud, wavesLeft, wavesInWindow, spawnInterval, segAtRel } from '../data/night.js';
+import { SEGMENTS, THEMES, NIGHT, TIDE_SECS, themeIdOf, themeOf, signatureOf, planNight, nightPlan, mainKindOf, nightHud, wavesLeft, wavesInWindow, spawnInterval, waveUnitsInWindow, waveUnitsElapsed, segAtRel } from '../data/night.js';
+import { aliveEnemyCount, enemyCapOf, ensureNightSpawnBudget, recordNightSpawn, remainingNightSpawnBudget, screenEnemyRoom } from '../systems/spawnBudget.js';
+import { burnBuildingFuel } from '../systems/logistics.js';
 import { sealError, sealNow, litLampStats } from '../systems/seal.js';
 import { DIFFICULTY, DIFF_ORDER } from '../data/difficulty.js';
 import { PANELS, panelQuerySnapshot } from '../ui/panels.js';
-import { T } from '../world/map.js';
+import { createMap, T } from '../world/map.js';
 import { NODE_AMT, NODE_DEEP, nodeMax, nodeStart, nodeFallback, ROCK_START } from '../data/nodes.js';
 import { LAYER_ORDER, LAYER_NAMES, LAYER_META } from '../data/layers.js';
 import { snapshot } from '../core/save.js';
@@ -65,6 +68,13 @@ import { TASKS, DIRECTIVES, taskFromSave, directiveFromSave } from '../data/task
 import { taskBoardStats } from '../systems/taskBoard.js';
 import { FIRST_SLICE, createFirstSlice, normalizeFirstSlice } from '../data/firstSlice.js';
 import { EXPEDITION } from '../data/expedition.js';
+import { ENDGAME } from '../data/endgame.js';
+import { createRunStats, normalizeEndingRecord, normalizeRunStats, recordRunCount, recordRunMaximum, restoreLegacyEnding, settleResonanceEnding } from '../systems/ending.js';
+import { genDepth, genMap, surfaceChunkMapSeed, surfaceChunkNightOpsSeed, surfaceChunkSeed } from '../world/gen.js';
+import { ensureSurfaceChunk, restoreSurfaceTerrain } from '../world/chunks.js';
+import { ensureNightOps } from '../systems/nightops.js';
+import { siteAnchorAudit, resonanceLightReport, resonanceReport, resonanceSitePrepBudget } from './observe.js';
+import { beginStandardTrial, initResonance, lockStandardTrialAtTide, retryPendingResonanceSite, resonancePlaceError, resonanceSiteForBuild, settleStandardTrialAtDawn, updateStandardTrial } from '../systems/resonance.js';
 
 // 节点地形与上限都取自 data/nodes.js（唯一数据源，B13 之后不再手写第二份）
 const NODE_TILES = Object.keys(NODE_AMT).map(Number).concat([T.ROCK]);
@@ -479,6 +489,7 @@ const RUNTIME_CHECKS = [
       if (!(state.playerRestT >= 0 && state.playerRestT <= SURVIVAL.REST.DURATION)) out.push(`玩家休整计时=${state.playerRestT}`);
       if (state.deathPack) {
         if (!Number.isFinite(state.deathPack.x) || !Number.isFinite(state.deathPack.y) || !state.deathPack.layerId) out.push('遗落包坐标/层无效');
+        if (!Number.isInteger(state.deathPack.chunkX) || !Number.isInteger(state.deathPack.chunkY)) out.push('遗落包缺少所属区块坐标');
         if (!Object.values(state.deathPack.stock || {}).some((n) => n > 0) && !state.deathPack.held) out.push('空遗落包仍存在');
       }
       if (state.rescue) {
@@ -614,12 +625,10 @@ const RUNTIME_CHECKS = [
     id: 'enemy.cap',
     run() {
       if (!state.started) return null;
-      const tide = Math.min(state.day, WAVES.TIDE_MAX);
-      const dm = state.diff || { capMul: 1 };
-      const cap = Math.round((WAVES.CAP_BASE + tide * WAVES.CAP_PER_TIDE
-        + (state.day % BOSS.EVERY === 0 ? WAVES.CAP_BOSS_NIGHT : 0)) * (dm.capMul || 1));
-      const n = (state.enemies || []).filter((e) => e.alive).length;
-      if (n > Math.max(8, cap) * 1.5) return bad('enemy.cap', `同屏 ${n} 只 > 上限 ${cap} 的 1.5 倍`, []);
+      const cap = enemyCapOf(state);
+      const n = aliveEnemyCount(state.enemies);
+      if (n <= cap) state._legacyCapGrace = false;
+      if (n > cap && !state._legacyCapGrace) return bad('enemy.cap', `同屏 ${n} 只 > 硬上限 ${cap}`, []);
       return null;
     },
   },
@@ -915,6 +924,27 @@ const RUNTIME_CHECKS = [
       return out.length ? bad('store.pack', '背包没有被当成容器（采集会白丢）', out.slice(0, MAX_DETAIL)) : null;
     },
   },
+  {
+    id: 'store.chunk-scope',
+    run() {
+      const remoteStock = { ore: 3 };
+      const fake = {
+        layerId: 'surface', chunkX: 1, chunkY: 0,
+        layers: { surface: { beacons: [], buildings: [] } },
+        chunkStore: { '0,0': { id: '0,0', cx: 0, cy: 0, beacons: [{ stock: remoteStock }], buildings: [] } },
+        player: { x: 4, y: 4 }, pack: { stock: {}, cap: 24 }, res: {},
+      };
+      const out = [];
+      if (canWithdraw(fake, { ore: 1 })) out.push('远端区块库存被判为当前可支付物资');
+      if (withdrawOne(fake, 'ore', 1) === null) out.push('远端库存可被直接扣除');
+      if (remoteStock.ore !== 3) out.push(`远端库存被修改为 ${remoteStock.ore}（应为 3）`);
+      fake.pack.stock.ore = 1;
+      if (withdraw(fake, { ore: 2 }) === null) out.push('库存不足时错误地返回支付成功');
+      if (fake.pack.stock.ore !== 1 || remoteStock.ore !== 3) out.push('支付失败时仍发生了部分扣料');
+      if (!canWithdraw(fake, { ore: 1 })) out.push('玩家背包物资未计入当前可支付库存');
+      return out.length ? bad('store.chunk-scope', '支付绕过跨区块手动运输边界', out.slice(0, MAX_DETAIL)) : null;
+    },
+  },
   // A29 载荷槽位（W14-A 第 2c 步）：研究门槛必须真的生效
   // 【重要分工】`build.load` 只守**结构合法性**（用 MAX_SLOTS），因为调试口 `__load(...,force)`
   //   有意绕过研究；而“装了几个槽”是**安装点**的规则（2d 的面板 + `__load` 默认路径）。
@@ -1134,6 +1164,17 @@ const RUNTIME_CHECKS = [
     run() {
       if (!state.started) return null;
       const out = [];
+      const terrain = createMap(3, 2);
+      terrain.set(0, 0, T.ORE); terrain.nodeAmt[0] = NODE_AMT[T.ORE];
+      terrain.set(1, 0, T.VINE); terrain.nodeAmt[1] = NODE_AMT[T.VINE];
+      terrain.set(2, 0, T.ROCK);
+      restoreSurfaceTerrain(terrain, { nodes: [1, 2], tileDiffs: [2, T.FLOOR] });
+      if (terrain.tiles[0] !== T.FLOOR || terrain.nodeAmt[0] !== 0 || terrain.nodeAmt[1] !== 2 || terrain.tiles[2] !== T.FLOOR) out.push('存读复活了耗尽节点或开凿岩壁');
+      const legacyTerrain = createMap(2, 1);
+      legacyTerrain.set(0, 0, T.VINE); legacyTerrain.nodeAmt[0] = NODE_AMT[T.VINE];
+      legacyTerrain.set(1, 0, T.ROCK);
+      restoreSurfaceTerrain(legacyTerrain, { nodes: [] });
+      if (legacyTerrain.tiles[0] !== T.FLOOR || legacyTerrain.tiles[1] !== T.ROCK) out.push('旧档耗尽资源未清除或未开凿岩壁被移除');
       for (const c of Object.values(state.chunkStore || {})) {
         const o = c && c.outpost;
         if (!o) continue;
@@ -1203,6 +1244,482 @@ const RUNTIME_CHECKS = [
 // =====================================================================
 const DATA_CHECKS = [
   {
+    id: 'endgame.spec',
+    run() {
+      const out = [];
+      if (ENDGAME.VERSION < 1 || ENDGAME.BEACON_COUNT !== 3) out.push('终局协议版本/信标数量异常');
+      if (BUILD.resonanceBeacon && JSON.stringify(BUILD.resonanceBeacon.cost) !== JSON.stringify(ENDGAME.SITE_COSTS.first)) out.push('首座信标施工费必须直接读取终局成本表');
+      if (JSON.stringify(ENDGAME.BIOME_ORDER) !== JSON.stringify(['tundra', 'vineMist', 'shaleRise'])) out.push('终局群系顺序必须覆盖三种现有地表群系');
+      const probes = ENDGAME.SITE_CHUNK_PROBES || [];
+      if (probes.length !== ENDGAME.BEACON_COUNT || new Set(probes.map((p) => p.biome)).size !== ENDGAME.BEACON_COUNT) out.push('群系探针缺少唯一候选');
+      if (probes.map((p) => p.id).join(',') !== 'first,second,third') out.push('信标路线必须是先邻近远征、再深入、最后回营地');
+      for (const p of probes) if (biomeIdAt(p.x, p.y) !== p.biome) out.push(`群系探针 ${p.x},${p.y} 预期 ${p.biome}，实际 ${biomeIdAt(p.x, p.y)}`);
+      const firstSearch = ENDGAME.FIRST_SITE_CHUNK_SEARCH || [];
+      if (firstSearch.length < 2 || firstSearch[0].x !== probes[0]?.x || firstSearch[0].y !== probes[0]?.y
+        || new Set(firstSearch.map((p) => `${p.x},${p.y}`)).size !== firstSearch.length
+        || firstSearch.some((p) => biomeIdAt(p.x, p.y) !== probes[0]?.biome)) out.push('首站备用区块必须唯一、有限、固定顺序且保持藤雾林群系');
+      for (const probe of probes) {
+        const search = ENDGAME.SITE_CHUNK_SEARCH?.[probe.id] || [];
+        if (!search.length || new Set(search.map((p) => `${p.x},${p.y}`)).size !== search.length
+          || search.some((p) => biomeIdAt(p.x, p.y) !== probe.biome)) out.push(`${probe.id} 选址候选必须有限、唯一且保持目标群系`);
+        if (search[0]?.x !== probe.x || search[0]?.y !== probe.y) out.push(`${probe.id} 首选区块必须与固定群系探针一致`);
+      }
+      if (surfaceChunkMapSeed(4242, 0, 0) !== 4242 || surfaceChunkNightOpsSeed(4242, 0, 0) !== 4242) out.push('苔原原点审计必须复用新局的 worldSeed，而非远端区块派生种子');
+      if (surfaceChunkMapSeed(4242, 1, 0) !== surfaceChunkSeed(4242, 1, 0)
+        || surfaceChunkNightOpsSeed(4242, 1, 0) !== surfaceChunkSeed(4242 ^ 0x51ed270b, 1, 0)) out.push('远端地表区块审计种子与正式载入规则不一致');
+      const secondProbe = probes.find((p) => p.id === 'second');
+      const occupiedMap = genMap(SURVIVAL.CHUNK.WIDTH, SURVIVAL.CHUNK.HEIGHT, surfaceChunkMapSeed(4242, 3, 0), 'shaleRise');
+      occupiedMap.occBuild.fill(1);
+      const savedChunk = { id: '3,0', cx: 3, cy: 0, biome: 'shaleRise', map: occupiedMap, buildings: [], beacons: [], nightops: null };
+      const savedState = { seed: 4242, chunkStore: { '3,0': savedChunk } };
+      const savedBefore = JSON.stringify(savedState.chunkStore);
+      const tileMapRef = savedChunk.map, buildMaskRef = savedChunk.map.occBuild;
+      const blockedAudit = secondProbe && siteAnchorAudit(savedState, secondProbe);
+      if (!blockedAudit || !blockedAudit.blocked || blockedAudit.legalAnchors !== 0) out.push(`已保存且全占格的站点区块应返回 blocked：${JSON.stringify(blockedAudit)}`);
+      if (savedChunk.nightops !== null || savedChunk.map !== tileMapRef || savedChunk.map.occBuild !== buildMaskRef
+        || JSON.stringify(savedState.chunkStore) !== savedBefore) out.push('站点锚点只读审计修改了旧存档区块、夜行状态或占格数组');
+      if (!Array.isArray(ENDGAME.RESOURCE_AUDIT_SEEDS) || ENDGAME.RESOURCE_AUDIT_SEEDS.length < 3 || new Set(ENDGAME.RESOURCE_AUDIT_SEEDS).size !== ENDGAME.RESOURCE_AUDIT_SEEDS.length) out.push('资源审计种子不足或重复');
+      const anchorAuditSeeds = [1, 2026, 4242];
+      if (JSON.stringify(ENDGAME.RESOURCE_AUDIT_SEEDS) !== JSON.stringify(anchorAuditSeeds)) out.push(`R4-C 锚点审计种子必须固定为 ${anchorAuditSeeds.join(',')}`);
+      const auditAnchor = (seed, siteIndex) => {
+        const priorSites = Object.fromEntries(probes.slice(0, siteIndex).map((probe, index) => [probe.id,
+          { status: 'complete', completedDay: 7 + index }]));
+        const auditState = { seed, milestone: { bossDefeated: true }, chunkStore: {} };
+        initResonance(auditState, { sites: priorSites });
+        const probe = probes[siteIndex], site = auditState.resonance?.sites?.[probe?.id];
+        const chunk = site && auditState.chunkStore?.[`${site.chunkX},${site.chunkY}`];
+        if (!site || site.status !== 'revealed' || !chunk || chunk.biome !== probe.biome
+          || !Number.isInteger(site.x) || !Number.isInteger(site.y) || !chunk.map?.isWalk(site.x, site.y)) {
+          return { error: '未生成目标群系内合法可走锚点', site: site && { ...site }, biome: chunk?.biome };
+        }
+        const blocked = siteAnchorAudit(auditState, { ...probe, x: site.chunkX, y: site.chunkY });
+        if (!blocked || blocked.blocked || blocked.legalAnchors < 1) return { error: '生成后锚点区块无合法候选', site: { ...site }, blocked };
+        return { status: site.status, biome: chunk.biome, chunk: [site.chunkX, site.chunkY], anchor: [site.x, site.y] };
+      };
+      for (const seed of anchorAuditSeeds) for (let siteIndex = 0; siteIndex < probes.length; siteIndex++) {
+        const firstAnchor = auditAnchor(seed, siteIndex), repeatAnchor = auditAnchor(seed, siteIndex);
+        if (firstAnchor.error || repeatAnchor.error || JSON.stringify(firstAnchor) !== JSON.stringify(repeatAnchor))
+          out.push(`seed=${seed} ${probes[siteIndex]?.id} 锚点必须可用且重复生成稳定：${JSON.stringify({ firstAnchor, repeatAnchor })}`);
+      }
+      const packMap = createMap(9, 9); packMap.tiles.fill(T.FLOOR);
+      const packFixture = { map: packMap, player: { x: 4.5, y: 4.5 }, layerId: 'surface', chunkX: 0, chunkY: 0,
+        deathPack: { x: 4.5, y: 4.5, layerId: 'surface', chunkX: 0, chunkY: 0, stock: { ore: 1 } },
+        buildings: [], workers: [], graves: [], beacons: [], enemies: [], floaties: [], pack: { stock: {}, cap: PACK_CAP },
+        res: {}, layers: {}, chunkStore: {}, research: { unlocked: {} } };
+      if (resolveInteract(packFixture)?.kind !== 'deathPack' || resolveInteractAt(packFixture, 4, 4, E_REACH)?.kind !== 'deathPack')
+        out.push('遗落包在所属区块应由 E/指向解析为可回收目标');
+      packFixture.chunkX = 1;
+      if (resolveInteract(packFixture)?.kind === 'deathPack' || resolveInteractAt(packFixture, 4, 4, E_REACH)?.kind === 'deathPack')
+        out.push('遗落包不得跨区块抢占 E/指向交互目标');
+      const deeperDepth = (RESEARCH.deeper && RESEARCH.deeper.req2 || []).find((q) => q.depth != null);
+      if (!deeperDepth || deeperDepth.depth !== 1) out.push('深层深潜应以到达 depth1 为前置，不能要求先到达其解锁的 depth2');
+      if (deeperDepth && req2Text({ layers: { depth1: {} } }, deeperDepth) !== null) out.push('已经到达 depth1 时仍无法满足深层深潜的层级前置');
+      if ((RESEARCH.deeper.cost.core || 0) > 0) out.push('深层深潜不能消耗 depth1 不保证生成的母髓，否则特定种子只能依赖可重复潮穴掉落解锁');
+      let minDepth1Data = Infinity;
+      let minDepth2Core = Infinity;
+      let minSurfaceData = Infinity;
+      let minSurfaceOre = Infinity;
+      const nightYieldMin = Object.fromEntries(probes.map((p) => [p.id, Infinity]));
+      const siteSupplyMin = Object.fromEntries(probes.map((p) => [p.id, { ore: Infinity, data: Infinity }]));
+      const fuelRecipe = RECIPES.find((recipe) => recipe.id === 'fuel' && recipe.out === 'fuel');
+      for (const seed of ENDGAME.RESOURCE_AUDIT_SEEDS || []) {
+        const meta1 = LAYER_META.depth1, map1 = genDepth(meta1.w, meta1.h, (seed ^ 0x9e3779b9) >>> 0, 1);
+        const meta2 = LAYER_META.depth2, map2 = genDepth(meta2.w, meta2.h, (seed ^ (0x9e3779b9 * 2)) >>> 0, 2);
+        let data = 0, core = 0;
+        let surfaceData = 0, surfaceOre = 0;
+        for (const p of ENDGAME.SITE_CHUNK_PROBES) {
+          const map = genMap(SURVIVAL.CHUNK.WIDTH, SURVIVAL.CHUNK.HEIGHT, surfaceChunkMapSeed(seed, p.x, p.y), p.biome);
+          const mx = map.w / 2 | 0, my = map.h / 2 | 0, edge = SURVIVAL.CHUNK.EXIT_CORRIDOR;
+          for (let d = -3; d <= 3; d++) {
+            for (let x = 0; x < edge; x++) map.nodeAmt[(my + d) * map.w + x] = 0;
+            for (let x = map.w - edge; x < map.w; x++) map.nodeAmt[(my + d) * map.w + x] = 0;
+            for (let y = 0; y < edge; y++) map.nodeAmt[y * map.w + mx + d] = 0;
+            for (let y = map.h - edge; y < map.h; y++) map.nodeAmt[y * map.w + mx + d] = 0;
+          }
+          const nightLayer = { map, nightops: null };
+          ensureNightOps(nightLayer, surfaceChunkNightOpsSeed(seed, p.x, p.y));
+          const firstDuskPlants = Math.min(nightLayer.nightops?.blooms?.length || 0, NIGHTBLOOM.base);
+          const nightUpper = firstDuskPlants * NIGHTBLOOM.charges * NIGHTBLOOM.yield;
+          nightYieldMin[p.id] = Math.min(nightYieldMin[p.id], nightUpper);
+          const nightNeed = (ENDGAME.SITE_COSTS[p.id]?.night || 0) + (ENDGAME.TRIAL_START_COST.night || 0);
+          if (nightUpper < nightNeed) out.push(`${p.id} 夜辉草首夜理论上限不足：${nightUpper}/${nightNeed}（seed=${seed}）`);
+          let siteData = 0, siteOre = 0;
+          for (let i = 0; i < map.tiles.length; i++) {
+            if (map.tiles[i] === T.RELIC) { const n = map.nodeAmt[i] || 0; surfaceData += n; siteData += n; }
+            if (map.tiles[i] === T.ORE) { const n = map.nodeAmt[i] || 0; surfaceOre += n; siteOre += n; }
+          }
+          siteSupplyMin[p.id].data = Math.min(siteSupplyMin[p.id].data, siteData);
+          siteSupplyMin[p.id].ore = Math.min(siteSupplyMin[p.id].ore, siteOre);
+        }
+        for (let i = 0; i < map1.tiles.length; i++) if (map1.tiles[i] === T.RELIC) data += map1.nodeAmt[i] || 0;
+        for (let i = 0; i < map2.tiles.length; i++) if (map2.tiles[i] === T.MOTHER) core += map2.nodeAmt[i] || 0;
+        minDepth1Data = Math.min(minDepth1Data, data);
+        minDepth2Core = Math.min(minDepth2Core, core);
+        minSurfaceData = Math.min(minSurfaceData, surfaceData);
+        minSurfaceOre = Math.min(minSurfaceOre, surfaceOre);
+      }
+      const surfaceResearchData = RESEARCH.mining.cost.data || 0;
+      const depth1ResearchData = (RESEARCH.deep.cost.data || 0) + (RESEARCH.deeper.cost.data || 0);
+      if (minSurfaceData < surfaceResearchData) out.push(`候选地表档案不足以支付地表研究（最小 ${minSurfaceData} / 需求 ${surfaceResearchData}）`);
+      const beaconOreCost = Object.values(ENDGAME.SITE_COSTS || {}).reduce((sum, cost) => sum + (cost.ore || 0), 0);
+      const routeFuel = Object.values(ENDGAME.SITE_COSTS || {}).reduce((sum, cost) => sum + (cost.fuel || 0), 0)
+        + (ENDGAME.TRIAL_START_COST.fuel || 0) * ENDGAME.BEACON_COUNT;
+      if (!fuelRecipe || !(fuelRecipe.n > 0)) out.push('终局燃料成本没有可审计的既有炼油配方');
+      const fuelBatches = fuelRecipe && fuelRecipe.n > 0 ? Math.ceil(routeFuel / fuelRecipe.n) : Infinity;
+      const oreForRouteFuel = fuelRecipe && Number.isFinite(fuelBatches)
+        ? fuelBatches * ((fuelRecipe.cost && fuelRecipe.cost.ore) || 0)
+        : Infinity;
+      if (minSurfaceOre < beaconOreCost + oreForRouteFuel) out.push(`候选地表辉髓不足以支付信标与终局燃料折算（最小 ${minSurfaceOre} / 需求 ${beaconOreCost + oreForRouteFuel}）`);
+      const routeNight = Object.values(ENDGAME.SITE_COSTS || {}).reduce((sum, cost) => sum + (cost.night || 0), 0)
+        + (ENDGAME.TRIAL_START_COST.night || 0) * ENDGAME.BEACON_COUNT;
+      const routeNightUpper = Object.values(nightYieldMin).reduce((sum, n) => sum + (Number.isFinite(n) ? n : 0), 0);
+      if (routeNightUpper < routeNight) out.push(`三处候选地表夜辉草首夜理论上限不足全路线夜髓需求（${routeNightUpper}/${routeNight}）`);
+      const remoteStoreBuildUnits = Object.values(BUILD.store.cost || {}).reduce((sum, n) => sum + n, 0);
+      for (const p of probes) {
+        const cost = ENDGAME.SITE_COSTS[p.id] || {};
+        const fuelAtSite = (cost.fuel || 0) + (ENDGAME.TRIAL_START_COST.fuel || 0);
+        const localFuelBatches = fuelRecipe && fuelRecipe.n > 0 ? Math.ceil(fuelAtSite / fuelRecipe.n) : Infinity;
+        const localFuelOre = Number.isFinite(localFuelBatches) ? localFuelBatches * ((fuelRecipe.cost && fuelRecipe.cost.ore) || 0) : Infinity;
+        const localOreNeed = (cost.ore || 0) + localFuelOre;
+        if (siteSupplyMin[p.id].ore < localOreNeed) out.push(`${p.id} 群系单站辉髓不足施工与本站燃料加工：${siteSupplyMin[p.id].ore}/${localOreNeed}`);
+        if (siteSupplyMin[p.id].data < (cost.data || 0)) out.push(`${p.id} 群系单站档案不足：${siteSupplyMin[p.id].data}/${cost.data || 0}`);
+        const siteStockUnits = Object.values(cost).reduce((sum, n) => sum + n, 0)
+          + Object.values(ENDGAME.TRIAL_START_COST).reduce((sum, n) => sum + n, 0);
+        const siteContainerCap = p.id === 'third' ? CAMP_CAP : STORE_CAP;
+        if (siteStockUnits > siteContainerCap) out.push(`${p.id} 站施工/一次预约库存 ${siteStockUnits} 格，超过目的地容器容量 ${siteContainerCap}`);
+        if (p.id !== 'third' && remoteStoreBuildUnits > PACK_CAP) out.push(`${p.id} 远端储物箱首运建造材料 ${remoteStoreBuildUnits} 格，超过背包容量 ${PACK_CAP}`);
+      }
+      const beaconCoreCost = (ENDGAME.SITE_COSTS.second.core || 0) + (ENDGAME.SITE_COSTS.third.core || 0);
+      const routeBudget = resonanceReport({ seed: 4242, chunkStore: {}, milestone: {}, res: {} }).costs.fullRouteBudget;
+      const routeLogistics = routeBudget.logistics;
+      const depth2Access = routeBudget.access?.depth2Entry;
+      const surfaceDataRoute = depth2Access?.surfaceDataRoute;
+      const surfaceMainResearch = RESEARCH.mining.cost.data;
+      const depth1MainResearch = RESEARCH.deep.cost.data + RESEARCH.deeper.cost.data;
+      const allSiteData = Object.values(ENDGAME.SITE_COSTS).reduce((sum, cost) => sum + (cost.data || 0), 0);
+      if (!depth2Access || depth2Access.surfaceResearch.totalData !== surfaceMainResearch
+        || !depth2Access.surfaceResearch.covered || !depth2Access.depth1Research.covered || !depth2Access.depth1Shaft.covered
+        || !surfaceDataRoute?.covered || surfaceDataRoute.requiredForResearchAndAllSites !== surfaceMainResearch + allSiteData
+        || depth2Access.depth1Research.totalData !== depth1MainResearch
+        || depth2Access.depth1Research.deep !== RESEARCH.deep.cost.data
+        || depth2Access.depth1Research.deeper !== RESEARCH.deeper.cost.data
+        || Object.entries(BUILD.shaft.cost).some(([key, amount]) => depth2Access.depth1Shaft[key] !== amount)
+        || depth2Access.depth2Core.requiredAcrossSecondAndThird !== beaconCoreCost
+        || !depth2Access.depth2Core.covered) out.push(`二站/终站必经深层访问成本与母髓供给必须可审计：${JSON.stringify(depth2Access)}`);
+      const expectedStockUnits = { first: 23, second: 36, third: 52 };
+      const expectedPackLoads = { first: 1, second: 2, third: 0 };
+      for (const id of Object.keys(expectedStockUnits)) {
+        const l = routeLogistics?.siteLogistics?.[id];
+        if (!l || l.stockUnits !== expectedStockUnits[id] || !l.stockFitsContainer) out.push(`${id} 目的地库存预算异常：${JSON.stringify(l)}`);
+        if (!l || l.fullStockPackLoadsIfShipped !== expectedPackLoads[id]) out.push(`${id} 全部从原点运输时的背包装载下界异常：${JSON.stringify(l)}`);
+      }
+      if (routeLogistics?.packCap !== PACK_CAP || routeLogistics?.storeKitUnits !== remoteStoreBuildUnits
+        || routeLogistics?.siteLogistics?.first?.remoteStoreKitPackLoads !== 1
+        || routeLogistics?.siteLogistics?.second?.remoteStoreKitPackLoads !== 1) out.push(`远端建箱材料与背包运输口径异常：${JSON.stringify(routeLogistics)}`);
+      if (!Number.isFinite(minDepth1Data) || depth1ResearchData > minDepth1Data) out.push(`深渊分区研究档案总成本超过固定种子 depth1 保底供给（需求 ${depth1ResearchData} / 最小 ${minDepth1Data}）`);
+      if (!Number.isFinite(minDepth2Core) || beaconCoreCost > minDepth2Core) out.push(`两座后续信标母髓成本超过固定种子 depth2 保底供给（最小 ${minDepth2Core}）`);
+      if (Object.keys(ENDGAME.SITE_COSTS || {}).sort().join(',') !== 'first,second,third') out.push('信标施工成本必须覆盖三站且不能多/少站');
+      if (routeFuel !== 18 || oreForRouteFuel !== 9 || beaconOreCost + oreForRouteFuel !== 63 || routeNight !== 11) out.push(`终局资源预算折算异常：fuel=${routeFuel}, oreForFuel=${oreForRouteFuel}, oreAllIn=${beaconOreCost + oreForRouteFuel}, night=${routeNight}`);
+      for (const [id, cost] of Object.entries(ENDGAME.SITE_COSTS || {})) for (const [key, amount] of Object.entries(cost || {})) {
+        if (!RES_ORDER.includes(key) || !Number.isInteger(amount) || amount <= 0) out.push(`${id} 信标成本 ${key}=${amount} 不是正整数账本资源`);
+      }
+      for (const [key, amount] of Object.entries(ENDGAME.TRIAL_START_COST || {})) if (!RES_ORDER.includes(key) || !Number.isInteger(amount) || amount <= 0) out.push(`仪式成本 ${key}=${amount} 不是正整数账本资源`);
+      if (ENDGAME.REPORT_SCHEMA.join(',') !== 'version,milestone,sites,resourceAudit,stock,costs,status') out.push('终局报告 schema 不一致');
+      const fixture = { seed: 4242, milestone: { bossDefeated: true }, chunkStore: {} };
+      initResonance(fixture);
+      for (let ix = 0; ix < probes.length; ix++) {
+        const probe = probes[ix], costFixture = { ...fixture, resonance: JSON.parse(JSON.stringify(fixture.resonance)) };
+        for (let prev = 0; prev < ix; prev++) costFixture.resonance.sites[probes[prev].id].status = 'complete';
+        const planned = costFixture.resonance.sites[probe.id];
+        planned.status = 'revealed'; planned.x = 40; planned.y = 30;
+        const actualCost = buildCostOf(costFixture, 'resonanceBeacon', planned.x, planned.y);
+        if (JSON.stringify(actualCost) !== JSON.stringify(ENDGAME.SITE_COSTS[probe.id])) out.push(`${probe.id} 建造预览/扣料没有读取本站成本：${JSON.stringify(actualCost)}`);
+      }
+      const allComplete = { ...fixture, resonance: JSON.parse(JSON.stringify(fixture.resonance)) };
+      for (const probe of probes) allComplete.resonance.sites[probe.id].status = 'complete';
+      if (!lockedByResearch(allComplete, 'resonanceBeacon')
+        || resonancePlaceError(allComplete, 'resonanceBeacon', 40, 30) !== '三座信标均已完成') out.push('三座完成后仍显示可建或错误提示不明确');
+      const live = fixture.resonance.sites.first;
+      const chunk = fixture.chunkStore[`${live.chunkX},${live.chunkY}`];
+      if (!chunk || live.status !== 'revealed' || live.x == null || live.y == null) out.push('击败首个 Boss 后未生成首站合法位置');
+      if (chunk && live.x != null && resonancePlaceError({ ...fixture, layerId: 'surface', chunkX: live.chunkX, chunkY: live.chunkY }, 'resonanceBeacon', live.x, live.y) !== null) out.push('首站定位格未允许信标施工');
+      const firstProbe = firstSearch[0] || probes[0];
+      if (live.x != null && firstProbe) {
+        const primaryMap = genMap(SURVIVAL.CHUNK.WIDTH, SURVIVAL.CHUNK.HEIGHT,
+          surfaceChunkMapSeed(4242, firstProbe.x, firstProbe.y), biomeIdAt(firstProbe.x, firstProbe.y));
+        primaryMap.occBuild.fill(1);
+        const primary = { id: `${firstProbe.x},${firstProbe.y}`, cx: firstProbe.x, cy: firstProbe.y,
+          biome: biomeIdAt(firstProbe.x, firstProbe.y), map: primaryMap, buildings: [], beacons: [], nightops: null };
+        const fallbackFixture = { seed: 4242, milestone: { bossDefeated: true }, chunkStore: { [primary.id]: primary } };
+        initResonance(fallbackFixture);
+        const fallback = fallbackFixture.resonance.sites.first;
+        if (fallback.status !== 'revealed' || (fallback.chunkX === firstProbe.x && fallback.chunkY === firstProbe.y)
+          || biomeIdAt(fallback.chunkX, fallback.chunkY) !== probes[0]?.biome) out.push(`首站主区块全占后未落到同群系备用区块：${JSON.stringify(fallback)}`);
+
+        const blockedStore = {};
+        let freeAt = null;
+        for (const probe of firstSearch) {
+          const map = genMap(SURVIVAL.CHUNK.WIDTH, SURVIVAL.CHUNK.HEIGHT,
+            surfaceChunkMapSeed(4242, probe.x, probe.y), biomeIdAt(probe.x, probe.y));
+          if (probe.x === firstProbe.x && probe.y === firstProbe.y) {
+            freeAt = { x: live.x, y: live.y };
+          }
+          map.occBuild.fill(1);
+          const id = `${probe.x},${probe.y}`;
+          blockedStore[id] = { id, cx: probe.x, cy: probe.y, biome: biomeIdAt(probe.x, probe.y), map, buildings: [], beacons: [], nightops: null };
+        }
+        const blockedFixture = { seed: 4242, milestone: { bossDefeated: true }, chunkStore: blockedStore };
+        initResonance(blockedFixture);
+        const blockedSite = blockedFixture.resonance.sites.first;
+        if (blockedSite.status !== 'pending' || blockedSite.x != null || blockedSite.y != null) out.push('全部有限候选区块占满后未进入待腾位状态');
+        const freeChunk = blockedStore[`${firstProbe.x},${firstProbe.y}`];
+        if (freeAt && freeChunk && freeChunk.map.get(freeAt.x, freeAt.y) === T.FLOOR) {
+          freeChunk.map.occBuild[freeAt.y * freeChunk.map.w + freeAt.x] = 0;
+          if (retryPendingResonanceSite(blockedFixture) !== 'revealed' || blockedSite.chunkX !== firstProbe.x
+            || blockedSite.chunkY !== firstProbe.y || blockedSite.x == null || blockedSite.y == null) out.push('全候选阻塞后腾出固定候选格，首站未确定性恢复');
+        } else out.push('待腾位恢复测试未能构造首站原候选格');
+      }
+      // R4-B 旧档终站腾位：只用 9×9 小区块与 25 个候选占位，证明普通建筑拆除会触发稳定重试。
+      const tundraMap = createMap(9, 9); tundraMap.tiles.fill(T.FLOOR);
+      const tundraBuildings = [];
+      for (let y = 2; y <= 6; y++) for (let x = 2; x <= 6; x++) {
+        tundraMap.occBuild[y * tundraMap.w + x] = 1;
+        tundraBuildings.push({ type: 'wall', x, y, stock: null });
+      }
+      const tundraChunk = { id: '0,0', cx: 0, cy: 0, biome: 'tundra', map: tundraMap,
+        buildings: tundraBuildings, beacons: [], nightops: { vents: [] } };
+      const terminalFixture = { seed: 4242, milestone: { bossDefeated: true }, layerId: 'surface', chunkX: 0, chunkY: 0,
+        map: tundraMap, buildings: tundraBuildings, beacons: [], chunkStore: { '0,0': tundraChunk }, floaties: [] };
+      initResonance(terminalFixture, { sites: { first: { status: 'complete' }, second: { status: 'complete' } } });
+      const terminal = terminalFixture.resonance.sites.third;
+      if (terminal.status !== 'pending' || terminal.x != null || terminal.y != null) out.push('小型旧档夹具：候选格全部占用时终站必须暂缓');
+      const blocker = tundraBuildings.find((b) => b.x === 4 && b.y === 4);
+      const removed = blocker && removeBuilding(terminalFixture, blocker);
+      const recoveredAt = terminal.x == null ? null : `${terminal.x},${terminal.y}`;
+      if (!removed || terminal.status !== 'revealed' || terminal.x !== 4 || terminal.y !== 4
+        || tundraMap.occBuild[4 * tundraMap.w + 4] !== 0) out.push(`普通建筑拆除后终站未自动腾位：${JSON.stringify({ removed, terminal })}`);
+      if (retryPendingResonanceSite(terminalFixture) !== 'revealed' || `${terminal.x},${terminal.y}` !== recoveredAt)
+        out.push(`腾位后的终站锚点再次重试时发生漂移：${JSON.stringify(terminal)}`);
+      const migrated = { seed: 4242, milestone: { bossDefeated: true }, layerId: 'surface', chunkX: 4, chunkY: -2,
+        buildings: [{ type: 'resonanceBeacon', x: 31, y: 29, site: false }], chunkStore: {} };
+      initResonance(migrated);
+      const migratedSite = migrated.resonance.sites.first;
+      if (migratedSite.status !== 'built' || migratedSite.chunkX !== 4 || migratedSite.chunkY !== -2 || migratedSite.x !== 31 || migratedSite.y !== 29) out.push(`缺失共鸣元数据的既有首站未迁移：${JSON.stringify(migratedSite)}`);
+      const legacyUndated = resonanceReport({ milestone: { bossDefeated: true }, chunkStore: {}, res: {} }).milestone.clearedDay;
+      if (legacyUndated !== null) out.push(`缺失历史日期的旧档应显示未记录而非伪造日期：${legacyUndated}`);
+      const trialState = { seed: 4242, day: 1, t: 200, milestone: { bossDefeated: true }, layerId: 'surface',
+        chunkX: live.chunkX, chunkY: live.chunkY, player: { x: live.x + 0.5, y: live.y + 0.5 },
+        buildings: [], beacons: [], workers: [], enemies: [], floaties: [], banner: null,
+        pack: { stock: { fuel: ENDGAME.TRIAL_START_COST.fuel, night: ENDGAME.TRIAL_START_COST.night }, cap: PACK_CAP },
+        res: { fuel: ENDGAME.TRIAL_START_COST.fuel, night: ENDGAME.TRIAL_START_COST.night }, chunkStore: {}, layers: {},
+        nightLightPressure: 7, nightChallengeMul: 1.2 };
+      initResonance(trialState, { sites: { first: { ...live, status: 'built' } } });
+      const trialSite = trialState.resonance.sites.first;
+      const trialChunk = ensureSurfaceChunk(trialState, trialSite.chunkX, trialSite.chunkY);
+      trialState.map = trialChunk.map; trialState.light = new Float32Array(trialState.map.w * trialState.map.h);
+      trialState.discovered = trialChunk.discovered; trialState.beacons = trialChunk.beacons; trialState.enemies = trialChunk.enemies;
+      const trialBeacon = { type: 'resonanceBeacon', x: trialSite.x, y: trialSite.y, hp: BUILD.resonanceBeacon.hp,
+        site: false, resonanceSiteId: 'first' };
+      trialState.buildings = trialChunk.buildings = [trialBeacon]; trialState.layers.surface = trialChunk;
+      const trialIx = trialSite.y * trialState.map.w + trialSite.x;
+      const liveLightRef = trialState.light, liveMapKeys = Object.keys(trialState.map).sort().join(','), liveLightBefore = Array.from(trialState.light);
+      const lightProbe = resonanceLightReport(trialState, trialSite);
+      if (!lightProbe.loaded || lightProbe.threshold !== ENDGAME.STANDARD_TRIAL.minLight
+        || !lightProbe.counterfactual || !Number.isFinite(lightProbe.counterfactual.allSources)) out.push(`信标灯光归因探针未返回生产光图读数：${JSON.stringify(lightProbe)}`);
+      if (trialState.light !== liveLightRef || Array.from(trialState.light).some((v, i) => v !== liveLightBefore[i])
+        || Object.keys(trialState.map).sort().join(',') !== liveMapKeys) out.push('信标灯光归因只读探针修改了实时光图或地图缓存');
+      if (beginStandardTrial(trialState) == null || trialState.resonance.trial.status !== 'idle'
+        || trialState.res.fuel !== ENDGAME.TRIAL_START_COST.fuel) out.push('信标无人工光时预约应拒绝且不扣材料');
+      trialState.light[trialIx] = ENDGAME.STANDARD_TRIAL.minLight;
+      if (beginStandardTrial(trialState) !== null || trialState.resonance.trial.status !== 'reserved'
+        || trialState.res.fuel !== 0 || trialState.res.night !== 0) out.push('满足净光条件后应通过账本支付一次预约费');
+      trialState.nightLightPressure = 7; trialState.nightChallengeMul = 1.2;
+      if (!lockStandardTrialAtTide(trialState) || trialState.resonance.trial.status !== 'active'
+        || trialState.resonance.trial.challengeMul !== 1.2 || trialState.resonance.trial.themeId !== themeIdOf(trialState)) out.push('蚀潮开始时未锁定反冲夜主题/压力');
+      if (updateStandardTrial(trialState)) out.push('玩家留在有光信标旁却触发试炼失败');
+      const retryFeeTrial = { ...trialState, resonance: JSON.parse(JSON.stringify(trialState.resonance)),
+        pack: { stock: { fuel: ENDGAME.TRIAL_START_COST.fuel, night: ENDGAME.TRIAL_START_COST.night }, cap: PACK_CAP },
+        res: { fuel: ENDGAME.TRIAL_START_COST.fuel, night: ENDGAME.TRIAL_START_COST.night } };
+      retryFeeTrial.resonance.trial.status = 'failed'; retryFeeTrial.resonance.trial.attempts = 1;
+      retryFeeTrial.resonance.trial.result = 'failure'; retryFeeTrial.resonance.trial.completedDay = null;
+      if (beginStandardTrial(retryFeeTrial) !== null || retryFeeTrial.resonance.trial.status !== 'reserved'
+        || retryFeeTrial.resonance.trial.attempts !== 2 || retryFeeTrial.res.fuel !== 0 || retryFeeTrial.res.night !== 0) out.push('失败重试必须重新支付同一预约费且只增加一次尝试');
+      if (!settleStandardTrialAtDawn(trialState) || trialState.resonance.trial.status !== 'complete'
+        || trialState.resonance.trial.completedDay !== 1) out.push('信标存活且净光持续至黎明时未完成试炼');
+      const repeatCompleted = beginStandardTrial(trialState, 'first');
+      if (repeatCompleted !== '首座共鸣已经完成' || trialState.resonance.trial.attempts !== 1) out.push('已完成站点再次按 E 应显示完成状态且不得新增尝试');
+      const secondSite = trialState.resonance.sites.second;
+      if (trialState.resonance.sites.first.status !== 'complete' || !secondSite || secondSite.status !== 'revealed'
+        || biomeIdAt(secondSite.chunkX, secondSite.chunkY) !== probes[1]?.biome
+        || resonanceSiteForBuild(trialState, secondSite.x, secondSite.y) !== 'second'
+        || trialState.resonance.sites.third.status !== 'locked') out.push(`首站完成后必须只显露合法二站：${JSON.stringify(trialState.resonance.sites)}`);
+      const secondPrep = resonanceSitePrepBudget('second');
+      const lowPrep = secondPrep.levels.find((level) => level.level === '低');
+      const midPrep = secondPrep.levels.find((level) => level.level === '中');
+      const highPrep = secondPrep.levels.find((level) => level.level === '高');
+      const importedFuel = secondPrep.importedFuelPlan || [];
+      const lowImported = importedFuel.find((level) => level.level === '低');
+      const midImported = importedFuel.find((level) => level.level === '中');
+      const highImported = importedFuel.find((level) => level.level === '高');
+      if (secondPrep.beaconProvidesLight || secondPrep.tideSeconds !== TIDE_END - TIDE_START
+        || lowPrep?.lampFuelForTide !== 3 || lowPrep?.totalFuel !== 7 || lowPrep?.minimumOre !== 26
+        || midPrep?.lampFuelForTide !== 4 || midPrep?.totalFuel !== 8 || midPrep?.minimumOre !== 26
+        || highPrep?.lampFuelForTide !== 6 || highPrep?.totalFuel !== 10 || highPrep?.minimumOre !== 27
+        || lowImported?.fuelToBring !== 7 || lowImported?.fuelOnlyPackLoads !== 1 || lowImported?.siteOreMinimum !== 20 || lowImported?.upstreamOreEquivalent !== 4
+        || midImported?.fuelToBring !== 8 || midImported?.fuelOnlyPackLoads !== 1 || midImported?.siteOreMinimum !== 20 || midImported?.upstreamOreEquivalent !== 4
+        || highImported?.fuelToBring !== 10 || highImported?.fuelOnlyPackLoads !== 1 || highImported?.siteOreMinimum !== 20 || highImported?.upstreamOreEquivalent !== 5
+        || secondPrep.furnaceIgnitionUnits !== 1 || secondPrep.furnaceFireMat !== 'vine') {
+        out.push(`二站潮前照明/炼油预算与真实数据表不一致：${JSON.stringify(secondPrep)}`);
+      }
+      const savedTrial = JSON.parse(JSON.stringify(trialState.resonance));
+      const loadedTrial = { seed: 4242, milestone: { bossDefeated: true }, chunkStore: {}, buildings: [] };
+      initResonance(loadedTrial, savedTrial);
+      if (loadedTrial.resonance.trial.status !== 'complete' || loadedTrial.resonance.trial.completedDay !== 1
+        || loadedTrial.resonance.trial.result !== 'success') out.push('完成态反冲存档往返后必须保持完成且不重放');
+      const completedSecond = { ...secondSite, status: 'built', trial: { siteId: 'second', status: 'complete',
+        result: 'success', completedDay: 2, attempts: 1 } };
+      const progressedSave = { seed: 4242, milestone: { bossDefeated: true }, chunkStore: {}, buildings: [],
+        resonance: { version: ENDGAME.VERSION, trial: { siteId: 'first', status: 'complete', result: 'success', completedDay: 1 },
+          sites: { first: trialState.resonance.sites.first, second: completedSecond } } };
+      initResonance(progressedSave, progressedSave.resonance);
+      if (progressedSave.resonance.sites.second.status !== 'complete'
+        || progressedSave.resonance.sites.second.completedDay !== 2
+        || progressedSave.resonance.sites.third.status !== 'revealed') out.push(`二站完成态存读后应保留记录并开放终站：${JSON.stringify(progressedSave.resonance.sites)}`);
+      // 二、三站必须实际走完一次预约→潮夜锁定→黎明结算，不能只测解锁字段。
+      const routeState = { ...trialState, resonance: JSON.parse(JSON.stringify(trialState.resonance)),
+        chunkStore: trialState.chunkStore, layers: {}, buildings: [], beacons: [], enemies: [], floaties: [], banner: null };
+      for (const [id, day] of [['second', 2], ['third', 3]]) {
+        const site = routeState.resonance.sites[id];
+        if (!site || site.status !== 'revealed' || !Number.isInteger(site.x) || !Number.isInteger(site.y)) {
+          out.push(`${id} 未能进入可施工地点，无法验证完整反冲生命周期`); break;
+        }
+        const chunk = ensureSurfaceChunk(routeState, site.chunkX, site.chunkY);
+        const cost = ENDGAME.SITE_COSTS[id];
+        const paymentCamp = { x: site.x + 2, y: site.y, stock: { ...cost } };
+        chunk.beacons = routeState.beacons = [paymentCamp];
+        routeState.layerId = 'surface'; routeState.chunkX = site.chunkX; routeState.chunkY = site.chunkY;
+        routeState.map = chunk.map; routeState.layers.surface = chunk; routeState.buildings = chunk.buildings = [];
+        routeState.light = new Float32Array(chunk.map.w * chunk.map.h);
+        routeState.light[site.y * chunk.map.w + site.x] = ENDGAME.STANDARD_TRIAL.minLight;
+        routeState.player = { x: site.x + 0.5, y: site.y + 1.5 };
+        routeState.day = day; routeState.t = 200; routeState.banner = null;
+        routeState.pack = { stock: { fuel: ENDGAME.TRIAL_START_COST.fuel, night: ENDGAME.TRIAL_START_COST.night }, cap: PACK_CAP };
+        routeState.res = {};
+        const placeSite = () => tryPlace(routeState, 'resonanceBeacon', site.x, site.y);
+        const getPlacedBeacon = () => routeState.buildings.find((b) => b.type === 'resonanceBeacon' && b.resonanceSiteId === id);
+        if (placeSite() !== null || site.status !== 'building' || getPlacedBeacon()?.resonanceSiteId !== id
+          || Object.values(paymentCamp.stock).some((n) => n > 0)) {
+          out.push(`${id} 正常建造入口未绑定本站或未支付本站成本`); break;
+        }
+        if (undoPlace(routeState) !== null || site.status !== 'revealed'
+          || Object.entries(cost).some(([key, amount]) => (paymentCamp.stock[key] || 0) !== amount)) {
+          out.push(`${id} 撤销蓝图没有完整返还本站材料并恢复地点`); break;
+        }
+        if (placeSite() !== null || site.status !== 'building' || Object.values(paymentCamp.stock).some((n) => n > 0)) {
+          out.push(`${id} 第二次正常建造仍未按本站成本扣料`); break;
+        }
+        const beacon = getPlacedBeacon();
+        if (!beacon || !advanceBuild(routeState, beacon, 1e9) || site.status !== 'built' || beacon.site) {
+          out.push(`${id} 建筑施工完成未将本站状态转为 built`); break;
+        }
+        if (beginStandardTrial(routeState, id) !== null || routeState.resonance.trial.siteId !== id
+          || routeState.resonance.trial.status !== 'reserved' || routeState.res.fuel !== 0 || routeState.res.night !== 0) {
+          out.push(`${id} 预约未绑定本站或未按账本扣费`); break;
+        }
+        routeState.t = TIDE_START + 1; routeState.nightLightPressure = 1; routeState.nightChallengeMul = 1;
+        if (!lockStandardTrialAtTide(routeState) || routeState.resonance.trial.siteId !== id
+          || routeState.resonance.trial.status !== 'active' || !isTide(routeState)) {
+          out.push(`${id} 潮夜未锁定本站反冲`); break;
+        }
+        if (updateStandardTrial(routeState)) { out.push(`${id} 驻守条件满足却被判失败`); break; }
+        routeState.t = TIDE_END;
+        if (!settleStandardTrialAtDawn(routeState) || routeState.resonance.trial.siteId !== id
+          || routeState.resonance.trial.status !== 'complete' || site.status !== 'complete'
+          || site.completedDay !== day) {
+          out.push(`${id} 黎明未完成本站或完成记录错位`); break;
+        }
+      }
+      if (routeState.resonance.sites.second.status !== 'complete' || routeState.resonance.sites.third.status !== 'complete')
+        out.push(`二、三站必须都能完成独立反冲：${JSON.stringify(routeState.resonance.sites)}`);
+      if (!routeState.ending || !routeState._endingPending || routeState.ending.legacy
+        || routeState.ending.sites?.map((row) => row.completedDay).join(',') !== '1,2,3')
+        out.push('第三站黎明结算必须一次性封存三站完成日并交给结局界面');
+      const activeProbe = () => {
+        const probe = { seed: 4242, day: 2, t: TIDE_START + 1, milestone: { bossDefeated: true }, layerId: 'surface',
+          chunkX: trialSite.chunkX, chunkY: trialSite.chunkY, player: { ...trialState.player }, buildings: [{ ...trialBeacon }],
+          map: trialState.map, light: new Float32Array(trialState.light), chunkStore: {}, floaties: [], banner: null,
+          resonance: JSON.parse(JSON.stringify(savedTrial)) };
+        probe.resonance.trial.status = 'active'; probe.resonance.trial.activeDay = probe.day;
+        probe.resonance.trial.result = null; probe.resonance.trial.completedDay = null;
+        return probe;
+      };
+      const undergroundTrial = activeProbe(); undergroundTrial.layerId = 'depth1';
+      if (!settleStandardTrialAtDawn(undergroundTrial) || undergroundTrial.resonance.trial.failureReason !== '黎明前离开信标区块') out.push('下潜至黎明边界不得错误完成反冲');
+      const destroyedTrial = activeProbe(); destroyedTrial.buildings[0].hp = 0;
+      if (!updateStandardTrial(destroyedTrial) || destroyedTrial.resonance.trial.failureReason !== '信标被毁') out.push('信标摧毁必须中断反冲并保留失败原因');
+      const darkTrial = activeProbe(); darkTrial.light[trialIx] = 0;
+      if (!updateStandardTrial(darkTrial) || darkTrial.resonance.trial.failureReason !== '信标断光') out.push('反冲夜断光必须立即中断试炼');
+      const retryState = { ...trialState, day: 2, resonance: JSON.parse(JSON.stringify(trialState.resonance)),
+        buildings: [trialBeacon], chunkX: trialSite.chunkX, chunkY: trialSite.chunkY, layerId: 'surface' };
+      retryState.resonance.trial.status = 'active'; retryState.resonance.trial.activeDay = 2;
+      retryState.resonance.trial.result = null; retryState.resonance.trial.completedDay = null;
+      retryState.chunkStore = trialState.chunkStore; retryState.map = trialState.map; retryState.light = trialState.light;
+      retryState.layers = trialState.layers; retryState.player = { ...trialState.player }; retryState.floaties = [];
+      retryState.chunkX = trialSite.chunkX; retryState.chunkY = trialSite.chunkY; retryState.chunkStore[`${trialSite.chunkX},${trialSite.chunkY}`].buildings = retryState.buildings;
+      retryState.chunkX += 1;
+      if (!updateStandardTrial(retryState) || retryState.resonance.trial.status !== 'failed'
+        || retryState.resonance.trial.failureReason !== '离开信标区块') out.push('反冲夜离开区块未留下可读失败结果');
+      const bossTrial = { ...trialState, day: BOSS.EVERY, resonance: JSON.parse(JSON.stringify(trialState.resonance)), banner: null };
+      bossTrial.resonance.trial.status = 'reserved'; bossTrial.resonance.trial.targetDay = BOSS.EVERY;
+      if (lockStandardTrialAtTide(bossTrial) || bossTrial.resonance.trial.status !== 'reserved'
+        || bossTrial.resonance.trial.targetDay !== BOSS.EVERY + 1) out.push('预约碰到 Boss 周期夜时必须顺延且不能叠加反冲');
+
+      const endingFixture = {
+        day: 13, playerDead: false, kills: 42, milestone: { clearedDay: 7 },
+        resonance: { sites: {
+          first: { status: 'complete', chunkX: 1, chunkY: 0, x: 32, y: 36, completedDay: 9 },
+          second: { status: 'complete', chunkX: 3, chunkY: 0, x: 34, y: 31, completedDay: 11 },
+          third: { status: 'complete', chunkX: 0, chunkY: 0, x: 47, y: 38, completedDay: 13 },
+        } },
+        workers: [{ crew: { id: 'crew-test' }, name: '林岚', alive: true, downed: false, hollow: false }],
+        memorial: [], graves: [{}, {}], runStats: createRunStats(), ending: null, _endingPending: false,
+      };
+      recordRunCount(endingFixture, 'rescues'); recordRunCount(endingFixture, 'revivals');
+      recordRunMaximum(endingFixture, 'maxLightPressure', 18);
+      endingFixture.runStats.nightHarvests = 5;
+      if (!settleResonanceEnding(endingFixture) || !endingFixture._endingPending || endingFixture.ending?.id !== 'dawn'
+        || endingFixture.ending.settledDay !== 13 || endingFixture.ending.bossDay !== 7 || endingFixture.ending.kills !== 42
+        || endingFixture.ending.sites.map((site) => site.completedDay).join(',') !== '9,11,13'
+        || endingFixture.ending.crew?.[1]?.name !== '林岚' || endingFixture.ending.stats?.maxLightPressure !== 18
+        || endingFixture.ending.stats?.rescues !== 1 || endingFixture.ending.award?.granted !== true) {
+        out.push(`三站结算没有封存真实名单、日期、指标与一次性纪念：${JSON.stringify(endingFixture.ending)}`);
+      }
+      const sealedEnding = JSON.stringify(endingFixture.ending);
+      endingFixture.day = 99; endingFixture.workers[0].name = '改名探针';
+      if (settleResonanceEnding(endingFixture) || JSON.stringify(endingFixture.ending) !== sealedEnding) out.push('已有结局再次结算时必须保持快照不变');
+      const normalizedEnding = normalizeEndingRecord(JSON.parse(sealedEnding));
+      if (!normalizedEnding || normalizedEnding.sites[2].completedDay !== 13 || normalizedEnding.crew?.[1]?.name !== '林岚') out.push('结局记录归一化/存读结构丢失真实事实');
+      const normalizedStats = normalizeRunStats(JSON.parse(JSON.stringify(createRunStats())));
+      if (!normalizedStats || !Number.isFinite(normalizedStats.maxLightPressure)) out.push('本局统计新档结构无法往返归一化');
+
+      const legacyEnding = {
+        day: 40, resonance: { sites: {
+          first: { status: 'complete', completedDay: 9 },
+          second: { status: 'complete', completedDay: 11 },
+          third: { status: 'complete' },
+        } },
+        workers: [], memorial: [], graves: [], kills: 999, milestone: { bossDefeated: true },
+        runStats: null, ending: null, _endingPending: true,
+      };
+      if (!restoreLegacyEnding(legacyEnding) || legacyEnding._endingPending || legacyEnding.ending?.id !== 'afterglow'
+        || legacyEnding.ending.settledDay !== null || legacyEnding.ending.bossDay !== null || legacyEnding.ending.kills !== null
+        || legacyEnding.ending.crew !== null || legacyEnding.ending.stats !== null || legacyEnding.ending.award?.day !== null
+        || legacyEnding.ending.graveCount !== null || legacyEnding.ending.sites[0].completedDay !== 9)
+        out.push('旧档结局迁移必须保留已知站点事实并将缺失历史标为未知');
+      return out.length ? bad('endgame.spec', '终局协议/审计探针异常', out) : null;
+    },
+  },
+  {
     id: 'slice.spec',
     run() {
       const out = [];
@@ -1239,7 +1756,56 @@ const DATA_CHECKS = [
     id: 'visual.spec',
     run() {
       const out = [];
-      if (VISUAL.pixel.human !== 24 || VISUAL.pixel.tile !== 16) out.push('像素规格不一致');
+      if (VISUAL.version < 2 || VISUAL.artVersion !== 'v8') out.push('W19-V 视觉版本未登记');
+      if (JSON.stringify(VISUAL.themes) !== JSON.stringify(['legacy', 'v8-preview', 'v8']) || !VISUAL.themes.includes(VISUAL.defaultTheme)) out.push('视觉主题列表或默认主题异常');
+      if (VISUAL.pixel.tile !== 16 || VISUAL.pixel.human !== 24) out.push('逻辑像素规格不一致');
+      const h = VISUAL.pixel.humanV8;
+      if (!h || h.w !== 32 || h.h !== 48 || h.frameW !== 32 || h.frameH !== 48 || JSON.stringify(h.frames) !== JSON.stringify(['down', 'left', 'right', 'up'])) out.push('32×48 人物规格或方向顺序异常');
+      const tp = VISUAL.pixel.terrainPatch;
+      if (!tp || tp.w !== 32 || tp.h !== 32 || tp.logicalW !== 2 || tp.logicalH !== 2) out.push('32px 地表视觉块契约异常');
+      const spriteKeysForArt = new Set((SPRITES || []).map((s) => s.key));
+      if (!Array.isArray(VISUAL.layers) || JSON.stringify(VISUAL.layers) !== JSON.stringify(['legs', 'face', 'hair', 'torso', 'gear'])) out.push('人物图层契约异常');
+      const humanArt = VISUAL.humanArt || {};
+      for (const layer of VISUAL.layers || []) if (typeof humanArt[layer] !== 'string' || !spriteKeysForArt.has(humanArt[layer])) out.push(`人物图层素材映射缺失：${layer}`);
+      if (JSON.stringify(VISUAL.playerLayers) !== JSON.stringify(['face', 'hair', 'torso'])) out.push('玩家默认外观图层契约异常');
+      for (const layer of VISUAL.playerLayers || []) if (typeof (VISUAL.playerHumanArt || {})[layer] !== 'string' || !spriteKeysForArt.has(VISUAL.playerHumanArt[layer])) out.push(`玩家默认外观素材映射缺失：${layer}`);
+      if (typeof VISUAL.playerFullArt !== 'string' || !spriteKeysForArt.has(VISUAL.playerFullArt)) out.push('玩家整身样板素材映射缺失');
+      if (typeof VISUAL.humanFullArt !== 'string' || VISUAL.humanFullArt !== VISUAL.playerFullArt || !spriteKeysForArt.has(VISUAL.humanFullArt)) out.push('玩家/拓荒者共用人物模板契约异常');
+      if (!VISUAL.materialRules || VISUAL.materialRules.bakedGlow || !VISUAL.materialRules.dynamicLight || VISUAL.materialRules.terrainCoverage !== 'all-surface-blocks') out.push('动态光照或地表完整覆盖材质规则异常');
+      const buildingArt = VISUAL.buildingArt || {};
+      const buildingTypes = new Set(Object.keys(BUILD || {}));
+      for (const type of buildingTypes) if (typeof buildingArt[type] !== 'string' || !spriteKeysForArt.has(buildingArt[type])) out.push(`建筑视觉映射缺失：${type}`);
+      if (Object.keys(buildingArt).length !== buildingTypes.size) out.push(`建筑视觉映射数量=${Object.keys(buildingArt).length}，建筑表数量=${buildingTypes.size}`);
+      for (const [name, art, max] of [['blightArt', VISUAL.blightArt, 3], ['ventArt', VISUAL.ventArt, 1]]) {
+        if (!art || !Number.isFinite(art.maxStage == null ? art.maxBurst : art.maxStage) || (art.maxStage == null ? art.maxBurst : art.maxStage) !== max) out.push(`${name} 阶段上限异常`);
+        if (typeof art.spriteKey !== 'string' || !spriteKeysForArt.has(art.spriteKey)) out.push(`${name} 静态素材映射缺失：${art.spriteKey}`);
+        for (const key of name === 'blightArt' ? ['base', 'crack', 'crystal', 'pulse', 'border'] : ['base', 'crack', 'hot', 'pulse']) if (!Array.isArray(art[key]) || art[key].length !== 3 || art[key].some((v) => !Number.isFinite(v) || v < 0 || v > 255)) out.push(`${name}.${key} 颜色契约异常`);
+      }
+      for (const k of ['tundra', 'vineMist', 'shaleRise']) {
+        const art = VISUAL.biomeArt && VISUAL.biomeArt[k];
+        const edge = art && art.edge;
+        if (!art || !art.motif || !Array.isArray(art.base) || art.base.length !== 3 || !Array.isArray(art.detail) || art.detail.length !== 3 || typeof art.terrainKey !== 'string' || !Array.isArray(art.terrainKeys) || art.terrainKeys.length < 4 || art.terrainKeys.length > 6 || !art.terrainKeys.includes(art.terrainKey) || typeof art.decorKey !== 'string' || !Array.isArray(art.decorKeys) || art.decorKeys.length < 3 || art.decorKeys.length > 5 || !art.decorKeys.includes(art.decorKey) || !Number.isFinite(art.decorRate) || art.decorRate < 0 || art.decorRate > 1 || !edge || typeof edge.stroke !== 'string' || typeof edge.highlight !== 'string' || !Number.isFinite(edge.width) || edge.width <= 0 || !Number.isFinite(edge.accentRate) || edge.accentRate <= 0 || edge.accentRate > 1) out.push(`群系视觉契约缺失：${k}`);
+        const terrainKeys = Array.isArray(art && art.terrainKeys) ? art.terrainKeys : [];
+        for (const key of terrainKeys) {
+          const row = SPRITES.find((s) => s.key === key);
+          if (!row) out.push(`群系 ${k} 地表变体未登记：${key}`);
+          else if (row.kind !== 'terrainPatch' || row.pxW !== 32 || row.pxH !== 32 || row.frameW !== 32 || row.frameH !== 32 || row.logicalW !== 2 || row.logicalH !== 2 || row.emissive) out.push(`群系 ${k} 地表变体契约异常：${key}`);
+        }
+        const decorKeys = Array.isArray(art && art.decorKeys) ? art.decorKeys : [];
+        for (const key of decorKeys) {
+          const row = SPRITES.find((s) => s.key === key);
+          if (!row) out.push(`群系 ${k} 装饰变体未登记：${key}`);
+          else if (row.pxW !== 32 || row.pxH !== 32 || row.frameW !== 32 || row.frameH !== 32 || row.emissive) out.push(`群系 ${k} 装饰变体契约异常：${key}`);
+        }
+      }
+      for (const k of ['bud', 'charger', 'shell', 'bomber', 'moth', 'spitter', 'owl', 'blind', 'warden', 'core']) {
+        const art = VISUAL.enemyArt && VISUAL.enemyArt[k];
+        if (!art || typeof art.mark !== 'string' || typeof art.spriteKey !== 'string' || !spriteKeysForArt.has(art.spriteKey)) out.push(`蚀兽视觉契约缺失：${k}`);
+      }
+      for (const k of ['rock', 'ore', 'vine', 'relic', 'mother']) {
+        const art = VISUAL.nodeArt && VISUAL.nodeArt[k];
+        if (!art || typeof art.base !== 'string' || typeof art.detail !== 'string' || typeof art.hi !== 'string' || typeof art.spriteKey !== 'string' || !spriteKeysForArt.has(art.spriteKey)) out.push(`资源节点视觉契约缺失：${k}`);
+      }
       for (const k of ['amber', 'moss', 'blue', 'copper', 'violet', 'rose', 'fallback']) if (!VISUAL.colonist || typeof VISUAL.colonist[k] !== 'string') out.push(`拓荒者色板缺失：${k}`);
       const s = visualSpec();
       if (s.colors.some((c) => !c.pass)) out.push('关键 UI 颜色对比度低于 4.5:1');
@@ -1603,6 +2169,30 @@ const DATA_CHECKS = [
       if (state.started && isTide(state) && state.nightTheme && state.nightTheme !== themeIdOf(state)) {
         out.push(`state.nightTheme=${state.nightTheme} 与 themeIdOf()=${themeIdOf(state)} 不一致`);
       }
+      // ⑤ 普通刷怪预算与硬上限：潮穴只能消费标准波次预先给出的名额。
+      for (let d = 1; d <= 14; d++) {
+        const sample = { day: d, t: TIDE_START, diff: { waveMul: 1, capMul: 1 }, nightChallengeMul: 1, wasTide: false };
+        const planned = waveUnitsInWindow(sample);
+        const ledger = ensureNightSpawnBudget(sample, [], true);
+        if (!(planned > 0) || ledger.budget !== planned || waveUnitsElapsed(sample, TIDE_END) !== planned) out.push(`第 ${d} 天标准敌潮计划名额不一致（plan=${planned}, ledger=${ledger.budget}）`);
+        if (recordNightSpawn(sample, planned + 1) !== planned || remainingNightSpawnBudget(sample) !== 0) out.push(`第 ${d} 天潮穴/波次名额可被超额消费`);
+      }
+      const capProbe = { day: 7, diff: { capMul: 1 } };
+      const cap = enemyCapOf(capProbe);
+      const almostFull = Array.from({ length: cap - 1 }, () => ({ alive: true }));
+      if (screenEnemyRoom(capProbe, almostFull) !== 1 || screenEnemyRoom(capProbe, almostFull, 1) !== 0) out.push('活动区同屏硬上限没有为待生成批次预留空间');
+      const lamp = { type: 'lamp', fuel: 2, level: 1, burnT: 0 };
+      const burnState = { research: { unlocked: {} } };
+      const burnPeriod = burnSecOf(lamp, BUILD.lamp) / LIGHT_LEVELS[1].burn;
+      burnBuildingFuel([lamp], burnState, burnPeriod);
+      if (lamp.fuel !== 1 || Math.abs(lamp.burnT) > 1e-6) out.push(`共用燃烧公式异常：灯柱应消耗 1 燃料，实际 ${lamp.fuel}/${lamp.burnT}`);
+      const offLamp = { type: 'lamp', fuel: 2, level: 1, burnT: 0, off: true };
+      burnBuildingFuel([offLamp], burnState, burnPeriod * 2);
+      if (offLamp.fuel !== 2 || offLamp.burnT !== 0) out.push('关闭的灯具不应消耗燃料');
+      if (state.started && isTide(state) && state.nightSpawnDay === (state.day | 0)
+        && (!(state.nightSpawnBudget >= 0) || state.nightSpawnUsed < 0 || state.nightSpawnUsed > state.nightSpawnBudget)) {
+        out.push(`第 ${state.day} 天刷怪账本越界：${state.nightSpawnUsed}/${state.nightSpawnBudget}`);
+      }
       // HUD 数据完整性
       if (state.started) {
         const hud = nightHud(state);
@@ -1913,10 +2503,62 @@ const DATA_CHECKS = [
         if (!s.key) out.push('有素材项缺 key');
         if (keys.has(s.key)) out.push(`素材 key 重复：${s.key}`);
         keys.add(s.key);
-        if (srcs.has(s.src)) out.push(`素材路径重复：${s.src}`);
-        srcs.add(s.src);
-        if (!s.src || !s.src.startsWith('assets/')) out.push(`素材 ${s.key}.src="${s.src}" 不在 assets/ 下`);
+        if (s.src && srcs.has(s.src)) out.push(`素材路径重复：${s.src}`);
+        if (s.src) srcs.add(s.src);
+        if ((!s.src || !s.src.startsWith('assets/')) && !s.pending) out.push(`素材 ${s.key}.src="${s.src}" 不在 assets/ 下`);
+        if (s.pending && s.src) out.push(`素材 ${s.key} 同时标记 pending 且已有 src`);
+        if (s.key.startsWith('v8_')) {
+          if (!(s.frameW > 0 && s.frameH > 0 && Array.isArray(s.frames) && s.frames.length > 0)) out.push(`V8 素材 ${s.key} 缺少帧尺寸或 frames`);
+          if (!s.anchor || !Number.isFinite(s.anchor.x) || !Number.isFinite(s.anchor.y)) out.push(`V8 素材 ${s.key} 缺少锚点`);
+          if (!s.layer || typeof s.emissive !== 'boolean' || !s.fallback) out.push(`V8 素材 ${s.key} 缺少 layer/emissive/fallback`);
+          const frameCount = Array.isArray(s.frames) && s.frames.length ? s.frames.length : 1;
+          const sourceFrameCount = Number.isInteger(s.sourceFrameCount) ? s.sourceFrameCount : frameCount;
+          const minW = s.kind === 'spritesheet' ? s.frameW * sourceFrameCount : s.frameW;
+          if (!(s.pxW >= minW && s.pxH >= s.frameH)) out.push(`V8 素材 ${s.key} 登记尺寸 ${s.pxW}×${s.pxH} 装不下 ${frameCount} 帧 ${s.frameW}×${s.frameH}`);
+        }
+        if (s.kind === 'spritesheet') {
+          if (!(s.frameW > 0 && s.frameH > 0 && Array.isArray(s.frames) && s.frames.length === 4)) out.push(`spritesheet ${s.key} 缺少 4 向帧契约`);
+            const expectedAnchor = s.key === 'v8_player_default_full' ? [32, 76] : s.key === 'v8_player_pawn' ? [12, 41] : [16, 44];
+          if (!s.anchor || s.anchor.x !== expectedAnchor[0] || s.anchor.y !== expectedAnchor[1]) out.push(`spritesheet ${s.key} 锚点不是 ${expectedAnchor[0]},${expectedAnchor[1]}`);
+        }
+        if (s.kind === 'terrainPatch' && (s.pxW !== 32 || s.pxH !== 32 || s.logicalW !== 2 || s.logicalH !== 2)) out.push(`terrainPatch ${s.key} 不是 32px/2×2 契约`);
         if (s.pxW && s.pxH && (s.pxW % 2 || s.pxH % 2)) out.push(`素材 ${s.key} 尺寸 ${s.pxW}×${s.pxH} 是奇数（像素画会被拉糊）`);
+      }
+      const v8Required = [
+        'v8_human_legs', 'v8_human_face', 'v8_human_hair', 'v8_human_torso', 'v8_human_gear', 'v8_player_default_face', 'v8_player_default_hair', 'v8_player_default_torso', 'v8_player_default_full', 'v8_player_pawn',
+        'v8_terrain_tundra', 'v8_terrain_tundra_moss', 'v8_terrain_tundra_stones', 'v8_terrain_tundra_ridges', 'v8_terrain_tundra_lichen', 'v8_terrain_vineMist', 'v8_terrain_vineMist_roots', 'v8_terrain_vineMist_mist', 'v8_terrain_vineMist_leaf', 'v8_terrain_vineMist_water', 'v8_terrain_shaleRise', 'v8_terrain_shaleRise_strata', 'v8_terrain_shaleRise_chips', 'v8_terrain_shaleRise_veins', 'v8_terrain_shaleRise_iron',
+        'v8_node_rock', 'v8_node_ore', 'v8_node_vine', 'v8_node_relic', 'v8_node_mother',
+        'v8_blight', 'v8_vent',
+        'v8_campfire', 'v8_lamp', 'v8_store', 'v8_bench', 'v8_furnace', 'v8_smelter', 'v8_clinic', 'v8_analyzer', 'v8_bunk', 'v8_purifier', 'v8_towerGlow', 'v8_prism', 'v8_prismGun', 'v8_wall', 'v8_stoneWall', 'v8_gate',
+        'v8_decor_tundra', 'v8_decor_tundra_cairn', 'v8_decor_tundra_ice', 'v8_decor_tundra_reeds', 'v8_decor_vine', 'v8_decor_vine_fern', 'v8_decor_vine_mushroom', 'v8_decor_vine_roots', 'v8_decor_shale', 'v8_decor_shale_slab', 'v8_decor_shale_pebbles', 'v8_decor_shale_ironchip',
+        'v8_farm', 'v8_mycobed', 'v8_shaft', 'v8_towerShock', 'v8_towerChain', 'v8_decoy', 'v8_cache', 'v8_barricade',
+        'v8_enemy_bud', 'v8_enemy_charger', 'v8_enemy_shell', 'v8_enemy_bomber', 'v8_enemy_moth',
+        'v8_enemy_spitter', 'v8_enemy_owl', 'v8_enemy_blind', 'v8_enemy_warden', 'v8_enemy_core',
+      ];
+      for (const key of v8Required) if (!keys.has(key)) out.push(`V8 样板素材缺登记：${key}`);
+      const v8Shapes = {
+          v8_human_legs: [128, 48, 32, 48], v8_human_face: [128, 48, 32, 48], v8_human_hair: [128, 48, 32, 48], v8_human_torso: [128, 48, 32, 48], v8_human_gear: [128, 48, 32, 48], v8_player_default_face: [128, 48, 32, 48], v8_player_default_hair: [128, 48, 32, 48], v8_player_default_torso: [128, 48, 32, 48], v8_player_default_full: [256, 80, 64, 80], v8_player_pawn: [1536, 1024, 512, 1024],
+        v8_terrain_tundra: [32, 32, 32, 32], v8_terrain_tundra_moss: [32, 32, 32, 32], v8_terrain_tundra_stones: [32, 32, 32, 32], v8_terrain_tundra_ridges: [32, 32, 32, 32], v8_terrain_tundra_lichen: [32, 32, 32, 32], v8_terrain_vineMist: [32, 32, 32, 32], v8_terrain_vineMist_roots: [32, 32, 32, 32], v8_terrain_vineMist_mist: [32, 32, 32, 32], v8_terrain_vineMist_leaf: [32, 32, 32, 32], v8_terrain_vineMist_water: [32, 32, 32, 32], v8_terrain_shaleRise: [32, 32, 32, 32], v8_terrain_shaleRise_strata: [32, 32, 32, 32], v8_terrain_shaleRise_chips: [32, 32, 32, 32], v8_terrain_shaleRise_veins: [32, 32, 32, 32], v8_terrain_shaleRise_iron: [32, 32, 32, 32],
+        v8_node_rock: [32, 32, 32, 32], v8_node_ore: [32, 32, 32, 32], v8_node_vine: [32, 32, 32, 32], v8_node_relic: [32, 32, 32, 32], v8_node_mother: [32, 32, 32, 32],
+        v8_blight: [32, 32, 32, 32], v8_vent: [32, 32, 32, 32],
+        v8_lamp: [32, 48, 32, 48], v8_purifier: [32, 48, 32, 48], v8_wall: [32, 16, 32, 16], v8_stoneWall: [32, 16, 32, 16], v8_gate: [32, 16, 32, 16],
+        v8_decor_tundra: [32, 32, 32, 32], v8_decor_tundra_cairn: [32, 32, 32, 32], v8_decor_tundra_ice: [32, 32, 32, 32], v8_decor_tundra_reeds: [32, 32, 32, 32], v8_decor_vine: [32, 32, 32, 32], v8_decor_vine_fern: [32, 32, 32, 32], v8_decor_vine_mushroom: [32, 32, 32, 32], v8_decor_vine_roots: [32, 32, 32, 32], v8_decor_shale: [32, 32, 32, 32], v8_decor_shale_slab: [32, 32, 32, 32], v8_decor_shale_pebbles: [32, 32, 32, 32], v8_decor_shale_ironchip: [32, 32, 32, 32],
+        v8_farm: [32, 32, 32, 32], v8_mycobed: [32, 32, 32, 32], v8_shaft: [32, 32, 32, 32], v8_towerShock: [32, 32, 32, 32], v8_towerChain: [32, 32, 32, 32], v8_decoy: [32, 32, 32, 32], v8_cache: [32, 32, 32, 32], v8_barricade: [32, 16, 32, 16], v8_prismGun: [32, 32, 32, 32],
+      };
+      for (const [key, [w, h, fw, fh]] of Object.entries(v8Shapes)) {
+        const s = SPRITES.find((row) => row.key === key);
+        if (s && (s.pxW !== w || s.pxH !== h || s.frameW !== fw || s.frameH !== fh)) {
+          out.push(`V8 素材 ${key} 形状契约不符：登记 ${s.pxW}×${s.pxH} / 帧 ${s.frameW}×${s.frameH}，期望 ${w}×${h} / 帧 ${fw}×${fh}`);
+        }
+      }
+      const pawn = SPRITES.find((row) => row.key === 'v8_player_pawn');
+      if (!pawn || pawn.renderW !== 24 || pawn.renderH !== 48 || pawn.sourceFrameCount !== 3
+        || !Array.isArray(pawn.sourceFrameMap) || pawn.sourceFrameMap.join(',') !== '0,1,1,2'
+        || !Array.isArray(pawn.mirrorFrames) || pawn.mirrorFrames.join(',') !== 'false,true,false,false'
+        || !pawn.sourceCrop || pawn.sourceCrop.x !== 72 || pawn.sourceCrop.y !== 160
+        || pawn.sourceCrop.w !== 368 || pawn.sourceCrop.h !== 736
+        || !pawn.renderAnchor || pawn.renderAnchor.x !== 12 || pawn.renderAnchor.y !== 41) {
+        out.push('v8_player_pawn 缺少三视图 24×48 最近邻显示缓存契约');
       }
       return out.length ? bad('data.sprite', `${out.length} 处素材表问题`, out.slice(0, MAX_DETAIL)) : null;
     },
@@ -2325,23 +2967,48 @@ const DATA_CHECKS = [
     id: 'save.roundtrip',
     run(o) {
       if (!o || !o.roundtrip) return null;
-      if (typeof window === 'undefined' || typeof window.__reload !== 'function') return null;
+      if (typeof window === 'undefined' || typeof window.__restoreCheckpoint !== 'function'
+          || typeof window.__checkpoint !== 'function') return null;
       const out = [];
-      const snap = JSON.parse(JSON.stringify(snapshot(state)));
+      const snap = JSON.parse(JSON.stringify(window.__checkpoint()));
+      const enemyRows = (list) => (list || []).filter((e) => e && e.alive).map((e) => [
+        e.ekind, e.x, e.y, e.hp, e.maxHp, e.dmg, e.fuelDmg, e.atkT, e.wob, e.slowT, e.stuck,
+        e.summonT, e.tier, e.windT, e.dashT, e.dashVX, e.dashVY, e.fuseT, e.auraT,
+        e.bossPhase, e.dawnA, !!e.leaked, e._bvx || 0, e._bvy || 0,
+      ]);
+      const enemyFingerprint = () => JSON.stringify({
+        active: enemyRows(state.enemies),
+        chunks: Object.entries(state.chunkStore || {}).map(([k, c]) => [k, enemyRows(c && c.enemies)]).filter(([, rows]) => rows.length),
+      });
+      const burnTimerFingerprint = () => JSON.stringify({
+        active: (state.buildings || []).map((b) => [b.type, b.x, b.y, +b.burnT || 0]),
+        chunks: Object.entries(state.chunkStore || {}).map(([k, c]) => [k, (c.buildings || []).map((b) => [b.type, b.x, b.y, +b.burnT || 0])]),
+      });
+      const terrainFingerprint = () => JSON.stringify(Object.entries(state.chunkStore || {}).map(([k, c]) => [k, Array.from(c.map.tiles), Array.from(c.map.nodeAmt)]));
       const before = {
         n: (state.buildings || []).length, layer: state.layerId, w: state.map.w, h: state.map.h,
         hp: state.playerHp, hunger: state.playerHunger, injury: state.playerInjury,
         overwork: (state.workers || []).map((w) => w.overwork || 0),
         deathPack: JSON.stringify(state.deathPack || null),
         firstSlice: JSON.stringify(normalizeFirstSlice(state.firstSlice, false, state.day, state.t)),
+        enemies: enemyFingerprint(),
+        spawnLedger: `${state.nightSpawnDay | 0}/${state.nightSpawnBudget | 0}/${state.nightSpawnUsed | 0}`,
+        burnTimers: burnTimerFingerprint(),
+        terrain: terrainFingerprint(),
       };
-      try { window.__reload(snap); } catch (err) { out.push(`读档路径抛异常：${err && err.message}`); }
+      try {
+        if (window.__restoreCheckpoint(snap) !== true) out.push('内存检查点恢复入口拒绝有效检查点');
+      } catch (err) { out.push(`读档路径抛异常：${err && err.message}`); }
       const after = {
         n: (state.buildings || []).length, layer: state.layerId, w: state.map.w, h: state.map.h,
         hp: state.playerHp, hunger: state.playerHunger, injury: state.playerInjury,
         overwork: (state.workers || []).map((w) => w.overwork || 0),
         deathPack: JSON.stringify(state.deathPack || null),
         firstSlice: JSON.stringify(normalizeFirstSlice(state.firstSlice, false, state.day, state.t)),
+        enemies: enemyFingerprint(),
+        spawnLedger: `${state.nightSpawnDay | 0}/${state.nightSpawnBudget | 0}/${state.nightSpawnUsed | 0}`,
+        burnTimers: burnTimerFingerprint(),
+        terrain: terrainFingerprint(),
       };
       if (after.n !== before.n) out.push(`读档往返后建筑数 ${after.n} ≠ ${before.n}`);
       if (after.layer !== before.layer) out.push(`读档往返后层 ${after.layer} ≠ ${before.layer}`);
@@ -2352,6 +3019,10 @@ const DATA_CHECKS = [
       if (after.overwork.join(',') !== before.overwork.join(',')) out.push(`读档往返后透支=${after.overwork} ≠ ${before.overwork}`);
       if (after.deathPack !== before.deathPack) out.push('读档往返后遗落包内容不一致');
       if (after.firstSlice !== before.firstSlice) out.push('读档往返后首局切片状态不一致');
+      if (after.enemies !== before.enemies) out.push('读档往返后当前层/地表区块的存活蚀兽状态不一致');
+      if (after.spawnLedger !== before.spawnLedger) out.push(`读档往返后夜潮普通刷怪账本 ${after.spawnLedger} ≠ ${before.spawnLedger}`);
+      if (after.burnTimers !== before.burnTimers) out.push('读档往返后活动区/休眠区灯具燃烧进度不一致');
+      if (after.terrain !== before.terrain) out.push('读档往返后地表节点余量/开凿地形不一致');
       return out.length ? bad('save.roundtrip', '读档往返路径有问题（loadFromData/restoreBuildings）', out.slice(0, MAX_DETAIL)) : null;
     },
   },

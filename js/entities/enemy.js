@@ -8,6 +8,7 @@ import { applyDamage } from '../systems/combat.js';
 import { hurtPlayer } from '../systems/survival.js';
 import { bondHurt } from '../systems/mind.js';
 import { sfx } from '../core/audio.js';
+import { aliveEnemyCount, screenEnemyRoom } from '../systems/spawnBudget.js';
 
 const R = 0.32;                 // 蚀兽碰撞半径
 
@@ -21,7 +22,7 @@ function canStand(map, x, y) {
 }
 
 export class Enemy extends Entity {
-  constructor(kind, x, y) {
+  constructor(kind, x, y, wob = null) {
     super('enemy', x, y);
     const d = ENEMIES[kind];
     this.ekind = kind;
@@ -34,7 +35,7 @@ export class Enemy extends Entity {
     this.air = !!d.air;
     this.breaker = !!d.breaker;
     this.lampPref = !!d.lampPref;
-    this.wob = Math.random() * 6.28;   // 个体抖动相位
+    this.wob = Number.isFinite(wob) ? wob : Math.random() * 6.28;   // 个体抖动相位；读档可直接恢复且不额外消耗随机数
     this.flash = 0;                    // 受击闪白
     this.slowT = 0;                    // 减速剩余时间
     this.stuck = 0;                    // 卡住计时（供破墙判断）
@@ -302,10 +303,16 @@ export function updateEnemies(state, dt) {
         const cd = Math.max(BOSS.SUMMON_CD_MIN, (e.def.summonCd || BOSS.SUMMON_CD) - e.tier * BOSS.SUMMON_TIER_STEP);
         e.summonT = cd * (p2 ? BOSS.PHASE2_CD_MUL : 1);
         const batch = BOSS.SUMMON_BATCH + (p2 ? BOSS.PHASE2_BATCH_ADD : 0);
-        if (state.enemies.length + pending.length < BOSS.SUMMON_CAP) {
-          for (let k = 0; k < batch; k++) {
+        const alive = aliveEnemyCount(state.enemies);
+        const summonRoom = Math.max(0, BOSS.SUMMON_CAP - alive - pending.length);
+        const screenRoom = screenEnemyRoom(state, state.enemies, pending.length);
+        const summonCount = Math.min(batch, summonRoom, screenRoom);
+        if (summonCount > 0) {
+          for (let k = 0; k < summonCount; k++) {
             const a = Math.random() * Math.PI * 2, r = BOSS.SUMMON_RAD_MIN + Math.random() * BOSS.SUMMON_RAD_VAR;
-            pending.push(new Enemy(Math.random() < 0.5 ? 'bud' : 'moth', e.x + Math.cos(a) * r, e.y + Math.sin(a) * r));
+            const summon = new Enemy(Math.random() < 0.5 ? 'bud' : 'moth', e.x + Math.cos(a) * r, e.y + Math.sin(a) * r);
+            if (state._replayMode) summon._r6SpawnSource = 'boss-summon';
+            pending.push(summon);
           }
         }
       }

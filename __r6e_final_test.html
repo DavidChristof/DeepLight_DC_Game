@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><title>R6-E 整合验收</title>
+<body style="background:#101923;color:#e5edf5;font:13px monospace;margin:16px">
+<h1>R6-E 整合验收</h1><p id="status">准备</p>
+<pre id="out" style="max-height:280px;overflow:auto;white-space:pre-wrap"></pre>
+<iframe id="game" title="R6-E 隔离游戏" style="width:960px;height:640px;border:1px solid #607080"></iframe>
+<script type="module">
+const keys=['deep-light-saves-v2','deep-light-settings-v1','deep-light-ui-v1'];
+const recoveryKey='__deep_light_r6e_final_backup_v1';
+const out=document.querySelector('#out'), status=document.querySelector('#status'), frame=document.querySelector('#game');
+const emit=(label,data)=>{out.textContent+=`${label}: ${JSON.stringify(data,null,2)}\n`;};
+const assert=(ok,why)=>{if(!ok)throw new Error(why);};
+const restore=()=>{
+  const backup=JSON.parse(localStorage.getItem(recoveryKey)||'null');if(!backup)return null;
+  for(const k of keys)backup[k]==null?localStorage.removeItem(k):localStorage.setItem(k,backup[k]);
+  const unchanged=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)===backup[k]]));
+  localStorage.removeItem(recoveryKey);return unchanged;
+};
+if(localStorage.getItem(recoveryKey))emit('interrupted recovery',restore());
+const backup=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)]));
+localStorage.setItem(recoveryKey,JSON.stringify(backup));
+localStorage.setItem(keys[1],JSON.stringify({...JSON.parse(backup[keys[1]]||'{}'),autosave:false}));
+let done=false;window.addEventListener('beforeunload',()=>{if(!done)restore();});
+frame.addEventListener('load',async()=>{
+  const game=frame.contentWindow;let ok=false;
+  try{
+    game.__settings.autosave=false;
+    const check=(label,opts={})=>{const r=game.__check({includeKnown:true,...opts});emit(label,r);assert(r.ok,`${label}: ${JSON.stringify(r.fails)}`);};
+    check('menu');game.__newGame(4242,'normal');game.__settings.autosave=false;
+    check('new-game');check('new-game-roundtrip',{roundtrip:true});
+    const progress=JSON.parse(localStorage.getItem('__deep_light_r6e_checkpoints_v1')||'null');
+    const cp=progress?.latest;
+    assert(progress?.phase==='tundraTrialComplete'&&cp?.seed===4242&&cp?.diff==='normal','缺少本轮真实三站胜局，不能用旧R4完成档替代');
+    const ids=['first','second','third'];
+    assert(ids.every(id=>cp.resonance?.sites?.[id]?.status==='complete'),'三站没有全部完成');
+    const dates=ids.map(id=>cp.resonance.sites[id].completedDay);
+    assert(dates.every(Number.isInteger)&&dates[0]<=dates[1]&&dates[1]<=dates[2],'完成日期缺失或倒序');
+    assert(cp.ending?.sites?.length===3,'胜局没有由生产黎明结算生成结局');
+    assert(game.__restoreCheckpoint(cp),'胜局检查点无法加载');game.__settings.autosave=false;game.__quick(true);
+    check('normal-victory');
+    const record=JSON.stringify(game.__ending());
+    assert(game.__saveSlot('s3')&&game.__loadSlot('s3'),'胜局生产存档往返失败');
+    game.__settings.autosave=false;game.__quick(true);
+    assert(JSON.stringify(game.__ending())===record,'结局事实被存读改写');
+    check('victory-roundtrip',{roundtrip:true});
+    emit('victory-facts',{sourceKey:'__deep_light_r6e_checkpoints_v1',dates,diff:cp.diff,day:cp.day,
+      ending:game.__ending(),playerHp:game.__state.playerHp,deathPack:game.__state.deathPack});
+    assert(game.__showEnding(),'正式结局页无法打开');
+    status.textContent='等待浏览器实际点击：保存到自动档 → 继续拓荒';
+    const next=()=>new Promise(resolve=>game.requestAnimationFrame(resolve));
+    while(JSON.stringify(JSON.parse(localStorage.getItem(keys[0])||'{}').auto?.ending)!==record)await next();
+    emit('actual-save-ending',{autoExact:true});
+    while(!game.document.querySelector('#screen')?.classList.contains('hidden'))await next();
+    game.__quick(true);emit('actual-continue-ending',{returnedToGame:true});
+    check('continued-victory');
+    status.textContent='执行回放、源码审计和长跑';
+    const replay=game.__replay({seed:4242,diff:'normal',days:3,policy:'home'});
+    game.__settings.autosave=false;game.__quick(true);
+    check('replay-after-three-days');check('replay-roundtrip',{roundtrip:true});
+    emit('replay',{ranDays:replay.ranDays,steps:replay.steps,deaths:replay.deaths,minHp:replay.minHp,kills:replay.kills});
+    const source=await game.__srcCheck();emit('source',source);assert(source.ok,'源码审计失败');
+    game.__watch(true,20);game.__steps(1200);game.__watch(false);
+    emit('watch',game.__testLog());assert(game.__testLogRaw().length===0,'1200步监控产生违例');
+    assert(game.__restoreCheckpoint(cp),'最终结局恢复失败');game.__settings.autosave=false;game.__quick(true);game.__showEnding();
+    ok=true;
+  }catch(error){emit('failure',String(error.stack||error));}
+  finally{
+    game.__settings.autosave=false;game.__quick(true);game.__watch(false);
+    const unchanged=restore();emit('official-storage-restored',unchanged);
+    done=true;out.dataset.result=ok&&unchanged&&Object.values(unchanged).every(Boolean)?'passed':'failed';
+    status.textContent=out.dataset.result==='passed'?'R6-E 通过':'R6-E 未通过';
+  }
+});
+frame.src=`/?r6e-final=${Date.now()}`;
+</script></body></html>

@@ -124,7 +124,22 @@ function lowHealthOf(state) {
 }
 
 export function expeditionHud(state) {
-  if (!isAway(state)) return null;
+  const site = state.resonance && state.resonance.sites
+    ? Object.values(state.resonance.sites).find((candidate) => candidate.status !== 'locked' && candidate.status !== 'complete') : null;
+  let goal = null;
+  if (site && site.status !== 'built') {
+    const stage = ({ first: '首座', second: '二座', third: '终座' })[site.id] || '共鸣';
+    const biome = ({ first: '藤雾林', second: '碎岩台地', third: '苔原' })[site.id] || '未知群系';
+    if (site.status === 'pending') goal = { text: `${stage}共鸣信标 · 腾出空位后重试`, title: `${biome}候选区暂时没有可建空格。拆除一座建筑后会重新定位。`, warn: true };
+    else {
+      const dirs = [];
+      if (site.chunkX !== (state.chunkX | 0)) dirs.push(site.chunkX > (state.chunkX | 0) ? '东' : '西');
+      if (site.chunkY !== (state.chunkY | 0)) dirs.push(site.chunkY > (state.chunkY | 0) ? '南' : '北');
+      const where = dirs.length ? `${dirs.join('')}侧` : '当前区块';
+      goal = { text: `${stage}共鸣信标 · ${where}${biome}`, title: `前往区块 ${site.chunkX},${site.chunkY}，寻找金色定位标记并在那里施工。`, warn: false };
+    }
+  }
+  if (!isAway(state)) return goal;
   const readiness = outpostReadinessOf(state);
   const local = readiness.local;
   const directions = returnDirectionOf(state);
@@ -135,7 +150,7 @@ export function expeditionHud(state) {
   const title = `回营方向：${direction} · ${timePartOf(state)}\n` +
     `当地：储物箱${local.hasStore ? '✓' : '×'} · 人工光${local.hasLight ? '✓' : '×'} · 食物${local.food} · 燃料${local.fuel}${full ? ' · 仓库已满' : ''}\n` +
     `背包：${local.pack.used}/${local.pack.cap}（余 ${local.pack.free}） · 背包食物${local.pack.food} · 背包燃料${local.pack.fuel}\n` +
-    `前哨：${readiness.assigned ? '已派拓荒者' : '尚未派人'}`;
+    `前哨：${readiness.assigned ? '已派拓荒者' : '尚未派人'}${goal ? `\n目标：${goal.title}` : ''}`;
   return { text, title, warn, local, directions, readiness, full };
 }
 

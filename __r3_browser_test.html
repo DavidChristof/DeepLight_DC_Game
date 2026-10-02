@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>W20-R R3 首胜检查点测试</title>
+<body style="background:#101923;color:#e5edf5;font:14px Consolas,monospace">
+<h1>W20-R R3 isolated regression</h1>
+<pre id="out">准备隔离浏览器存档…</pre>
+<script>
+const keys = ['deep-light-saves-v2', 'deep-light-settings-v1', 'deep-light-ui-v1'];
+const backup = Object.fromEntries(keys.map((k) => [k, localStorage.getItem(k)]));
+const out = document.getElementById('out');
+const emit = (name, value) => { out.textContent += `\n${name}: ${JSON.stringify(value)}`; };
+try {
+  const raw = backup['deep-light-settings-v1'];
+  const settings = raw ? JSON.parse(raw) : {};
+  localStorage.setItem('deep-light-settings-v1', JSON.stringify({ ...settings, autosave: false }));
+} catch (_) {
+  localStorage.setItem('deep-light-settings-v1', JSON.stringify({ autosave: false }));
+}
+const frame = document.createElement('iframe');
+frame.src = '/';
+frame.style = 'width:720px;height:520px;border:1px solid #607080';
+frame.addEventListener('load', async () => {
+  const w = frame.contentWindow;
+  const originalRandom = w.Math.random;
+  const stableFrame = async () => {
+    const wasPaused = !!w.__state.paused;
+    w.__pause(true);
+    await new Promise((resolve) => w.requestAnimationFrame(resolve));
+    w.__pause(wasPaused);
+  };
+  try {
+    let testRng = 4242 >>> 0;
+    w.Math.random = () => {
+      let t = testRng += 0x6D2B79F5;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    emit('test-only-rng-seed', 4242);
+    emit('autosave-disabled-before-run', w.__settings.autosave === false);
+    const states = [];
+    states.push({ state: 'menu', check: w.__check({ includeKnown: true }) });
+    w.__newGame(4242, 'normal');
+    states.push({ state: 'new-game', check: w.__check({ includeKnown: true }) });
+    states.push({ state: 'save-load-roundtrip', check: w.__check({ includeKnown: true, roundtrip: true }) });
+    w.__watch(true, 20);
+    const replay = w.__replay({ seed: 4242, diff: 'normal', days: 3, policy: 'home' });
+    const watch = w.__testLog();
+    w.__watch(false);
+    states.push({ state: 'three-day-replay', replay: { ranDays: replay.ranDays, steps: replay.steps, deaths: replay.deaths, kills: replay.kills },
+      check: w.__check({ includeKnown: true }), watch });
+    emit('four-state-regression', states);
+    const result = w.__endgameCheckpoint({ seed: 4242, diff: 'normal', days: 7 });
+    emit('first-boss-checkpoint', { ok: result.ok, provenance: result.provenance, reason: result.reason,
+      milestone: result.milestone, replay: result.result && { seed: result.result.seed, diff: result.result.diff,
+        ranDays: result.result.ranDays, steps: result.result.steps, deaths: result.result.deaths,
+        kills: result.result.kills, fuelEnd: result.result.fuelEnd, rows: result.result.rows.length },
+      checkpointBytes: result.checkpoint ? JSON.stringify(result.checkpoint).length : 0 });
+    if (!result.ok) throw new Error(`first-boss replay failed: ${result.reason}`);
+    w.__restoreCheckpoint(result.checkpoint);
+    const s = w.__state;
+    const homeOre = (s.chunkStore['0,0'].beacons || []).reduce((n, b) => n + (b.stock.ore || 0), 0);
+    w.__goto(s.map.w - 1, Math.round(s.map.h / 2));
+    let exitSteps = 0;
+    for (; exitSteps < 1200 && (s.chunkX | 0) === 0; exitSteps++) w.__step(1 / 60);
+    const remoteTake = w.__take('ore', 1);
+    w.__goto(48, 36);
+    let siteSteps = 0;
+    for (; siteSteps < 1600 && Math.hypot(s.player.x - 48.5, s.player.y - 36.5) > 5.5; siteSteps++) w.__step(1 / 60);
+    const remotePlace = w.__place('resonanceBeacon', 48, 36);
+    const beforeRemoteSpend = { chunk: [s.chunkX, s.chunkY], homeOre, remoteTake, remotePlace,
+      siteSteps, oreAfter: (s.chunkStore['0,0'].beacons || []).reduce((n, b) => n + (b.stock.ore || 0), 0) };
+    emit('remote-payment-isolation', beforeRemoteSpend);
+    if ((s.chunkX | 0) !== 1 || beforeRemoteSpend.remoteTake === null || beforeRemoteSpend.remotePlace !== '资源不足'
+        || beforeRemoteSpend.homeOre !== beforeRemoteSpend.oreAfter)
+      throw new Error('remote chunk spent inaccessible home stock or the actual exit route failed');
+    const restored = w.__restoreCheckpoint(result.checkpoint);
+    w.__goto(52, 36);
+    let campSteps = 0;
+    for (; campSteps < 900 && Math.hypot(s.player.x - 51.5, s.player.y - 36.5) > 1.4; campSteps++) w.__step(1 / 60);
+    const campPoint = w.__screenOf(51, 36);
+    const canvas = w.document.querySelector('canvas');
+    canvas.dispatchEvent(new w.MouseEvent('mousemove', { clientX: campPoint.cx, clientY: campPoint.cy, bubbles: true }));
+    w.__step(1 / 60);
+    const resolved = w.__resolve();
+    w.dispatchEvent(new w.KeyboardEvent('keydown', { code: 'KeyE', key: 'e', bubbles: true }));
+    w.__step(1 / 60); w.__step(1 / 60);
+    w.dispatchEvent(new w.KeyboardEvent('keyup', { code: 'KeyE', key: 'e', bubbles: true }));
+    const panelOpened = s.activePanel === 'store';
+    const oreBeforeTransfer = (s.chunkStore['0,0'].beacons || []).reduce((n, b) => n + (b.stock.ore || 0), 0);
+    const pullAllOre = [...w.document.querySelectorAll('#panel .sbtnx')]
+      .find((el) => el.dataset.act === 'pull' && el.dataset.k === 'ore' && el.dataset.n === '999');
+    if (pullAllOre) pullAllOre.click();
+    const packOre = s.pack.stock.ore || 0;
+    const oreAfterTransfer = (s.chunkStore['0,0'].beacons || []).reduce((n, b) => n + (b.stock.ore || 0), 0);
+    emit('manual-ui-transfer', { restored, campSteps, player: [s.player.x, s.player.y], resolved,
+      panelOpened, buttonFound: !!pullAllOre, oreBeforeTransfer, packOre, oreAfterTransfer });
+    if (!restored || resolved.kind !== 'container' || !panelOpened || !pullAllOre
+        || packOre !== oreBeforeTransfer || oreAfterTransfer !== 0)
+      throw new Error('manual container UI failed to move camp ore into the player pack');
+    w.__goto(s.map.w - 1, Math.floor(s.player.y));
+    let carrySteps = 0;
+    for (; carrySteps < 1400 && (s.chunkX | 0) === 0; carrySteps++) w.__step(1 / 60);
+    const carriedAcross = { chunk: [s.chunkX, s.chunkY], steps: carrySteps,
+      packOre: s.pack.stock.ore || 0,
+      homeOre: (s.chunkStore['0,0'].beacons || []).reduce((n, b) => n + (b.stock.ore || 0), 0),
+      local: w.__store() };
+    emit('manual-cross-chunk-carry', carriedAcross);
+    if ((s.chunkX | 0) !== 1 || carriedAcross.packOre !== 8 || carriedAcross.homeOre !== 0)
+      throw new Error('manually loaded ore did not remain in the pack across the chunk boundary');
+    const site = s.resonance.sites.first;
+    const mineLog = [];
+    for (let attempts = 0; attempts < 24 && (s.pack.stock.ore || 0) < 12; attempts++) {
+      const sx = Math.floor(s.player.x), sy = Math.floor(s.player.y);
+      const candidates = [];
+      for (let i = 0; i < s.map.tiles.length; i++) {
+        if (s.map.tiles[i] !== 2 || s.map.nodeAmt[i] <= 0 || s.map.occWalk[i]) continue;
+        const tx = i % s.map.w, ty = Math.floor(i / s.map.w);
+        const path = w.__path(sx, sy, tx, ty);
+        if (path) candidates.push({ i, tx, ty, path: path.length });
+      }
+      candidates.sort((a, b) => a.path - b.path || a.i - b.i);
+      const target = candidates[0];
+      if (!target) break;
+      const path = w.__goto(target.tx, target.ty);
+      if (!path) break;
+      let moveSteps = 0;
+      for (; moveSteps < 1200 && Math.hypot(s.player.x - (target.tx + 0.5), s.player.y - (target.ty + 0.5)) > 1.25; moveSteps++) w.__step(1 / 60);
+      const point = w.__screenOf(target.tx, target.ty);
+      canvas.dispatchEvent(new w.MouseEvent('mousemove', { clientX: point.cx, clientY: point.cy, bubbles: true }));
+      await stableFrame();
+      for (let i = 0; i < 24; i++) w.__step(1 / 60); // 清空采集冷却，再发送有真实持续时间的按键
+      const action = w.__resolve();
+      const before = s.pack.stock.ore || 0;
+      w.dispatchEvent(new w.KeyboardEvent('keydown', { code: 'KeyE', key: 'e', bubbles: true }));
+      for (let i = 0; i < 18; i++) w.__step(1 / 60);
+      w.dispatchEvent(new w.KeyboardEvent('keyup', { code: 'KeyE', key: 'e', bubbles: true }));
+      for (let i = 0; i < 15; i++) w.__step(1 / 60);
+      mineLog.push({ target: [target.tx, target.ty], moveSteps, action: action && action.kind,
+        nodeBefore: s.map.nodeAmt[target.i], packOreBefore: before, packOreAfter: s.pack.stock.ore || 0 });
+      if ((s.pack.stock.ore || 0) === before && s.map.nodeAmt[target.i] <= 0) break;
+    }
+    emit('actual-site-ore-gathering', { mineLog, pack: { ...s.pack.stock }, store: w.__store().stats });
+    if ((s.pack.stock.ore || 0) < 12) throw new Error('could not obtain the 12 ore required for the first signal site via actual gathering');
+    const sx = Math.floor(s.player.x), sy = Math.floor(s.player.y);
+    const approaches = [];
+    for (let y = Math.max(1, site.y - 5); y <= Math.min(s.map.h - 2, site.y + 5); y++) {
+      for (let x = Math.max(1, site.x - 5); x <= Math.min(s.map.w - 2, site.x + 5); x++) {
+        if (x === site.x && y === site.y || !s.map.isWalk(x, y)) continue;
+        const d = Math.hypot(x + 0.5 - site.x - 0.5, y + 0.5 - site.y - 0.5);
+        if (d > 5.2) continue;
+        const path = w.__path(sx, sy, x, y);
+        if (path) approaches.push({ x, y, path: path.length });
+      }
+    }
+    approaches.sort((a, b) => a.path - b.path || a.y - b.y || a.x - b.x);
+    const approach = approaches[0];
+    if (!approach) throw new Error('no reachable standing tile within beacon placement range');
+    w.__goto(approach.x, approach.y);
+    let approachSteps = 0;
+    for (; approachSteps < 1200 && Math.hypot(s.player.x - (approach.x + 0.5), s.player.y - (approach.y + 0.5)) > 0.8; approachSteps++) w.__step(1 / 60);
+    w.dispatchEvent(new w.KeyboardEvent('keydown', { code: 'KeyB', key: 'b', bubbles: true }));
+    w.__step(1 / 60);
+    w.dispatchEvent(new w.KeyboardEvent('keyup', { code: 'KeyB', key: 'b', bubbles: true }));
+    const buildPanel = s.activePanel === 'build';
+    const logisticsTab = w.document.querySelector('#panel .bcat[data-cat="logi"]');
+    if (logisticsTab) logisticsTab.click();
+    const beaconRow = [...w.document.querySelectorAll('#panel .brow[data-type]')]
+      .find((el) => el.dataset.type === 'resonanceBeacon');
+    if (beaconRow) beaconRow.click();
+    const packBeforeBuild = { ...s.pack.stock };
+    const sitePoint = w.__screenOf(site.x, site.y);
+    canvas.dispatchEvent(new w.MouseEvent('mousemove', { clientX: sitePoint.cx, clientY: sitePoint.cy, bubbles: true }));
+    await stableFrame();
+    w.__step(1 / 60);
+    canvas.dispatchEvent(new w.MouseEvent('mousedown', { clientX: sitePoint.cx, clientY: sitePoint.cy, bubbles: true, button: 0 }));
+    w.__step(1 / 60); // 建造是在按住帧生成 dragRect、松手时提交
+    canvas.dispatchEvent(new w.MouseEvent('mouseup', { clientX: sitePoint.cx, clientY: sitePoint.cy, bubbles: true, button: 0 }));
+    const blueprint = s.buildings.find((b) => b.type === 'resonanceBeacon' && b.resonanceSiteId === 'first');
+    const paidBlueprint = { buildPanel, logisticsTab: !!logisticsTab, beaconRow: !!beaconRow,
+      selected: s.building, site: { x: site.x, y: site.y, status: s.resonance.sites.first.status },
+      building: blueprint && { x: blueprint.x, y: blueprint.y, site: blueprint.site },
+      packBeforeBuild, packAfterPlace: { ...s.pack.stock } };
+    emit('actual-beacon-build-ui', { ...paidBlueprint, approach, approachSteps, sitePoint });
+    if (!buildPanel || !logisticsTab || !beaconRow || !blueprint || !blueprint.site
+        || s.resonance.sites.first.status !== 'building'
+        || (s.pack.stock.ore || 0) !== (packBeforeBuild.ore || 0) - 12
+        || (s.pack.stock.fuel || 0) !== (packBeforeBuild.fuel || 0) - 6)
+      throw new Error('actual build panel placement did not atomically pay and create the first signal blueprint');
+    const stand = [{ x: site.x - 1, y: site.y }, { x: site.x + 1, y: site.y },
+      { x: site.x, y: site.y - 1 }, { x: site.x, y: site.y + 1 }]
+      .find((p) => s.map.isWalk(p.x, p.y) && w.__path(Math.floor(s.player.x), Math.floor(s.player.y), p.x, p.y));
+    if (!stand) throw new Error('no walkable adjacent position for manual beacon construction');
+    w.__goto(stand.x, stand.y);
+    for (let i = 0; i < 900 && Math.hypot(s.player.x - (stand.x + 0.5), s.player.y - (stand.y + 0.5)) > 0.8; i++) w.__step(1 / 60);
+    const workPoint = w.__screenOf(site.x, site.y);
+    canvas.dispatchEvent(new w.MouseEvent('mousemove', { clientX: workPoint.cx, clientY: workPoint.cy, bubbles: true }));
+    await stableFrame();
+    w.dispatchEvent(new w.KeyboardEvent('keydown', { code: 'KeyE', key: 'e', bubbles: true }));
+    for (let i = 0; i < 480; i++) w.__step(1 / 60);
+    w.dispatchEvent(new w.KeyboardEvent('keyup', { code: 'KeyE', key: 'e', bubbles: true }));
+    const builtBeacon = { status: s.resonance.sites.first.status, site: blueprint.site,
+      work: blueprint.work, hp: blueprint.hp, chunk: [s.chunkX, s.chunkY] };
+    emit('actual-beacon-construction', builtBeacon);
+    if (s.resonance.sites.first.status !== 'built' || blueprint.site)
+      throw new Error('holding the real interact key did not complete the first signal beacon');
+    for (let i = 0; i < 2 && (s.activePanel || s.building); i++) {
+      w.dispatchEvent(new w.KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true }));
+      w.__step(1 / 60);
+      w.dispatchEvent(new w.KeyboardEvent('keyup', { code: 'Escape', key: 'Escape', bubbles: true }));
+    }
+    // 预约前必须实测供给来源：回原点从营地 UI 手动取燃料，再亲自带回首站。
+    w.__goto(0, 36);
+    let returnSteps = 0;
+    for (; returnSteps < 1800 && (s.chunkX | 0) === 1; returnSteps++) w.__step(1 / 60);
+    if ((s.chunkX | 0) !== 0) throw new Error('could not return to origin to retrieve trial fuel');
+    w.__goto(44, 36);
+    for (let i = 0; i < 900 && Math.hypot(s.player.x - 44.5, s.player.y - 36.5) > 1.2; i++) w.__step(1 / 60);
+    const fuelCamp = s.beacons.find((b) => b.x === 45 && b.y === 36);
+    const fuelBefore = fuelCamp && fuelCamp.stock.fuel || 0;
+    const fuelPoint = w.__screenOf(45, 36);
+    canvas.dispatchEvent(new w.MouseEvent('mousemove', { clientX: fuelPoint.cx, clientY: fuelPoint.cy, bubbles: true }));
+    await stableFrame();
+    w.dispatchEvent(new w.KeyboardEvent('keydown', { code: 'KeyE', key: 'e', bubbles: true }));
+    w.__step(1 / 60); w.__step(1 / 60);
+    w.dispatchEvent(new w.KeyboardEvent('keyup', { code: 'KeyE', key: 'e', bubbles: true }));
+    const fuelPull = [...w.document.querySelectorAll('#panel .sbtnx')]
+      .find((el) => el.dataset.act === 'pull' && el.dataset.k === 'fuel' && el.dataset.n === '999');
+    if (!fuelPull) throw new Error('local fuel container UI did not expose an all-transfer control');
+    fuelPull.click();
+    const fuelAfterTransfer = { pack: s.pack.stock.fuel || 0, camp: fuelCamp && fuelCamp.stock.fuel || 0 };
+    w.document.querySelector('#panel .pclose')?.click();
+    w.__goto(s.map.w - 1, 36);
+    let outboundSteps = 0;
+    for (; outboundSteps < 1800 && (s.chunkX | 0) === 0; outboundSteps++) w.__step(1 / 60);
+    if ((s.chunkX | 0) !== 1) throw new Error('could not return to the first resonance chunk with trial fuel');
+    w.__goto(48, 35);
+    for (let i = 0; i < 900 && Math.hypot(s.player.x - 48.5, s.player.y - 35.5) > 1.0; i++) w.__step(1 / 60);
+    const bloomOps = s.layers.surface.nightops;
+    emit('actual-trial-fuel-transport', { returnSteps, outboundSteps, fuelBefore,
+      fuelAfterTransfer, packOnSite: s.pack.stock.fuel || 0,
+      siteStatus: s.resonance.sites.first.status, time: { day: s.day, t: +s.t.toFixed(2) },
+      beaconLight: s.light[site.y * s.map.w + site.x] || 0,
+      nightbloomSites: (bloomOps?.blooms || []).map((b) => ({ x: b.x, y: b.y, alive: b.alive, charges: b.charges })) });
+    if (fuelAfterTransfer.pack < 4 || fuelAfterTransfer.camp !== 0 || (s.chunkX | 0) !== 1)
+      throw new Error('actual local fuel transfer and cross-chunk carry did not preserve trial resources');
+    const defenseMineLog = [];
+    for (let attempts = 0; attempts < 20 && (s.pack.stock.ore || 0) < 6; attempts++) {
+      const sx = Math.floor(s.player.x), sy = Math.floor(s.player.y);
+      const ores = [];
+      for (let i = 0; i < s.map.tiles.length; i++) {
+        if (s.map.tiles[i] !== 2 || s.map.nodeAmt[i] <= 0 || s.map.occWalk[i]) continue;
+        const tx = i % s.map.w, ty = Math.floor(i / s.map.w), path = w.__path(sx, sy, tx, ty);
+        if (path) ores.push({ i, tx, ty, path: path.length });
+      }
+      ores.sort((a, b) => a.path - b.path || a.i - b.i);
+      const target = ores[0];
+      if (!target) break;
+      w.__goto(target.tx, target.ty);
+      let steps = 0;
+      for (; steps < 900 && Math.hypot(s.player.x - (target.tx + 0.5), s.player.y - (target.ty + 0.5)) > 1.15; steps++) w.__step(1 / 60);
+      const point = w.__screenOf(target.tx, target.ty);
+      canvas.dispatchEvent(new w.MouseEvent('mousemove', { clientX: point.cx, clientY: point.cy, bubbles: true }));
+      await stableFrame(); w.__step(1 / 60);
+      const action = w.__resolve(), before = s.pack.stock.ore || 0;
+      w.dispatchEvent(new w.KeyboardEvent('keydown', { code: 'KeyE', key: 'e', bubbles: true }));
+      for (let i = 0; i < 18; i++) w.__step(1 / 60);
+      w.dispatchEvent(new w.KeyboardEvent('keyup', { code: 'KeyE', key: 'e', bubbles: true }));
+      defenseMineLog.push({ tile: [target.tx, target.ty], steps, action: action?.kind,
+        nodeAfter: s.map.nodeAmt[target.i], oreBefore: before, oreAfter: s.pack.stock.ore || 0 });
+    }
+    if ((s.pack.stock.ore || 0) < 6) throw new Error(`could not gather 6 ore for a local defense tower: ${JSON.stringify(defenseMineLog)}`);
+    const towerSites = [];
+    for (let y = Math.max(1, site.y - 4); y <= Math.min(s.map.h - 2, site.y + 4); y++) {
+      for (let x = Math.max(1, site.x - 4); x <= Math.min(s.map.w - 2, site.x + 4); x++) {
+        const i = y * s.map.w + x;
+        if (Math.hypot(x - site.x, y - site.y) > 3 || s.map.tiles[i] !== 0 || !s.map.isWalk(x, y)
+            || s.map.occBuild[i] || s.map.occWalk[i] || s.buildings.some((b) => b.x === x && b.y === y)
+            || s.beacons.some((b) => b.x === x && b.y === y)) continue;
+        const path = w.__path(Math.floor(s.player.x), Math.floor(s.player.y), x, y);
+        if (path) towerSites.push({ x, y, path: path.length });
+      }
+    }
+    towerSites.sort((a, b) => a.path - b.path || a.y - b.y || a.x - b.x);
+    const towerSite = towerSites[0];
+    if (!towerSite) throw new Error('no reachable legal tower tile near the first resonance beacon');
+    const towerApproach = [{ x: site.x - 1, y: site.y }, { x: site.x + 1, y: site.y },
+      { x: site.x, y: site.y - 1 }, { x: site.x, y: site.y + 1 }]
+      .find((p) => s.map.isWalk(p.x, p.y) && w.__path(Math.floor(s.player.x), Math.floor(s.player.y), p.x, p.y));
+    if (!towerApproach) throw new Error('no adjacent approach tile for local defense construction');
+    w.__goto(towerApproach.x, towerApproach.y);
+    for (let i = 0; i < 1200 && Math.hypot(s.player.x - (towerApproach.x + 0.5), s.player.y - (towerApproach.y + 0.5)) > 0.2; i++) w.__step(1 / 60);
+    w.dispatchEvent(new w.KeyboardEvent('keydown', { code: 'KeyB', key: 'b', bubbles: true }));
+    w.__step(1 / 60); w.dispatchEvent(new w.KeyboardEvent('keyup', { code: 'KeyB', key: 'b', bubbles: true }));
+    w.document.querySelector('#panel .bcat[data-cat="def"]')?.click();
+    const towerRow = [...w.document.querySelectorAll('#panel .brow[data-type]')]
+      .find((el) => el.dataset.type === 'towerGlow');
+    if (!towerRow) throw new Error('defense category did not expose the glow tower');
+    towerRow.click();
+    const towerPoint = w.__screenOf(towerSite.x, towerSite.y);
+    canvas.dispatchEvent(new w.MouseEvent('mousemove', { clientX: towerPoint.cx, clientY: towerPoint.cy, bubbles: true }));
+    await stableFrame(); w.__step(1 / 60);
+    canvas.dispatchEvent(new w.MouseEvent('mousedown', { clientX: towerPoint.cx, clientY: towerPoint.cy, bubbles: true, button: 0 }));
+    w.__step(1 / 60);
+    canvas.dispatchEvent(new w.MouseEvent('mouseup', { clientX: towerPoint.cx, clientY: towerPoint.cy, bubbles: true, button: 0 }));
+    const tower = s.buildings.find((b) => b.type === 'towerGlow' && b.x === towerSite.x && b.y === towerSite.y);
+    if (!tower || !tower.site || (s.pack.stock.ore || 0) !== (8 - 6) || (s.pack.stock.fuel || 0) !== 4)
+      throw new Error(`glow tower did not place/pay expected 6 ore + 2 fuel: ${JSON.stringify({ tower, pack: s.pack.stock })}`);
+    for (let i = 0; i < 2 && (s.activePanel || s.building); i++) {
+      w.dispatchEvent(new w.KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true }));
+      w.__step(1 / 60); w.dispatchEvent(new w.KeyboardEvent('keyup', { code: 'Escape', key: 'Escape', bubbles: true }));
+    }
+    const towerStand = [{ x: tower.x - 1, y: tower.y }, { x: tower.x + 1, y: tower.y },
+      { x: tower.x, y: tower.y - 1 }, { x: tower.x, y: tower.y + 1 }]
+      .find((p) => s.map.isWalk(p.x, p.y) && w.__path(Math.floor(s.player.x), Math.floor(s.player.y), p.x, p.y));
+    if (!towerStand) throw new Error('no walkable adjacent tile for tower construction');
+    w.__goto(towerStand.x, towerStand.y);
+    for (let i = 0; i < 900 && Math.hypot(s.player.x - (towerStand.x + 0.5), s.player.y - (towerStand.y + 0.5)) > 0.8; i++) w.__step(1 / 60);
+    const towerWorkPoint = w.__screenOf(tower.x, tower.y);
+    canvas.dispatchEvent(new w.MouseEvent('mousemove', { clientX: towerWorkPoint.cx, clientY: towerWorkPoint.cy, bubbles: true }));
+    await stableFrame(); w.__step(1 / 60);
+    w.dispatchEvent(new w.KeyboardEvent('keydown', { code: 'KeyE', key: 'e', bubbles: true }));
+    for (let i = 0; i < 420; i++) w.__step(1 / 60);
+    w.dispatchEvent(new w.KeyboardEvent('keyup', { code: 'KeyE', key: 'e', bubbles: true }));
+    emit('actual-first-site-defense', { mineLog: defenseMineLog, tile: [tower.x, tower.y],
+      status: tower.site ? 'building' : 'built', work: tower.work, hp: tower.hp,
+      pack: { ...s.pack.stock }, light: s.light[tower.y * s.map.w + tower.x] || 0 });
+    if (tower.site || (s.pack.stock.ore || 0) !== 2 || (s.pack.stock.fuel || 0) !== 4)
+      throw new Error('local defense tower did not finish before the first tide appointment');
+    if (s.t < 320) w.__steps(Math.ceil((320 - s.t) * 60), 1 / 60);
+    const harvestable = (bloomOps?.blooms || []).filter((b) => b.alive && b.charges > 0)
+      .map((b) => ({ b, path: w.__path(Math.floor(s.player.x), Math.floor(s.player.y), b.x, b.y) }))
+      .filter((v) => v.path).sort((a, b) => a.path.length - b.path.length)[0];
+    if (!harvestable) throw new Error('first local tide produced no reachable dark nightbloom');
+    const bloom = harvestable.b, beforeNight = s.pack.stock.night || 0;
+    w.__goto(bloom.x, bloom.y);
+    let bloomSteps = 0;
+    for (; bloomSteps < 1200 && Math.hypot(s.player.x - (bloom.x + 0.5), s.player.y - (bloom.y + 0.5)) > 1.15; bloomSteps++) w.__step(1 / 60);
+    const bloomPoint = w.__screenOf(bloom.x, bloom.y);
+    canvas.dispatchEvent(new w.MouseEvent('mousemove', { clientX: bloomPoint.cx, clientY: bloomPoint.cy, bubbles: true }));
+    await stableFrame();
+    w.__step(1 / 60); // 让游戏自己的 updateCursor 接收鼠标目标
+    const bloomAction = w.__resolve();
+    w.dispatchEvent(new w.KeyboardEvent('keydown', { code: 'KeyE', key: 'e', bubbles: true }));
+    w.__step(1 / 60);
+    w.dispatchEvent(new w.KeyboardEvent('keyup', { code: 'KeyE', key: 'e', bubbles: true }));
+    const nightAfter = s.pack.stock.night || 0;
+    if (nightAfter <= beforeNight) throw new Error(`actual nightbloom interaction failed: ${JSON.stringify(bloomAction)}`);
+    w.__goto(site.x - 1, site.y);
+    let signalSteps = 0;
+    for (; signalSteps < 1200 && Math.hypot(s.player.x - (site.x - 0.5), s.player.y - (site.y + 0.5)) > 0.2; signalSteps++) w.__step(1 / 60);
+    const signalPoint = w.__screenOf(site.x, site.y);
+    canvas.dispatchEvent(new w.MouseEvent('mousemove', { clientX: signalPoint.cx, clientY: signalPoint.cy, bubbles: true }));
+    await stableFrame();
+    w.__step(1 / 60);
+    const signalAction = w.__resolve();
+    const fuelBeforeReservation = s.pack.stock.fuel || 0;
+    w.dispatchEvent(new w.KeyboardEvent('keydown', { code: 'KeyE', key: 'e', bubbles: true }));
+    w.__step(1 / 60);
+    w.dispatchEvent(new w.KeyboardEvent('keyup', { code: 'KeyE', key: 'e', bubbles: true }));
+    emit('actual-nightbloom-and-trial-appointment', { bloom: { x: bloom.x, y: bloom.y, charges: bloom.charges,
+        moveSteps: bloomSteps, action: bloomAction?.kind, nightBefore: beforeNight, nightAfter },
+      signal: { moveSteps: signalSteps, action: signalAction?.kind, light: s.light[site.y * s.map.w + site.x] || 0,
+        player: { x: +s.player.x.toFixed(2), y: +s.player.y.toFixed(2) }, cursor: { ...s.cursor },
+        buildMode: s.building, panel: s.activePanel,
+        status: s.resonance.trial.status, targetDay: s.resonance.trial.targetDay,
+        attempts: s.resonance.trial.attempts, fuel: s.pack.stock.fuel || 0, night: s.pack.stock.night || 0,
+        day: s.day, t: +s.t.toFixed(2) } });
+    if (s.resonance.trial.status !== 'reserved' || s.resonance.trial.targetDay !== (s.day | 0) + 1
+        || (s.pack.stock.fuel || 0) !== fuelBeforeReservation - 4 || (s.pack.stock.night || 0) !== nightAfter - 1)
+      throw new Error('actual UI reservation did not reserve the next tide and atomically pay fuel/night');
+    const deathState = () => ({ hp: s.playerHp, pack: { ...s.pack.stock },
+      deathPack: s.deathPack && { x: s.deathPack.x, y: s.deathPack.y,
+        chunkX: s.deathPack.chunkX, chunkY: s.deathPack.chunkY, stock: { ...s.deathPack.stock } } });
+    const afterReservation = { day: s.day, t: +s.t.toFixed(2), ...deathState(),
+      kills: s.kills, trial: s.resonance.trial.status, wave: w.__wave() };
+    const toNextDawn = Math.ceil(((400 - s.t) % 400) * 60);
+    w.__steps(toNextDawn, 1 / 60);
+    const betweenTides = { day: s.day, t: +s.t.toFixed(2), ...deathState(),
+      kills: s.kills, trial: s.resonance.trial.status, chunk: [s.chunkX, s.chunkY], enemies: s.enemies.filter((e) => e.alive).length };
+    if (s.resonance.trial.status === 'reserved' && s.t < 320)
+      w.__steps(Math.ceil((320 - s.t) * 60), 1 / 60);
+    const atTrialTide = { day: s.day, t: +s.t.toFixed(2), ...deathState(), kills: s.kills,
+      trial: s.resonance.trial.status, activeDay: s.resonance.trial.activeDay,
+      challengeMul: s.resonance.trial.challengeMul, themeId: s.resonance.trial.themeId,
+      chunk: [s.chunkX, s.chunkY], enemies: s.enemies.filter((e) => e.alive).length, wave: w.__wave() };
+    const trialWaveSamples = [];
+    if (s.resonance.trial.status === 'active') {
+      const remain = Math.ceil((400 - s.t) * 60);
+      for (let left = remain; left > 0; left -= 300) {
+        w.__steps(Math.min(300, left), 1 / 60);
+        trialWaveSamples.push({ day: s.day, t: +s.t.toFixed(1), alive: s.enemies.filter((e) => e.alive).length,
+          kills: s.kills, noSpawnT: +(s.noSpawnT || 0).toFixed(1) });
+      }
+    }
+    const afterTrialDawn = { day: s.day, t: +s.t.toFixed(2), ...deathState(), kills: s.kills,
+      trial: s.resonance.trial.status, result: s.resonance.trial.result,
+      failureReason: s.resonance.trial.failureReason, completedDay: s.resonance.trial.completedDay,
+      site: s.resonance.sites.first.status, beaconHp: s.buildings.find((b) => b.resonanceSiteId === 'first')?.hp,
+      nextSite: { status: s.resonance.sites.second.status, chunk: [s.resonance.sites.second.chunkX, s.resonance.sites.second.chunkY] },
+      terminalSite: s.resonance.sites.third.status,
+      chunk: [s.chunkX, s.chunkY], enemies: s.enemies.filter((e) => e.alive).length, wave: w.__wave() };
+    emit('actual-two-tide-trial', { afterReservation, betweenTides, atTrialTide, trialWaveSamples, afterTrialDawn });
+    if (afterTrialDawn.trial !== 'complete' || afterTrialDawn.site !== 'complete'
+        || afterTrialDawn.nextSite.status !== 'revealed' || afterTrialDawn.terminalSite !== 'locked')
+      throw new Error('the first resonance tide did not complete or open exactly the second site');
+    const lostPack = s.deathPack;
+    let deathPackRecovery = null;
+    if (lostPack) {
+      const dx = Math.floor(lostPack.x), dy = Math.floor(lostPack.y);
+      w.__goto(dx, dy);
+      for (let i = 0; i < 900 && Math.hypot(s.player.x - (dx + 0.5), s.player.y - (dy + 0.5)) > 1.0; i++) w.__step(1 / 60);
+      const dpPoint = w.__screenOf(dx, dy);
+      canvas.dispatchEvent(new w.MouseEvent('mousemove', { clientX: dpPoint.cx, clientY: dpPoint.cy, bubbles: true }));
+      await stableFrame();
+      w.__step(1 / 60);
+      const dpAction = w.__resolve();
+      w.dispatchEvent(new w.KeyboardEvent('keydown', { code: 'KeyE', key: 'e', bubbles: true }));
+      w.__step(1 / 60);
+      w.dispatchEvent(new w.KeyboardEvent('keyup', { code: 'KeyE', key: 'e', bubbles: true }));
+      deathPackRecovery = { action: dpAction?.kind, remaining: s.deathPack,
+        pack: { ...s.pack.stock }, expectedFuel: lostPack.stock.fuel || 0 };
+      if (dpAction?.kind !== 'deathPack' || s.deathPack || (s.pack.stock.fuel || 0) < (lostPack.stock.fuel || 0))
+        throw new Error('actual KeyE death-pack recovery did not conserve dropped supplies');
+    }
+    emit('actual-death-pack-recovery', deathPackRecovery || 'no death occurred');
+    const beforeRepeat = { trial: s.resonance.trial.status, attempts: s.resonance.trial.attempts,
+      completedDay: s.resonance.trial.completedDay, pack: { ...s.pack.stock } };
+    const repeatPoint = w.__screenOf(site.x, site.y);
+    canvas.dispatchEvent(new w.MouseEvent('mousemove', { clientX: repeatPoint.cx, clientY: repeatPoint.cy, bubbles: true }));
+    await stableFrame();
+    w.__step(1 / 60);
+    const repeatAction = w.__resolve();
+    w.dispatchEvent(new w.KeyboardEvent('keydown', { code: 'KeyE', key: 'e', bubbles: true }));
+    w.__step(1 / 60);
+    w.dispatchEvent(new w.KeyboardEvent('keyup', { code: 'KeyE', key: 'e', bubbles: true }));
+    const afterRepeat = { trial: s.resonance.trial.status, attempts: s.resonance.trial.attempts,
+      completedDay: s.resonance.trial.completedDay, pack: { ...s.pack.stock } };
+    emit('actual-completion-idempotency', { repeatAction: repeatAction?.kind, beforeRepeat, afterRepeat });
+    if (JSON.stringify(beforeRepeat) !== JSON.stringify(afterRepeat))
+      throw new Error('repeating E interaction after successful completion changed trial or resources');
+    // 给 R4-A 自动续跑留一个仅在父页面内存中的真实检查点；此时首站已完成、遗落包处理和重复输入也验过，不写进 localStorage。
+    const r4StartCheckpoint = w.__checkpoint();
+    parent.__r4StartCheckpoint = r4StartCheckpoint;
+    emit('r4-resume-checkpoint', { available: !!parent.__r4StartCheckpoint,
+      bytes: JSON.stringify(r4StartCheckpoint).length, site: r4StartCheckpoint.resonance?.sites?.first?.status,
+      next: r4StartCheckpoint.resonance?.sites?.second?.status, deathPack: !!r4StartCheckpoint.deathPack });
+    if (r4StartCheckpoint.resonance?.sites?.first?.status !== 'complete'
+        || r4StartCheckpoint.resonance?.sites?.second?.status !== 'revealed' || r4StartCheckpoint.deathPack)
+      throw new Error('R4 resume checkpoint is not a clean verified first-site completion');
+    emit('memory-restore', { restored, report: w.__resonance(), check: w.__check({ includeKnown: true, roundtrip: true }) });
+    emit('source-check', await w.__srcCheck());
+  } catch (error) {
+    emit('error', String(error && error.stack || error));
+  } finally {
+    w.Math.random = originalRandom;
+    const wasUnchanged = Object.fromEntries(keys.map((k) => [k, localStorage.getItem(k) === backup[k]]));
+    emit('storage-before-restore', wasUnchanged);
+    for (const key of keys) backup[key] == null ? localStorage.removeItem(key) : localStorage.setItem(key, backup[key]);
+    emit('storage-restored', Object.fromEntries(keys.map((k) => [k, localStorage.getItem(k) === backup[k]])));
+    out.dataset.done = 'true';
+  }
+}, { once: true });
+document.body.appendChild(frame);
+</script>
+</body>
+</html>

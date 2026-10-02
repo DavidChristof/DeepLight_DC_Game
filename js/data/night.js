@@ -85,6 +85,27 @@ export function spawnInterval(state, seg, dm) {
     * (d.waveMul || 1) * (seg ? seg.intervalMul : 1) / (state.nightChallengeMul || 1);
 }
 
+// 普通敌潮的单波数量。波次、潮穴共用同一夜的总名额；潮穴只能占用这些既有名额。
+export function waveBatchSize(state, seg) {
+  const tide = tideOf(state);
+  const part = seg || segmentOf(state);
+  return 1 + Math.floor(tide / WAVES.BATCH_DIV) + (part ? part.batchAdd : 0);
+}
+
+function waveUnitsUntil(state, endT) {
+  const dm = state.diff || { waveMul: 1 };
+  let t = TIDE_START, units = 0;
+  for (let guard = 0; guard < 400 && t < TIDE_END && t < endT; guard++) {
+    units += waveBatchSize(state, segAtRel(t - TIDE_START));
+    t += spawnInterval(state, segAtRel(t - TIDE_START), dm);
+  }
+  return units;
+}
+
+// 一夜标准波次名额（独立于同屏 cap；拥堵/无合法落点只会让实际数量更少）。
+export function waveUnitsInWindow(state) { return waveUnitsUntil(state, TIDE_END); }
+export function waveUnitsElapsed(state, endT = state && state.t) { return waveUnitsUntil(state, endT); }
+
 // —— 本夜还剩几波（给 HUD 的“威胁预告”）——
 // 【为什么是估数】同屏 cap 卡住时，刷怪器**不消耗**这一批（spawnT 归零就等着），所以这只是“上限意义的上还会来几批”；
 //   HUD 文案里要带个“≈”字（不把估数说成承诺）。窗口外（白天/黎明）返回 null = HUD 不显示。

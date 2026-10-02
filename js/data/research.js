@@ -110,7 +110,7 @@ export const RESEARCH = {
     desc: '解锁一次性复苏：墓碑旁消耗稀缺资源，把一名拓荒者带回，但会带伤、饥饿并经历恢复期（本局限 1 次）',
   },
   deeper: {
-    sect: 'deep', name: '深层深潜', cost: { data: 20, core: 2 }, req: ['deep'], req2: [{ depth: 2 }],
+    sect: 'deep', name: '深层深潜', cost: { data: 20 }, req: ['deep'], req2: [{ depth: 1 }],
     desc: '允许在深潜层建造竖井，下探第二阶熔渊',
   },
   carrier: {   // W14-A 第 5 步 5b：结构装载体

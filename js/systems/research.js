@@ -7,7 +7,7 @@
 //   · 知识节点（sect:'know'）只能在【解析台】旁解锁 —— 把"点菜单"变成"要先安好家"
 import { RESEARCH } from '../data/research.js';
 import { RELIC_SERIES, PARTS_NEED } from '../data/relics.js';
-import { withdraw } from './storage.js';
+import { withdraw, spendableOf, canWithdraw } from './storage.js';
 import { seriesGot } from './relics.js';
 import { PULSE, TOWER } from '../data/combat.js';   // 战斗乘子的数值唯一数据源（W14-A 第 0 步）
 import { SLOT_TECHS, MAX_SLOTS } from '../data/payload.js';   // 载荷槽位的研究表（W14-A 第 2 步）
@@ -150,9 +150,10 @@ export function researchError(state, id) {
   }
   if (r.sect === 'know' && !nearAnalyzer(state)) return '要把线索带回「解析台」才能解析';
   const c = costOf(state, id);
-  if ((state.res.data || 0) < (c.data || 0)) return `档案点数不足（还差 ${Math.ceil((c.data || 0) - (state.res.data || 0))}）`;
-  if ((state.res.core || 0) < (c.core || 0)) return `母髓不足（还差 ${(c.core || 0) - (state.res.core || 0)}）`;
-  if ((state.res.night || 0) < (c.night || 0)) return `夜髓不足（还差 ${(c.night || 0) - (state.res.night || 0)}）`;
+  const have = spendableOf(state);
+  if ((have.data || 0) < (c.data || 0)) return `档案点数不足（还差 ${Math.ceil((c.data || 0) - (have.data || 0))}）`;
+  if ((have.core || 0) < (c.core || 0)) return `母髓不足（还差 ${(c.core || 0) - (have.core || 0)}）`;
+  if ((have.night || 0) < (c.night || 0)) return `夜髓不足（还差 ${(c.night || 0) - (have.night || 0)}）`;
   return null;
 }
 
@@ -161,7 +162,9 @@ export function unlockTech(state, id) {
   if (err) return err;
   const c = costOf(state, id);
   if (Object.keys(c).length) {
-    withdraw(state, { data: c.data || 0, core: c.core || 0, night: c.night || 0 }, state.player.x, state.player.y);
+    const cost = { data: c.data || 0, core: c.core || 0, night: c.night || 0 };
+    if (!canWithdraw(state, cost)) return '当前区块/背包物资不足';
+    withdraw(state, cost, state.player.x, state.player.y);
   }
   state.research.unlocked[id] = true;
   state.researchVersion = (state.researchVersion || 0) + 1;

@@ -1,5 +1,5 @@
 // world/chunks.js —— 地表区块的确定性载入与切换（W15-B S08）
-import { genMap } from './gen.js';
+import { genMap, surfaceChunkMapSeed, surfaceChunkNightOpsSeed } from './gen.js';
 import { ensureNightOps } from '../systems/nightops.js';
 import { isTide } from '../core/time.js';
 import { BUILD } from '../data/buildings.js';
@@ -11,14 +11,11 @@ import { seedBlightFrontInChunk } from '../systems/blight.js';
 import { T } from './map.js';
 import { STARVE } from '../data/traits.js';
 import { downWorker } from '../entities/worker.js';
+import { burnBuildingFuel } from '../systems/logistics.js';
+import { NODE_AMT } from '../data/nodes.js';
 
 const W = SURVIVAL.CHUNK.WIDTH, H = SURVIVAL.CHUNK.HEIGHT;
 const keyOf = (x, y) => `${x},${y}`;
-function seedOf(seed, cx, cy) {
-  const h = Math.imul((seed ^ 0x9e3779b9) >>> 0, 0x85ebca6b) ^ Math.imul((cx | 0) + 0x7f4a7c15, 0xc2b2ae35) ^ Math.imul((cy | 0) + 0x165667b1, 0x27d4eb2f);
-  return (h ^ (h >>> 16)) >>> 0;
-}
-
 function carveExit(m) {
   const mx = m.w / 2 | 0, my = m.h / 2 | 0;
   const edge = Math.max(2, SURVIVAL.CHUNK.EXIT_CORRIDOR | 0);
@@ -39,12 +36,33 @@ export function ensureSurfaceChunk(state, cx = 0, cy = 0) {
     return state.chunkStore[key];
   }
   const biome = biomeOf(cx, cy);
-  const map = genMap(W, H, seedOf(state.seed, cx, cy), biome.id);
+  const map = genMap(W, H, surfaceChunkMapSeed(state.seed, cx, cy), biome.id);
   carveExit(map);
+  map._baseTiles = map.tiles.slice();
   const chunk = { id: key, cx, cy, biome: biome.id, map, discovered: new Uint8Array(W * H), buildings: [], beacons: [], enemies: [], workers: [], nightops: null, outpost: null, modified: false };
-  ensureNightOps(chunk, seedOf(state.seed ^ 0x51ed270b, cx, cy));
+  ensureNightOps(chunk, surfaceChunkNightOpsSeed(state.seed, cx, cy));
   state.chunkStore[key] = chunk;
   return chunk;
+}
+
+// nodes 是完整的非零余量清单，遗漏的节点代表耗尽，不是“沿用生成值”。
+// tileDiffs 保存岩壁开凿等无法从余量反推的地形；旧档仍可恢复已采空的矿物/藤木/遗迹。
+export function restoreSurfaceTerrain(map, data) {
+  if (!map || !data) return;
+  if (Array.isArray(data.nodes)) {
+    map.nodeAmt.fill(0);
+    for (let n = 0; n + 1 < data.nodes.length; n += 2) {
+      const i = data.nodes[n], amount = data.nodes[n + 1];
+      if (Number.isInteger(i) && i >= 0 && i < map.tiles.length && Number.isFinite(amount)) map.nodeAmt[i] = amount;
+    }
+    for (let i = 0; i < map.tiles.length; i++) {
+      if (NODE_AMT[map.tiles[i]] && map.nodeAmt[i] <= 0) map.set(i % map.w, (i / map.w) | 0, T.FLOOR);
+    }
+  }
+  if (Array.isArray(data.tileDiffs)) for (let n = 0; n + 1 < data.tileDiffs.length; n += 2) {
+    const i = data.tileDiffs[n], tile = data.tileDiffs[n + 1];
+    if (Number.isInteger(i) && i >= 0 && i < map.tiles.length && Object.values(T).includes(tile)) map.set(i % map.w, (i / map.w) | 0, tile);
+  }
 }
 
 function ensureOutpostState(chunk) {
@@ -80,6 +98,7 @@ export function bindSurfaceChunk(state, chunk) {
   state.layers.surface = chunk;
   state.map = chunk.map; state.discovered = chunk.discovered; state.buildings = chunk.buildings;
   state.beacons = chunk.beacons; state.enemies = chunk.enemies; state.workers = chunk.workers || [];
+  state.bossRef = (state.enemies || []).find((e) => e && e.alive && e.def && e.def.boss) || null;
   state.chunkX = chunk.cx; state.chunkY = chunk.cy;
   state.light = null; state._chunkTransition = (state._chunkTransition || 0) + 1;
   // 区块各自持有建筑/篝火容器；切换后必须立刻重算全局账本，避免回到旧区块时 res 仍停留在新区块的快照。
@@ -357,6 +376,7 @@ export function updateOutpostSettlement(state, dt) {
     if (o.nextT > 0) continue;
     o.nextT = ECOLOGY.OUTPOST_SETTLE_SEC;
     o.ticks = Math.min(0x7fffffff, o.ticks + 1);
+    burnBuildingFuel(chunk.buildings, state, ECOLOGY.OUTPOST_SETTLE_SEC);
     const ecology = settleRemoteEcology(state, chunk, o);
     recordRemoteAlert(state, chunk, o, workers, ecology);
     const yieldByRes = {};

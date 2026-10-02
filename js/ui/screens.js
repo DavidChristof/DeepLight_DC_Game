@@ -8,8 +8,9 @@ import { sfx } from '../core/audio.js';
 import { KEY_ACTIONS, KEY_GROUPS, actionsOf, boundCode, keyLabel, isChanged, isModifierOnly, setKey, resetKey, resetAllKeys, changedCount } from '../data/keymap.js';
 import { HINTS } from '../systems/hints.js';
 import { hasAsset, specOf } from '../core/assets.js';
+import { ENDGAME } from '../data/endgame.js';
 
-const VERSION = 'v0.7-w7';
+const VERSION = 'v0.8.0-alpha.1';
 
 let hooks = {
   onStart: () => { }, onLoad: () => { }, onSave: () => { },
@@ -91,13 +92,14 @@ function render() {
   hooks.onScreenChange(top);
   if (!top) { el.classList.add('hidden'); el.innerHTML = ''; return; }
   el.classList.remove('hidden');
-  const wide = (top === 'settings' || top === 'info') ? ' wide' : '';
+  const wide = (top === 'settings' || top === 'info' || top === 'ending') ? ' wide' : '';
   // 主菜单占满整屏（封面式）——其它界面仍是居中卡片
   const full = top === 'main' ? ' maincard' : '';
+  const ending = top === 'ending' ? ' endingcard' : '';
   // 主菜单插画（W13-F）：有 assets/sprites/title_art.png 就当成背景铺上（暗化后不抢文字）
   const art = (top === 'main' && hasAsset('title_art')) ? specOf('title_art') : null;
   const artStyle = art ? ` style="--art:url('${artUrl(art)}')"` : '';
-  el.innerHTML = `<div class="scrim"></div><div class="card${wide}${full}${art ? ' has-art' : ''}"${artStyle}>${VIEWS[top]()}</div>`;
+  el.innerHTML = `<div class="scrim"></div><div class="card${wide}${full}${ending}${art ? ' has-art' : ''}"${artStyle}>${VIEWS[top]()}</div>`;
 }
 
 // —— 各界面内容 ——
@@ -126,6 +128,60 @@ function menuButtons() {
   return items.map((it, i) => `<button class="mbtn${i === menuSel ? ' sel' : ''}${it.primary ? ' primary' : ''}"
       data-act="${it.act}" data-mi="${i}">
       <span class="mbname">${it.label}</span><span class="mbsub">${it.sub}</span></button>`).join('');
+}
+
+function escapeHtml(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[ch]));
+}
+function endingDay(day) { return Number.isInteger(day) && day > 0 ? `第 ${day} 天` : '未记录'; }
+function endingCount(value, unit = '') { return Number.isFinite(value) && value >= 0 ? `${Math.floor(value)}${unit}` : '未记录'; }
+function endingSiteLabel(id) { return ({ first: '藤雾林 · 首座', second: '碎岩台地 · 二座', third: '苔原 · 终座' })[id] || '共鸣信标'; }
+function endingPosition(site) {
+  if (![site.chunkX, site.chunkY, site.x, site.y].every(Number.isInteger)) return '位置未记录';
+  return `区块 ${site.chunkX},${site.chunkY} · 格 ${site.x},${site.y}`;
+}
+function endingView() {
+  const ending = state.ending;
+  if (!ending) return `<h2>还没有结局</h2><div class="row end"><button class="sbtn primary" data-act="back">返回</button></div>`;
+  const outcome = ENDGAME.ENDING.OUTCOMES[ending.id] || ENDGAME.ENDING.OUTCOMES.afterglow;
+  const stats = ending.stats;
+  const crew = Array.isArray(ending.crew) ? ending.crew.map((member) =>
+    `<li><span>${escapeHtml(member.name)}</span><b>${escapeHtml(member.status)}</b></li>`).join('')
+    : '<li><span>当时名单</span><b>未记录</b></li>';
+  const sites = (ending.sites || []).map((site) =>
+    `<li><div><b>${endingSiteLabel(site.id)}</b><small>${endingPosition(site)}</small></div><span>${endingDay(site.completedDay)}</span></li>`).join('');
+  const deaths = Array.isArray(ending.memorial)
+    ? `${ending.memorial.length} 条履历 · ${ending.memorial.filter((event) => event.revived).length} 人复苏`
+    : '未记录';
+  return `<div class="ending-head">
+      <div class="ending-kicker">余辉共鸣 · 本局结语</div>
+      <h1>${escapeHtml(outcome.title)}</h1>
+      <p>${escapeHtml(outcome.subtitle)}</p>
+      <div class="ending-award">✦ ${ending.award?.granted ? '余辉纪念已记入本局' : '纪念记录未授予'}</div>
+    </div>
+    <div class="ending-columns">
+      <section class="ending-section"><h3>拓荒队</h3><ul class="ending-roster">${crew}</ul>
+        <div class="ending-foot">墓碑 ${endingCount(ending.graveCount)} · ${escapeHtml(deaths)}</div></section>
+      <section class="ending-section"><h3>三座信标</h3><ul class="ending-sites">${sites}</ul></section>
+      <section class="ending-section"><h3>一路留下的记录</h3><div class="ending-stats">
+        <span>首次击破蚀巢核心</span><b>${endingDay(ending.bossDay)}</b>
+        <span>本局结算</span><b>${endingDay(ending.settledDay)}</b>
+        <span>击杀蚀兽</span><b>${endingCount(ending.kills)}</b>
+        <span>最高光压</span><b>${endingCount(stats?.maxLightPressure)}</b>
+        <span>夜采</span><b>${endingCount(stats?.nightHarvests, ' 次')}</b>
+        <span>救援 / 复苏</span><b>${endingCount(stats?.rescues)} / ${endingCount(stats?.revivals)}</b>
+        <span>蚀化 / 安抚</span><b>${endingCount(stats?.hollowings)} / ${endingCount(stats?.soothings)}</b>
+        <span>拓荒者离世</span><b>${endingCount(stats?.workerDeaths)}</b>
+      </div></section>
+    </div>
+    ${ending.legacy ? '<div class="ending-legacy">旧存档没有完整结算记录；缺失的历史没有补猜。</div>' : ''}
+    ${note ? `<div class="note">${escapeHtml(note)}</div>` : ''}
+    <div class="row end ending-actions">
+      <button class="sbtn" data-act="save-ending">保存到自动档</button>
+      <button class="sbtn primary" data-act="continue-ending">继续拓荒</button>
+    </div>`;
 }
 
 const VIEWS = {
@@ -274,6 +330,7 @@ const VIEWS = {
     <div class="psec">第 ${state.day} 天 · ${state.res ? '辉髓 ' + state.res.ore + ' · 藤木 ' + state.res.vine : ''} · 想快速冻结用 P</div>
     <div class="mbtns">
       <button class="mbtn primary" data-act="resume">继续游戏</button>
+      ${state.ending ? '<button class="mbtn" data-act="view-ending">结局记录<span class="sub">重看本局结语</span></button>' : ''}
       <button class="mbtn" data-act="save-auto">保存进度<span class="sub">写入自动存档位</span></button>
       <button class="mbtn" data-act="load">存档管理<span class="sub">载入 / 覆盖 / 删除</span></button>
       <button class="mbtn" data-act="settings">设置</button>
@@ -281,6 +338,8 @@ const VIEWS = {
       <button class="mbtn danger" data-act="main-menu">返回主菜单<span class="sub">当前进度已自动存档则不会丢失</span></button>
     </div>
     ${note ? `<div class="note">${note}</div>` : ''}`,
+
+  ending: endingView,
 };
 
 const COST_NAME = { ore: '辉髓', vine: '藤木', fuel: '燃料', food: '食物', data: '档案', core: '母髓' };
@@ -340,6 +399,9 @@ function doAction(act, data) {
     case 'info': openScreen('info'); break;
     case 'back': backScreen(); break;
     case 'resume': closeScreens(); hooks.onResume(); break;
+    case 'continue-ending': closeScreens(); hooks.onResume(); break;
+    case 'view-ending': replaceScreen('ending'); break;
+    case 'save-ending': hooks.onSave('auto'); setNote('结局已保存'); break;
 
     case 'seed-random':
       newSeed = String((Math.random() * 1e9) | 0).slice(0, 8);
@@ -407,6 +469,7 @@ export function screenChange(ev) {
   const key = t.dataset.set;
   if (t.type === 'checkbox') settings[key] = t.checked;
   else if (key === 'scale') settings[key] = t.value === 'fit' ? 'fit' : Number(t.value);
+  else if (key === 'visualTheme') settings[key] = ['legacy', 'v8-preview', 'v8'].includes(t.value) ? t.value : 'v8-preview';
   else if (key === 'glow') settings[key] = Number(t.value);
   else if (key === 'volMaster' || key === 'volSfx' || key === 'volAmbient' || key === 'volMusic') settings[key] = Number(t.value);
   saveSettings();
@@ -426,6 +489,13 @@ function pct(v) { return `${Math.round((v == null ? 0 : v) * 100)}%`; }
 function setVideo() {
   return `
     <div class="psec">画面</div>
+    <div class="setrow"><span>视觉主题</span>
+      <select class="field" data-set="visualTheme">
+        <option value="legacy" ${settings.visualTheme === 'legacy' ? 'selected' : ''}>经典绘制</option>
+        <option value="v8-preview" ${settings.visualTheme === 'v8-preview' ? 'selected' : ''}>32px 预览</option>
+        <option value="v8" ${settings.visualTheme === 'v8' ? 'selected' : ''}>32px 完整</option>
+      </select>
+    </div>
     <div class="setrow"><span>画布缩放</span>
       <select class="field" data-set="scale">
         ${['fit', '1', '2', '3'].map((v) => `<option value="${v}" ${String(settings.scale) === v ? 'selected' : ''}>${v === 'fit' ? '自适应窗口' : v + ' 倍'}</option>`).join('')}

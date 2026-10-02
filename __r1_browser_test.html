@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>W20-R R1 浏览器回归</title>
+<body style="background:#101923;color:#e5edf5;font:14px Consolas,monospace">
+<h1>W20-R R1 browser regression</h1>
+<pre id="out">正在载入游戏…</pre>
+<pre id="live">等待游戏状态…</pre>
+<iframe id="game" src="/" style="width:720px;height:520px;border:1px solid #607080"></iframe>
+<script>
+const keys = ['deep-light-saves-v2', 'deep-light-settings-v1', 'deep-light-ui-v1'];
+const priorBackup = sessionStorage.getItem('__r1_storage_backup');
+const backup = priorBackup ? JSON.parse(priorBackup) : Object.fromEntries(keys.map((k) => [k, localStorage.getItem(k)]));
+if (!priorBackup) sessionStorage.setItem('__r1_storage_backup', JSON.stringify(backup));
+try {
+  const raw = backup['deep-light-settings-v1'];
+  if (raw) localStorage.setItem('deep-light-settings-v1', JSON.stringify({ ...JSON.parse(raw), autosave: false }));
+} catch (_) {}
+const out = document.getElementById('out');
+const emit = (name, result) => { out.textContent += `\n${name}: ${JSON.stringify(result)}`; };
+window.addEventListener('error', (e) => { out.textContent += `\nuncaught: ${e.message}`; });
+const frame = document.getElementById('game');
+let started = false;
+async function run() {
+  if (started) return;
+  started = true;
+  try {
+  out.textContent = 'autosave forced off for isolated regression';
+  const w = frame.contentWindow;
+  emit('debug', { check: typeof w.__check, href: w.location.href });
+  const check = (opts = {}) => { const r = w.__check({ includeKnown: true, ...opts }); return { ok: r.ok, ran: r.ran, fails: r.fails }; };
+  emit('menu', check());
+  const src = await w.__srcCheck();
+  emit('source-check', src);
+  w.__newGame(4242, 'normal');
+  emit('new-game', check());
+  emit('roundtrip', check({ roundtrip: true }));
+  const legacy = w.__saveSlot('auto');
+  delete legacy.resonance;
+  legacy.milestone = { bossDefeated: true, bossDay: 7, clearedDay: 8 };
+  legacy.day = 8;
+  legacy.chunkX = 1; legacy.chunkY = 0;
+  legacy.px = 50; legacy.py = 36;
+  legacy.stores.pack.ore = (legacy.stores.pack.ore || 0) + 12;
+  legacy.stores.pack.fuel = (legacy.stores.pack.fuel || 0) + 6;
+  legacy.res.ore = (legacy.res.ore || 0) + 12;
+  legacy.res.fuel = (legacy.res.fuel || 0) + 6;
+  w.__reload(legacy);
+  emit('legacy-load-location', { chunk: w.__chunk(), site: w.__resonance().firstSite, chunkKeys: Object.keys(w.__state.chunkStore || {}) });
+  const site = w.__resonance().firstSite;
+  emit('legacy-boss-save-migration', { site, migrated: site.status === 'revealed' && site.x != null });
+  emit('legacy-save-check', check());
+  const wrongSpot = w.__place('resonanceBeacon', site.x + 1, site.y);
+  const placeResult = w.__place('resonanceBeacon', site.x, site.y);
+  emit('unique-placement', { wrongSpot, placeResult, status: w.__resonance().firstSite.status, chunk: w.__chunk(), buildings: w.__state.buildings.filter((b) => b.type === 'resonanceBeacon') });
+  w.__finish(site.x, site.y);
+  const builtSave = w.__saveSlot('auto');
+  emit('built-save-snapshot', { chunkX: builtSave.chunkX, chunkY: builtSave.chunkY, resonance: builtSave.resonance, currentBuildings: builtSave.buildings.filter((b) => b.type === 'resonanceBeacon'), chunks: builtSave.chunks.map((c) => ({ x: c.x, y: c.y, buildings: c.buildings.filter((b) => b.type === 'resonanceBeacon') })) });
+  w.__reload(builtSave);
+  emit('built-save-roundtrip', { site: w.__resonance().firstSite, chunk: w.__chunk(), buildings: w.__state.buildings.filter((b) => b.type === 'resonanceBeacon'), check: check() });
+  const demolish = w.__demolish(site.x, site.y);
+  emit('demolish-retry', { demolish, status: w.__resonance().firstSite.status, check: check() });
+  const replay = w.__replay({ seed: 4242, diff: 'normal', days: 3, policy: 'home' });
+  emit('replay', { ranDays: replay.ranDays, steps: replay.steps, deaths: replay.deaths, kills: replay.kills });
+  emit('after-replay-check', check());
+  w.__watch(true, 20);
+  w.__steps(1200);
+  emit('watch-1200', w.__testLog());
+  w.__watch(false);
+  w.__reload(legacy);
+  const uiSite = w.__resonance().firstSite;
+  for (const [key, amount] of Object.entries({ ...w.__state.pack.stock })) if (amount > 0) w.__take(key, amount);
+  w.__give('ore', 2); w.__give('vine', 2);
+  let storeSpot = null;
+  for (const [dx, dy] of [[0, 2], [0, -2], [2, 0], [-2, 0], [1, 2], [-1, 2]]) {
+    const x = uiSite.x + dx, y = uiSite.y + dy;
+    if (w.__place('store', x, y) !== null) continue;
+    w.__finish(x, y); storeSpot = { x, y }; break;
+  }
+  w.__give('ore', 14); w.__give('fuel', 10); w.__give('vine', 2); w.__give('night', 1);
+  emit('r2-beacon-place', w.__place('resonanceBeacon', uiSite.x, uiSite.y));
+  emit('r2-beacon-finish', w.__finish(uiSite.x, uiSite.y));
+  let lampSpot = null;
+  for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-2, 0], [2, 0], [0, -2], [0, 2]]) {
+    const x = uiSite.x + dx, y = uiSite.y + dy;
+    if (w.__place('lamp', x, y) !== null) continue;
+    w.__finish(x, y);
+    const lamp = w.__state.buildings.find((b) => b.type === 'lamp' && b.x === x && b.y === y);
+    if (lamp) { lamp.fuel = 30; lampSpot = { x, y }; break; }
+  }
+  w.__state.workers.length = 0;
+  w.__state.day = 8; w.__state.t = 200; w.__state.wasTide = false; w.__state.wasDawn = false;
+  w.__state.noSpawnT = 0; w.__state.spawnT = 999; w.__state.bossSpawnedThisNight = false;
+  const p = w.__state.player; p.x = uiSite.x + 1.5; p.y = uiSite.y + 0.5; p.path = []; p.dest = null;
+  w.__steps(2);
+  emit('r2-trial-ui-ready', { chunk: w.__chunk(), player: { x: p.x, y: p.y }, site: uiSite,
+    beacon: w.__state.buildings.find((b) => b.type === 'resonanceBeacon'), lampSpot,
+    beaconLight: w.__state.light[uiSite.y * w.__state.map.w + uiSite.x],
+    resolvedAction: (w.__resolve() || {}).kind, storeSpot,
+    check: check(), screen: w.__screenOf(uiSite.x, uiSite.y),
+    frameRect: (() => { const r = frame.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; })(),
+    canvasRect: (() => { const r = w.document.querySelector('canvas').getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; })(), page: w.location.href });
+  w.__state.nearAct = w.__resolve(); w.__state.interactCd = 0;
+  w.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', code: 'KeyE', bubbles: true }));
+  emit('r2-key-down', { held: w.__held('KeyE'), nearAct: (w.__state.nearAct || {}).kind, started: w.__state.started });
+  w.__steps(2);
+  w.dispatchEvent(new KeyboardEvent('keyup', { key: 'e', code: 'KeyE', bubbles: true }));
+  emit('r2-keyboard-reservation', { trial: w.__resonance().trial, costs: { fuel: w.__state.res.fuel, night: w.__state.res.night }, check: check() });
+  w.__state.t = 319.99; w.__state.day = 8; w.__state.wasTide = false; w.__state.spawnT = 0; w.__state.noSpawnT = 0;
+  const beforeNight = w.__wave();
+  w.__steps(8);
+  const afterNight = w.__wave();
+  emit('r2-night-battle', { trial: w.__resonance().trial, before: { count: beforeNight['场上'], cap: beforeNight['同屏上限'] },
+    after: { count: afterNight['场上'], cap: afterNight['同屏上限'], tide: afterNight['蚀潮中'] }, check: check() });
+  const activeSave = w.__saveSlot('auto'); w.__reload(activeSave); w.__steps(2);
+  emit('r2-active-save-roundtrip', { trial: w.__resonance().trial, wave: { count: w.__wave()['场上'], cap: w.__wave()['同屏上限'] }, check: check() });
+  } catch (e) { emit('error', String(e && e.stack || e)); }
+  finally {
+    const now = Object.fromEntries(keys.map((k) => [k, localStorage.getItem(k)]));
+    emit('storage-before-restore', Object.fromEntries(keys.map((k) => [k, now[k] === backup[k] ? 'unchanged' : 'changed'])));
+    for (const k of keys) backup[k] == null ? localStorage.removeItem(k) : localStorage.setItem(k, backup[k]);
+    emit('storage-restored', Object.fromEntries(keys.map((k) => [k, localStorage.getItem(k) === backup[k]])));
+    out.dataset.done = 'true';
+  }
+}
+if (frame.contentDocument && frame.contentDocument.readyState === 'complete' && frame.contentWindow.location.href !== 'about:blank') run();
+else frame.addEventListener('load', run, { once: true });
+setInterval(() => {
+  const live = document.getElementById('live');
+  try {
+    const w = frame.contentWindow;
+    const site = w.__resonance().firstSite;
+    const fr = frame.getBoundingClientRect();
+    const cr = w.document.querySelector('canvas').getBoundingClientRect();
+    live.textContent = JSON.stringify({ chunk: w.__chunk(), player: { x: w.__state.player.x, y: w.__state.player.y }, site,
+      screen: w.__screenOf(site.x, site.y), frameRect: { x: fr.x, y: fr.y, w: fr.width, h: fr.height }, canvasRect: { x: cr.x, y: cr.y, w: cr.width, h: cr.height },
+      beacon: w.__state.buildings.filter((b) => b.type === 'resonanceBeacon'),
+      resources: { ore: w.__state.res.ore, fuel: w.__state.res.fuel } }, null, 2);
+  } catch (e) { live.textContent = `waiting: ${String(e && e.message || e)}`; }
+}, 250);
+</script>
+</body>
+</html>

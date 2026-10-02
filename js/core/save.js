@@ -42,22 +42,37 @@ function packBlight(state) {
 }
 
 function packBuilding(b) {
-  return { type: b.type, x: b.x, y: b.y, hp: b.hp == null ? null : Math.round(b.hp), fuel: b.fuel || 0, growth: b.growth || 0, level: b.level == null ? 1 : b.level, site: b.site ? 1 : 0, work: Math.round(b.work || 0), stock: b.stock || null, craft: b.craft || null, prog: b.prog || 0, made: b.made || 0, off: b.off ? 1 : 0, open: b.open == null ? null : !!b.open, recipe: b.recipe || null, fireMat: b.fireMat || null, mods: b.mods && b.mods.length ? b.mods.slice() : null, natural: b.natural ? 1 : 0, entry: b.entry ? 1 : 0, mounted: b.mounted ? 1 : null };
+  return { type: b.type, x: b.x, y: b.y, hp: b.hp == null ? null : Math.round(b.hp), fuel: b.fuel || 0, burnT: +b.burnT || 0, growth: b.growth || 0, level: b.level == null ? 1 : b.level, site: b.site ? 1 : 0, work: Math.round(b.work || 0), stock: b.stock || null, craft: b.craft || null, prog: b.prog || 0, made: b.made || 0, off: b.off ? 1 : 0, open: b.open == null ? null : !!b.open, recipe: b.recipe || null, fireMat: b.fireMat || null, mods: b.mods && b.mods.length ? b.mods.slice() : null, natural: b.natural ? 1 : 0, entry: b.entry ? 1 : 0, mounted: b.mounted ? 1 : null, resonanceSiteId: b.resonanceSiteId || null };
 }
 
 function packFront(f) {
   return { x: f.x | 0, y: f.y | 0, core: f.core | 0, cells: Array.isArray(f.cells) ? f.cells.slice() : [], level: f.level | 0, growT: +f.growT || 0, pressure: f.pressure | 0, source: f.source || 'legacy' };
 }
 
+function packEnemy(e) {
+  if (!e || e.alive === false || !Number.isFinite(e.x) || !Number.isFinite(e.y) || !e.ekind) return null;
+  const out = { kind: e.ekind, x: e.x, y: e.y };
+  for (const key of ['hp', 'maxHp', 'dmg', 'fuelDmg', 'atkT', 'wob', 'flash', 'slowT', 'stuck', 'summonT', 'tier', 'windT', 'dashT', 'dashVX', 'dashVY', 'fuseT', 'auraT', 'bossPhase', 'dawnA', '_bvx', '_bvy']) {
+    if (Number.isFinite(e[key])) out[key] = e[key];
+  }
+  if (e.leaked != null) out.leaked = !!e.leaked;
+  return out;
+}
+
+function packEnemies(list) {
+  return (Array.isArray(list) ? list : []).map(packEnemy).filter(Boolean);
+}
+
 function packChunks(state) {
   const out = [];
   for (const c of Object.values(state.chunkStore || {})) {
     if (!c || !c.map) continue;
-    const nodes = [];
+    const nodes = [], tileDiffs = [];
     for (let i = 0; i < c.map.nodeAmt.length; i++) if (c.map.nodeAmt[i]) nodes.push(i, c.map.nodeAmt[i]);
+    if (c.map._baseTiles) for (let i = 0; i < c.map.tiles.length; i++) if (c.map.tiles[i] !== c.map._baseTiles[i]) tileDiffs.push(i, c.map.tiles[i]);
     const blight = [];
     if (c.map.blight) for (let i = 0; i < c.map.blight.length; i++) if (c.map.blight[i]) blight.push(i, c.map.blight[i]);
-    out.push({ x: c.cx || 0, y: c.cy || 0, biome: c.biome || c.map.biome || null, buildings: (c.buildings || []).map(packBuilding), beacons: (c.beacons || []).map((b) => ({ ...b, stock: b.stock ? { ...b.stock } : undefined })), nodes, blight, fronts: (c.map.blightFronts || []).map(packFront), patches: (c.ecoPatches || []).map((p) => ({ ...p })), creatures: (c.ecoCreatures || []).map((e) => ({ ...e })), outpost: c.outpost ? { nextT: +c.outpost.nextT || 0, ticks: c.outpost.ticks | 0, lightPressure: +c.outpost.lightPressure || 0, frontDebt: c.outpost.frontDebt | 0, lastEcology: { ...(c.outpost.lastEcology || {}) }, alerts: (c.outpost.alerts || []).slice(-3).map((a) => ({ ...a })), lastYield: { ...(c.outpost.lastYield || {}) }, lastNeeds: { ...(c.outpost.lastNeeds || {}) }, lastReason: String(c.outpost.lastReason || '') } : null, nightops: c.nightops ? { day: c.nightops.day || 0, tideOn: !!c.nightops.tideOn, blooms: (c.nightops.blooms || []).map((b) => ({ ...b })), vents: (c.nightops.vents || []).map((v) => ({ ...v })) } : null });
+    out.push({ x: c.cx || 0, y: c.cy || 0, biome: c.biome || c.map.biome || null, buildings: (c.buildings || []).map(packBuilding), beacons: (c.beacons || []).map((b) => ({ ...b, stock: b.stock ? { ...b.stock } : undefined })), enemies: packEnemies(c.enemies), nodes, tileDiffs, blight, fronts: (c.map.blightFronts || []).map(packFront), patches: (c.ecoPatches || []).map((p) => ({ ...p })), creatures: (c.ecoCreatures || []).map((e) => ({ ...e })), outpost: c.outpost ? { nextT: +c.outpost.nextT || 0, ticks: c.outpost.ticks | 0, lightPressure: +c.outpost.lightPressure || 0, frontDebt: c.outpost.frontDebt | 0, lastEcology: { ...(c.outpost.lastEcology || {}) }, alerts: (c.outpost.alerts || []).slice(-3).map((a) => ({ ...a })), lastYield: { ...(c.outpost.lastYield || {}) }, lastNeeds: { ...(c.outpost.lastNeeds || {}) }, lastReason: String(c.outpost.lastReason || '') } : null, nightops: c.nightops ? { day: c.nightops.day || 0, tideOn: !!c.nightops.tideOn, blooms: (c.nightops.blooms || []).map((b) => ({ ...b })), vents: (c.nightops.vents || []).map((v) => ({ ...v })) } : null });
   }
   return out;
 }
@@ -70,8 +85,11 @@ export function snapshot(state) {
     t: state.t,
     // 夜战“记账”（B21）：不存它就会导致读档后重放“蚀潮降临”边沿、
     // 且当晚大潮 Boss 再降临一次（bossTier 还会再加一次 = 自己刷难度）。
-    // 散怪/Boss 本体不存是有意的（“读档清夜”），但“今晚算不算已经考过试”必须存。
+    // 活跃战斗实体也要保存；否则读档会在 spawnT/bossSpawnedThisNight 仍有效时免费清掉当夜压力。
     spawnT: state.spawnT || 0,
+    nightSpawnDay: state.nightSpawnDay | 0,
+    nightSpawnBudget: state.nightSpawnBudget | 0,
+    nightSpawnUsed: state.nightSpawnUsed | 0,
     noSpawnT: state.noSpawnT || 0,
     wasTide: !!state.wasTide,
     wasDawn: !!state.wasDawn,
@@ -99,6 +117,9 @@ export function snapshot(state) {
     pulseMul: state.pulseMul,
     bossTier: state.bossTier,
     milestone: state.milestone,
+    resonance: state.resonance ? JSON.parse(JSON.stringify(state.resonance)) : null,
+    runStats: state.runStats ? JSON.parse(JSON.stringify(state.runStats)) : null,
+    ending: state.ending ? JSON.parse(JSON.stringify(state.ending)) : null,
     research: state.research,
     layerId: state.layerId,
     chunkX: state.chunkX || 0,
@@ -106,6 +127,7 @@ export function snapshot(state) {
     equip: state.equip || { held: null },          // 玩家手上的工具
     buildings: state.buildings.map(packBuilding),
     chunks: packChunks(state),
+    activeEnemies: state.layerId === 'surface' ? null : packEnemies(state.enemies),
     stores: {
       beacons: ((state.layers && state.layers.surface && state.layers.surface.beacons) || []).map((b) => Object.assign({}, b.stock || {})),
       pack: Object.assign({}, (state.pack && state.pack.stock) || {}),
@@ -132,7 +154,7 @@ export function snapshot(state) {
         bonds: m.snapshot.bonds && typeof m.snapshot.bonds === 'object' ? { ...m.snapshot.bonds } : {},
       } : null,
     })),
-    deathPack: state.deathPack ? { x: state.deathPack.x, y: state.deathPack.y, layerId: state.deathPack.layerId, stock: Object.assign({}, state.deathPack.stock || {}), held: state.deathPack.held || null, day: state.deathPack.day || state.day } : null,
+    deathPack: state.deathPack ? { x: state.deathPack.x, y: state.deathPack.y, layerId: state.deathPack.layerId, chunkX: state.deathPack.chunkX ?? state.chunkX ?? 0, chunkY: state.deathPack.chunkY ?? state.chunkY ?? 0, stock: Object.assign({}, state.deathPack.stock || {}), held: state.deathPack.held || null, day: state.deathPack.day || state.day } : null,
     mind: state.mind || null,
     seen: state.seen || {},                        // 首次提示：读档后不要再说一遍
     // N6b：快照必须收集所有已载入区块的成员；只拼原点会让“回营地存档”的远端前哨成员丢失。

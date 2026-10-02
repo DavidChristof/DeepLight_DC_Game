@@ -5,7 +5,7 @@
 //   · 玩家卸下 / 阵亡 = deposit 回最近的容器
 //   · 拓荒者领用同一套：从最近的容器拿，死后归还 —— 「仓库里还有几把镐」是真的要管的
 import { TOOLS, toolDef, isTool } from '../data/tools.js';
-import { withdrawOne, deposit } from './storage.js';
+import { withdrawOne, deposit, canWithdraw, spendableOf } from './storage.js';
 import { hasTech } from './research.js';
 
 export const heldTool = (state) => (state.equip && state.equip.held) || null;
@@ -48,8 +48,8 @@ export function workerMineMul(w, res) {
 export function equipTool(state, k) {
   if (!isTool(k)) return '不是工具';
   if (heldTool(state)) return '先卸下手上的工具';
-  if ((state.res[k] || 0) < 1) return '仓库里没有这件工具';
-  withdrawOne(state, k, 1, state.player.x, state.player.y);
+  if (!canWithdraw(state, { [k]: 1 })) return '这里没有这件工具';
+  if (withdrawOne(state, k, 1, state.player.x, state.player.y) !== null) return '这里没有这件工具';
   state.equip.held = k;
   state._sidebarSig = null;
   state.floaties.push({ x: state.player.x, y: state.player.y - 0.6, txt: `装备 ${TOOLS[k].name}`, color: '#eafcff', t: 0, life: 1.1 });
@@ -75,7 +75,8 @@ export function unequipTool(state) {
 // 想要什么：施工偏好锤子，其余优先镐（能挖石头）→ 斧 → 镰
 function wanted(state, w) {
   const prefer = w.job === 'build' ? ['hammer', 'pick', 'axe', 'sickle'] : ['pick', 'axe', 'hammer', 'sickle'];
-  for (const k of prefer) if ((state.res[k] || 0) > 0) return k;
+  const have = spendableOf(state);
+  for (const k of prefer) if ((have[k] || 0) > 0) return k;
   return null;
 }
 
@@ -90,7 +91,7 @@ export function updateWorkerTools(state, dt) {
     if (w.hollow) continue;
     const k = wanted(state, w);
     if (!k) continue;
-    withdrawOne(state, k, 1, w.x, w.y);
+    if (withdrawOne(state, k, 1, w.x, w.y) !== null) continue;
     w.tool = k;
     state.floaties.push({ x: w.x, y: w.y - 0.6, txt: `${w.name} 拿起${TOOLS[k].name}`, color: '#dfe9ff', t: 0, life: 1.2 });
     state._sidebarSig = null;

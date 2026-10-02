@@ -14,6 +14,22 @@ export function mulberry(a) {
   };
 }
 
+// 地表区块与资源审计共用同一坐标种子，避免观测工具复制生成规则。
+export function surfaceChunkSeed(seed, cx, cy) {
+  const h = Math.imul((seed ^ 0x9e3779b9) >>> 0, 0x85ebca6b) ^ Math.imul((cx | 0) + 0x7f4a7c15, 0xc2b2ae35) ^ Math.imul((cy | 0) + 0x165667b1, 0x27d4eb2f);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+// 原点在新局入口中直接由 worldSeed 生成；远端区块才派生坐标种子。
+// 这两条 helper 同时供正式载入与只读审计使用，避免把营地区块误当作懒生成区块。
+export function surfaceChunkMapSeed(seed, cx, cy) {
+  return (cx | 0) === 0 && (cy | 0) === 0 ? seed : surfaceChunkSeed(seed, cx, cy);
+}
+
+export function surfaceChunkNightOpsSeed(seed, cx, cy) {
+  return (cx | 0) === 0 && (cy | 0) === 0 ? seed : surfaceChunkSeed(seed ^ 0x51ed270b, cx, cy);
+}
+
 export function genMap(w, h, seed, biomeId = 'tundra') {
   const m = createMap(w, h);
   const biome = BIOMES[biomeId] || BIOMES.tundra;

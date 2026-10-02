@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>W20-R R4-C 三站存读验收</title>
+<body style="background:#101923;color:#e5edf5;font:14px Consolas,monospace">
+<h1>W20-R R4-C · 三站贯通与存读</h1>
+<p>隔离运行真实游戏入口；正式存档键会先备份，完成或中断恢复后逐字节还原。</p>
+<pre id="out">正在准备测试…</pre>
+<button id="recover">恢复测试前正式存档</button>
+<iframe id="game" title="R4-C 隔离游戏实例" style="width:720px;height:520px;border:1px solid #607080"></iframe>
+<script>
+(() => {
+  const officialKeys = ['deep-light-saves-v2', 'deep-light-settings-v1', 'deep-light-ui-v1'];
+  const saveKey = 'deep-light-saves-v2';
+  const checkpointKey = '__deep_light_r4a_checkpoints_v1';
+  const backupKey = '__deep_light_r4c_storage_backup_v1';
+  const out = document.getElementById('out');
+  const frame = document.getElementById('game');
+  const emit = (name, value) => { out.textContent += `\n${name}: ${JSON.stringify(value)}`; };
+  const rawOfficial = () => Object.fromEntries(officialKeys.map((key) => [key, localStorage.getItem(key)]));
+  const restoreOfficial = () => {
+    let backup;
+    try { backup = JSON.parse(localStorage.getItem(backupKey) || 'null'); } catch (_) { }
+    if (!backup || !backup.keys) return { restored: false, reason: 'no recovery backup' };
+    for (const key of officialKeys) {
+      const raw = backup.keys[key];
+      raw == null ? localStorage.removeItem(key) : localStorage.setItem(key, raw);
+    }
+    const unchanged = Object.fromEntries(officialKeys.map((key) => [key, localStorage.getItem(key) === backup.keys[key]]));
+    localStorage.removeItem(backupKey);
+    return { restored: true, unchanged };
+  };
+  document.getElementById('recover').addEventListener('click', () => emit('manual recovery', restoreOfficial()));
+  // Recover a stale backup from an interrupted earlier run before taking a fresh one.
+  if (localStorage.getItem(backupKey)) emit('stale test backup recovery', restoreOfficial());
+  const storageBefore = rawOfficial();
+  try {
+    localStorage.setItem(backupKey, JSON.stringify({ version: 1, createdAt: Date.now(), keys: storageBefore }));
+    const settings = storageBefore['deep-light-settings-v1'] ? JSON.parse(storageBefore['deep-light-settings-v1']) : {};
+    localStorage.setItem('deep-light-settings-v1', JSON.stringify({ ...settings, autosave: false }));
+  } catch (error) {
+    emit('setup failed', String(error && error.message || error));
+    return;
+  }
+  window.addEventListener('beforeunload', () => { if (!out.dataset.done) restoreOfficial(); });
+  frame.addEventListener('load', async () => {
+    const game = frame.contentWindow;
+    const results = { ok: false, checks: [], siteEvidence: [], repeatedE: [], route: [], costs: null };
+    try {
+      let checkpoint;
+      try { checkpoint = JSON.parse(localStorage.getItem(checkpointKey) || 'null'); } catch (_) { }
+      if (checkpoint?.schema !== 1 || checkpoint?.seed !== 4242 || checkpoint?.phase !== 'tundraTrialComplete'
+        || !checkpoint.latest || typeof game.__restoreCheckpoint !== 'function') {
+        throw new Error(`缺少有效 R4-B 真实完成检查点：${JSON.stringify({ phase: checkpoint?.phase, seed: checkpoint?.seed })}`);
+      }
+      if (!game.__restoreCheckpoint(checkpoint.latest)) throw new Error('无法恢复 R4-B 完成快照');
+      game.__settings.autosave = false;
+      game.__quick(false);
+      const initialState = game.__state;
+      const ids = ['first', 'second', 'third'];
+      const siteSnapshot = (s) => Object.fromEntries(ids.map((id) => {
+        const site = s.resonance?.sites?.[id];
+        return [id, site && { status: site.status, completedDay: site.completedDay, chunkX: site.chunkX,
+          chunkY: site.chunkY, x: site.x, y: site.y, trial: site.trial && { status: site.trial.status,
+            result: site.trial.result, completedDay: site.trial.completedDay, attempts: site.trial.attempts } }];
+      }));
+      const resourceKeys = ['ore', 'vine', 'stone', 'charcoal', 'fuel', 'food', 'data', 'core', 'night'];
+      const totalStock = (s) => {
+        const totals = Object.fromEntries(resourceKeys.map((key) => [key, 0]));
+        const seen = new Set();
+        const add = (stock) => {
+          if (!stock || typeof stock !== 'object' || seen.has(stock)) return;
+          seen.add(stock);
+          for (const key of resourceKeys) totals[key] += Math.max(0, Number(stock[key]) || 0);
+        };
+        add(s.pack?.stock);
+        const visit = (container) => add(container?.stock);
+        for (const chunk of Object.values(s.chunkStore || {})) for (const item of [...(chunk.beacons || []), ...(chunk.buildings || [])]) visit(item);
+        for (const item of [...(s.beacons || []), ...(s.buildings || [])]) visit(item);
+        for (const layer of Object.values(s.layers || {})) for (const item of [...(layer?.beacons || []), ...(layer?.buildings || [])]) visit(item);
+        return totals;
+      };
+      const stationAudit = (s) => ids.map((id) => {
+        const site = s.resonance?.sites?.[id];
+        const chunk = site && s.chunkStore?.[`${site.chunkX},${site.chunkY}`];
+        const objects = [...new Set([...(chunk?.beacons || []), ...(chunk?.buildings || [])])];
+        const beacon = objects.find((b) => b.type === 'resonanceBeacon' && b.resonanceSiteId === id
+          && b.x === site.x && b.y === site.y);
+        const towers = objects.filter((b) => ['towerGlow', 'towerShock', 'towerChain', 'prismGun'].includes(b.type))
+          .map((b) => ({ type: b.type, x: b.x, y: b.y, hp: b.hp, level: b.level || 1 }));
+        const lights = objects.filter((b) => ['lamp', 'purifier', 'cache', 'decoy'].includes(b.type))
+          .map((b) => ({ type: b.type, x: b.x, y: b.y, fuel: b.fuel || 0, off: !!b.off }));
+        const barriers = objects.filter((b) => ['wall', 'stoneWall', 'gate', 'barricade'].includes(b.type))
+          .map((b) => ({ type: b.type, x: b.x, y: b.y, hp: b.hp }));
+        const campLights = (chunk?.beacons || []).filter((b) => (b.power || 0) > 0)
+          .map((b) => ({ type: b.type || 'camp light', x: b.x, y: b.y, power: b.power, radius: b.radius || 0 }));
+        return { id, chunk: site && [site.chunkX, site.chunkY], anchor: site && [site.x, site.y],
+          status: site?.status, completedDay: site?.completedDay, trial: site?.trial && { status: site.trial.status,
+            result: site.trial.result, completedDay: site.trial.completedDay, attempts: site.trial.attempts },
+          beacon: beacon && { hp: beacon.hp, maxHp: beacon.maxHp }, towers, lights, barriers, campLights };
+      });
+      const beforeSites = siteSnapshot(initialState);
+      const beforeTotals = totalStock(initialState);
+      const beforeDay = { day: initialState.day | 0, t: +initialState.t.toFixed(4) };
+      const initialAudit = stationAudit(initialState);
+      const validSites = ids.every((id) => beforeSites[id]?.status === 'complete'
+        && beforeSites[id]?.trial?.status === 'complete' && beforeSites[id]?.trial?.result === 'success'
+        && beforeSites[id]?.completedDay === beforeSites[id]?.trial?.completedDay);
+      if (!validSites || JSON.stringify(ids.map((id) => beforeSites[id].completedDay)) !== JSON.stringify([9, 11, 13]))
+        throw new Error(`三站完成事实/日期与 R4-A/B 检查点不符：${JSON.stringify(beforeSites)}`);
+      if (initialAudit.some((row) => !row.beacon || !(row.beacon.hp > 0)))
+        throw new Error(`三站信标建筑缺失或已毁：${JSON.stringify(initialAudit)}`);
+      results.siteEvidence = initialAudit;
+      emit('R4-B completed checkpoint restored', { phase: checkpoint.phase, seed: checkpoint.seed, day: beforeDay,
+        sites: beforeSites, stockAcrossPackAndStoredContainers: beforeTotals, defenses: initialAudit });
+
+      // Exercise production saveGame/loadGame through a temporary manual slot, then verify exact simulation facts.
+      const saved = game.__saveSlot('s3');
+      const savesAfterWrite = JSON.parse(localStorage.getItem(saveKey) || '{}');
+      const savedSlot = savesAfterWrite.s3;
+      if (!saved || !savedSlot || !savedSlot.resonance) throw new Error('生产存档入口未写入临时 s3 快照');
+      const savedSummary = { day: savedSlot.day | 0, t: +Number(savedSlot.t || 0).toFixed(4),
+        sites: Object.fromEntries(ids.map((id) => [id, { status: savedSlot.resonance.sites?.[id]?.status,
+          completedDay: savedSlot.resonance.sites?.[id]?.completedDay, trial: savedSlot.resonance.sites?.[id]?.trial?.status }])) };
+      const loaded = game.__loadSlot('s3');
+      await new Promise((resolve) => game.requestAnimationFrame(resolve));
+      game.__settings.autosave = false;
+      const afterLoad = game.__state;
+      const afterSites = siteSnapshot(afterLoad), afterTotals = totalStock(afterLoad);
+      const loadStable = loaded && beforeDay.day === (afterLoad.day | 0) && beforeDay.t === +afterLoad.t.toFixed(4)
+        && JSON.stringify(beforeSites) === JSON.stringify(afterSites) && JSON.stringify(beforeTotals) === JSON.stringify(afterTotals);
+      if (!loadStable) throw new Error(`真实 s3 存读往返使日期、站点或库存回退：${JSON.stringify({ beforeDay, after: { day: afterLoad.day, t: afterLoad.t }, beforeSites, afterSites, beforeTotals, afterTotals })}`);
+      results.checks.push({ id: 'production-save-load-roundtrip', savedSummary, loaded, exactSimulationFacts: loadStable });
+      emit('production save/load roundtrip passed', { saveSlot: 's3 (temporary; restored after run)', beforeDay,
+        afterDay: { day: afterLoad.day | 0, t: +afterLoad.t.toFixed(4) }, sites: afterSites, stock: afterTotals });
+
+      const step = (n = 1) => game.__steps(n);
+      const distanceTo = (x, y) => Math.hypot(game.__state.player.x - (x + 0.5), game.__state.player.y - (y + 0.5));
+      const moveTo = (x, y, limit = 2400) => {
+        if (!game.__goto(x, y)) throw new Error(`无法寻路至 R4-C 目标 ${x},${y}`);
+        let frames = 0;
+        for (; frames < limit && distanceTo(x, y) > 0.95; frames++) step(1);
+        if (distanceTo(x, y) > 0.95) throw new Error(`R4-C 移动超时 ${x},${y}`);
+        return frames;
+      };
+      const crossX = (dir, expectedX, limit = 1800) => {
+        const s = game.__state, oldX = s.chunkX | 0;
+        game.__goto(dir > 0 ? s.map.w - 1 : 0, s.map.h >> 1);
+        let frames = 0;
+        for (; frames < limit && (game.__state.chunkX | 0) === oldX; frames++) step(1);
+        if ((game.__state.chunkX | 0) !== expectedX) throw new Error(`R4-C 区块出口失败：目标x=${expectedX}，当前=${game.__state.chunkX},${game.__state.chunkY}`);
+        return frames;
+      };
+      const crossY = (dir, expectedY, limit = 1800) => {
+        const s = game.__state, oldY = s.chunkY | 0;
+        game.__goto(s.map.w >> 1, dir > 0 ? s.map.h - 1 : 0);
+        let frames = 0;
+        for (; frames < limit && (game.__state.chunkY | 0) === oldY; frames++) step(1);
+        if ((game.__state.chunkY | 0) !== expectedY) throw new Error(`R4-C 区块出口失败：目标y=${expectedY}，当前=${game.__state.chunkX},${game.__state.chunkY}`);
+        return frames;
+      };
+      const goChunk = (x, y) => {
+        let frames = 0;
+        while ((game.__state.chunkX | 0) !== x) frames += crossX(Math.sign(x - (game.__state.chunkX | 0)), (game.__state.chunkX | 0) + Math.sign(x - (game.__state.chunkX | 0)));
+        while ((game.__state.chunkY | 0) !== y) frames += crossY(Math.sign(y - (game.__state.chunkY | 0)), (game.__state.chunkY | 0) + Math.sign(y - (game.__state.chunkY | 0)));
+        return frames;
+      };
+      const hover = async (x, y) => {
+        let p = game.__screenOf(x, y), settleFrames = 0, stableFrames = 0;
+        while ((!p.inside || stableFrames < 3) && settleFrames++ < 90) {
+          const prior = p;
+          step(1);
+          await new Promise((resolve) => game.requestAnimationFrame(resolve));
+          p = game.__screenOf(x, y);
+          stableFrames = prior.inside && p.inside && Math.hypot(prior.cx - p.cx, prior.cy - p.cy) < 0.5
+            ? stableFrames + 1 : 0;
+        }
+        if (!p.inside) throw new Error(`R4-C 信标未进入视野：${x},${y}`);
+        game.document.querySelector('canvas').dispatchEvent(new game.MouseEvent('mousemove', { clientX: p.cx, clientY: p.cy, bubbles: true }));
+        await new Promise((resolve) => game.requestAnimationFrame(resolve));
+        step(1);
+      };
+      const pressE = () => {
+        game.dispatchEvent(new game.KeyboardEvent('keydown', { code: 'KeyE', key: 'e', bubbles: true }));
+        step(1);
+        game.dispatchEvent(new game.KeyboardEvent('keyup', { code: 'KeyE', key: 'e', bubbles: true }));
+        step(2);
+      };
+      const stockFingerprint = () => JSON.stringify({ totals: totalStock(game.__state), res: game.__state.res,
+        pack: game.__state.pack?.stock });
+      const verifyCompletedE = async (id) => {
+        let s = game.__state, site = s.resonance.sites[id];
+        const moved = goChunk(site.chunkX, site.chunkY);
+        s = game.__state; site = s.resonance.sites[id];
+        const beacon = s.buildings.find((b) => b.type === 'resonanceBeacon' && b.resonanceSiteId === id
+          && b.x === site.x && b.y === site.y);
+        if (!beacon) throw new Error(`${id} 站点区块载入后找不到其信标`);
+        const candidates = [];
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue;
+          const x = site.x + dx, y = site.y + dy;
+          if (!s.map.isWalk(x, y) || s.map.occWalk[y * s.map.w + x]) continue;
+          const path = game.__path(Math.floor(s.player.x), Math.floor(s.player.y), x, y);
+          if (path) candidates.push({ x, y, length: path.length });
+        }
+        candidates.sort((a, b) => a.length - b.length || a.y - b.y || a.x - b.x);
+        const stand = candidates[0];
+        if (!stand) throw new Error(`${id} 信标旁没有可达交互站位`);
+        const moveFrames = moveTo(stand.x, stand.y);
+        await hover(site.x, site.y);
+        const expectedText = ({ first: '首座', second: '二座', third: '终座' })[id] + '共鸣已经完成';
+        const attempts = site.trial.attempts, completedDay = site.completedDay, totalsBefore = stockFingerprint();
+        const feedback = [];
+        for (let i = 0; i < 2; i++) {
+          let guard = 0;
+          while ((game.__state.interactCd || 0) > 0 && guard++ < 90) step(1);
+          const action = game.__resolve();
+          if (action?.kind !== 'resonance' || action.b !== beacon) throw new Error(`${id} 真实 E 目标不再是本站信标：${JSON.stringify({ kind: action?.kind, target: action?.b?.resonanceSiteId })}`);
+          pressE();
+          const last = game.__state.floaties?.at(-1)?.txt || '';
+          feedback.push(last);
+          if (last !== expectedText) throw new Error(`${id} 重复 E 未通过真实交互返回“已完成”：${JSON.stringify({ expectedText, last })}`);
+          if (game.__state.resonance.sites[id].status !== 'complete'
+            || game.__state.resonance.sites[id].completedDay !== completedDay
+            || game.__state.resonance.sites[id].trial.attempts !== attempts
+            || stockFingerprint() !== totalsBefore) throw new Error(`${id} 重复 E 改写完成日、尝试次数或资源账本`);
+        }
+        const row = { id, chunk: [site.chunkX, site.chunkY], movedFrames: moved, approachFrames: moveFrames,
+          repetitions: 2, feedback, attempts, completedDay, noResourceDelta: true,
+          dayAfter: game.__state.day | 0, tAfter: +game.__state.t.toFixed(2) };
+        results.repeatedE.push(row); results.route.push({ id, movedFrames: moved, chunk: row.chunk, day: row.dayAfter });
+        emit('completed station E interaction is idempotent', row);
+      };
+
+      // C begins from the genuine R4-B checkpoint, saves/loads mid-audit, then continues the chain through all sites.
+      const routeOrder = ['third', 'first', 'second', 'third'];
+      for (const id of routeOrder) await verifyCompletedE(id);
+      const finalSites = siteSnapshot(game.__state);
+      if (ids.some((id) => finalSites[id]?.status !== 'complete' || finalSites[id]?.completedDay !== beforeSites[id].completedDay))
+        throw new Error(`跨站往返后完成事实/日期回退：${JSON.stringify(finalSites)}`);
+      results.checks.push({ id: 'three-site-chain-after-load', route: results.route, finalSites,
+        monotonicDay: results.route.every((row, i, all) => !i || row.day >= all[i - 1].day) });
+      if (!results.checks.at(-1).monotonicDay) throw new Error(`区块往返日期倒退：${JSON.stringify(results.route)}`);
+      results.costs = {
+        mandatoryFromDataTable: { construction: game.__resonance().costs.construction,
+          trialEach: game.__resonance().costs.trialStart, defenseAndAccessMustBeAccountedSeparately: true },
+        remainingAfterR4BCheckpoint: totalStock(game.__state),
+        note: '三站真实建造/预约与每站布防成本见 ENDGAME/BUG_HUNT 实测条目；此处余额按背包及所有已保存建筑/容器去重汇总。',
+      };
+      results.ok = true;
+      emit('R4-C route, save/load, dates, and idempotency passed', results);
+    } catch (error) {
+      results.error = String(error && error.stack || error);
+      emit('R4-C subgate failed', results.error);
+    } finally {
+      const restored = restoreOfficial();
+      results.storageRestored = restored;
+      emit('official game storage restored', restored);
+      out.dataset.done = 'true';
+      if (!results.ok || !restored.restored || Object.values(restored.unchanged || {}).some((value) => !value)) out.dataset.result = 'failed';
+      else out.dataset.result = 'passed';
+    }
+  }, { once: true });
+  frame.src = '/';
+})();
+</script>
+</body>
+</html>

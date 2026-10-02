@@ -11,9 +11,10 @@
 // 【纪律】这些函数只读不写：不许改 state（观测台把游戏改坏了就是最糟的 bug）。
 
 import { PULSE, TOWER, WAVES, BOSS, TYPES, TYPE_ORDER, TYPE_NAME, armorMul, LIGHT_FEAR_BURN, ABILITY, tideOf } from '../data/combat.js';
-import { BUILD } from '../data/buildings.js';
+import { BUILD, LIGHT_LEVELS } from '../data/buildings.js';
 import { EXPEDITION } from '../data/expedition.js';
-import { CAMP_CAP, PACK_CAP } from '../data/storage.js';
+import { ENDGAME } from '../data/endgame.js';
+import { CAMP_CAP, PACK_CAP, STORE_CAP } from '../data/storage.js';
 import { CARRY } from '../data/combat.js';
 import { ENEMIES, KINDS } from '../data/enemies.js';
 import { nightPlan, signatureOf, mainKindOf, nightHud, pickKind } from '../data/night.js';
@@ -22,28 +23,97 @@ import { MODS, FUEL_PER_MOD, MAX_SLOTS, allLoads, allCombos, towerTypes, payload
 import { pulseMul, pulseRangeMul, towerDmgMul, towerRateMul, owlDmgMul } from '../systems/research.js';
 import { damageMul } from '../systems/codex.js';
 import { hasTinker, bondLevel } from '../systems/mind.js';
-import { isTide, isNight } from '../core/time.js';
+import { isTide, isNight, TIDE_START, TIDE_END } from '../core/time.js';
 import { SURVIVAL } from '../data/survival.js';
 import { injuryName, restBeds, restCount } from '../systems/survival.js';
 import { T } from '../world/map.js';
 import { nodeMax } from '../data/nodes.js';
+import { genMap, genDepth, surfaceChunkMapSeed, surfaceChunkNightOpsSeed } from '../world/gen.js';
+import { LAYER_META } from '../data/layers.js';
+import { ensureNightOps } from '../systems/nightops.js';
+import { NIGHTBLOOM } from '../data/nightops.js';
+import { RECIPES } from '../data/tools.js';
+import { RESEARCH } from '../data/research.js';
 import { ECOLOGY, biomeOf, frontStageOf } from '../data/ecology.js';
 import { lightPressure } from '../systems/ecoPressure.js';
 import { activeSurfaceChunks, outpostReport } from '../world/chunks.js';
 import { visualSpec } from '../data/visual.js';
 import { assetStats } from '../core/assets.js';
+import { settings } from '../core/settings.js';
 import { COLONISTS, crewCardOf, roleInfluence } from '../data/colonists.js';
 import { taskFromSave, directiveFromSave } from '../data/tasks.js';
 import { taskBoardStats } from '../systems/taskBoard.js';
+import { compute as computeLight } from '../world/light.js';
+import { liveResonanceStatus } from '../systems/resonance.js';
 
 const alive = (arr) => (arr || []).filter((e) => e && e.alive);
 
 export function visualReport() {
   const spec = visualSpec();
+  const assets = assetStats();
+  const v8Rows = (assets.rows || []).filter((r) => String(r.key || '').startsWith('v8_'));
+  const humanRows = v8Rows.filter((r) => String(r.key || '').startsWith('v8_human_'));
+  const hazardKeys = [spec.blightArt && spec.blightArt.spriteKey, spec.ventArt && spec.ventArt.spriteKey].filter(Boolean);
+  const hazardRows = v8Rows.filter((r) => hazardKeys.includes(r.key));
+  const drawModes = { direct: 0, crop: 0, 'nearest-cache': 0, fallback: 0 };
+  for (const row of v8Rows) if (drawModes[row.drawMode] != null) drawModes[row.drawMode] += 1;
+  const loadedByLayer = {};
+  for (const row of v8Rows) {
+    const layer = row.layer || 'untyped';
+    loadedByLayer[layer] = (loadedByLayer[layer] || 0) + (row.ok ? 1 : 0);
+  }
+  const coverage = {};
+  const groupOf = (row) => {
+    const key = String(row.key || '');
+    if (key.startsWith('v8_human_')) return 'human';
+    if (key.startsWith('v8_terrain_')) return 'terrain';
+    if (key.startsWith('v8_decor_')) return 'decor';
+    if (key.startsWith('v8_node_')) return 'node';
+    if (key === 'v8_blight' || key === 'v8_vent') return 'hazard';
+    if (key.startsWith('v8_enemy_')) return 'creature';
+    if (row.layer === 'building') return 'building';
+    return 'other';
+  };
+  for (const row of v8Rows) {
+    const group = groupOf(row);
+    const slot = coverage[group] || (coverage[group] = { total: 0, loaded: 0, fallback: 0, dimensionErrors: 0 });
+    slot.total += 1;
+    if (row.ok && row.dimensionOk) slot.loaded += 1;
+    if (row.drawMode === 'fallback') slot.fallback += 1;
+    if (!row.dimensionOk) slot.dimensionErrors += 1;
+  }
   return {
     ...spec,
+    theme: settings.visualTheme,
+    v8: {
+      total: v8Rows.length,
+      loaded: v8Rows.filter((r) => r.ok).length,
+      missing: v8Rows.filter((r) => r.src && !r.ok).map((r) => r.key),
+      unconfigured: v8Rows.filter((r) => !r.src).map((r) => r.key),
+      pending: v8Rows.filter((r) => r.pending).map((r) => r.key),
+      dimensionErrors: v8Rows.filter((r) => !r.dimensionOk).map((r) => ({ key: r.key, error: r.dimensionError })),
+      drawModes,
+      layers: [...(spec.layers || [])],
+      layerCount: (spec.layers || []).length,
+      loadedByLayer,
+      coverage,
+      humanLayers: {
+        total: humanRows.length,
+        loaded: humanRows.filter((r) => r.ok).map((r) => r.key),
+        missing: humanRows.filter((r) => r.src && !r.ok).map((r) => r.key),
+        pending: humanRows.filter((r) => r.pending).map((r) => r.key),
+      },
+      hazards: {
+        keys: [...hazardKeys],
+        loaded: hazardRows.filter((r) => r.ok).map((r) => r.key),
+        missing: hazardRows.filter((r) => r.src && !r.ok).map((r) => r.key),
+        pending: hazardRows.filter((r) => r.pending).map((r) => r.key),
+        fallback: hazardRows.filter((r) => !r.ok).length,
+      },
+      fallback: v8Rows.filter((r) => !r.ok).length,
+    },
     semanticCount: Object.values(spec.semantic || {}).reduce((sum, count) => sum + count, 0),
-    assets: assetStats(),
+    assets,
   };
 }
 
@@ -72,7 +142,7 @@ export function survivalReport(state) {
       hunger: workers.map((w) => ({ name: w.name, hunger: +w.hunger.toFixed(1), hp: +w.hp.toFixed(1), maxHp: w.maxHp })) },
     stores: { food: state.res.food || 0, fuel: state.res.fuel || 0 },
     rest: { beds: restBeds(state), occupied: restCount(state), overwork: workers.map((w) => ({ name: w.name, level: w.overwork || 0 })), playerRestT: state.playerRestT || 0 },
-    deathPack: state.deathPack ? { layerId: state.deathPack.layerId, day: state.deathPack.day, items: Object.assign({}, state.deathPack.stock || {}), held: state.deathPack.held || null } : null,
+    deathPack: state.deathPack ? { layerId: state.deathPack.layerId, chunkX: state.deathPack.chunkX ?? null, chunkY: state.deathPack.chunkY ?? null, day: state.deathPack.day, items: Object.assign({}, state.deathPack.stock || {}), held: state.deathPack.held || null } : null,
     death: { fuelLoss: SURVIVAL.DEATH.FUEL_LOSS, fuelAtRisk: Math.floor((state.res.fuel || 0) * SURVIVAL.DEATH.FUEL_LOSS) },
     nodes,
     chunk: { x: 0, y: 0, active: !!map, width: map ? map.w : 0, height: map ? map.h : 0, persisted: 1 },
@@ -141,6 +211,394 @@ export function expeditionReport(state) {
     outpost: outpost ? { ticks: outpost.ticks | 0, reason: outpost.lastReason || '', needs: { ...(outpost.lastNeeds || {}) }, yield: { ...(outpost.lastYield || {}) }, alerts: (outpost.alerts || []).length } : null,
     returnHint: { atHome: cx === home.x && cy === home.y, home: { ...home }, distance: Math.max(Math.abs(dx), Math.abs(dy)), directions },
     status: '按需载入：无人区块休眠，人工光弱边缘刷怪' };
+}
+
+// —— W20-R R0：终局闭环可达性基线（只读，不生成/写入真实区块）——
+function resourceProfile(map) {
+  const keys = { [T.ORE]: 'ore', [T.VINE]: 'vine', [T.RELIC]: 'relic', [T.MOTHER]: 'core' };
+  const out = { ore: 0, vine: 0, relic: 0, core: 0 };
+  if (!map || !map.nodeAmt) return out;
+  for (let i = 0; i < map.nodeAmt.length; i++) {
+    const key = keys[map.tiles[i]];
+    if (key) out[key] += Math.max(0, map.nodeAmt[i] || 0);
+  }
+  return out;
+}
+
+// 只把从层入口实际可走到、且有可达相邻采集站位的节点计入路线下界。
+// RELIC/MOTHER 本身不可走，不能仅凭地图上有 nodeAmt 就把它算成可采供给。
+function reachableResourceProfile(map) {
+  const out = { ore: 0, vine: 0, relic: 0, core: 0 };
+  if (!map || !map.nodeAmt || !map.isWalk) return out;
+  const startX = map.w >> 1, startY = map.h >> 1, start = startY * map.w + startX;
+  const seen = new Uint8Array(map.w * map.h), queue = new Int32Array(map.w * map.h);
+  let head = 0, tail = 0;
+  if (!map.isWalk(startX, startY)) return out;
+  seen[start] = 1; queue[tail++] = start;
+  const dx = [1, -1, 0, 0], dy = [0, 0, 1, -1];
+  while (head < tail) {
+    const i = queue[head++], x = i % map.w, y = (i / map.w) | 0;
+    for (let d = 0; d < 4; d++) {
+      const nx = x + dx[d], ny = y + dy[d];
+      if (!map.isWalk(nx, ny)) continue;
+      const ni = ny * map.w + nx;
+      if (seen[ni]) continue;
+      seen[ni] = 1; queue[tail++] = ni;
+    }
+  }
+  const keys = { [T.ORE]: 'ore', [T.VINE]: 'vine', [T.RELIC]: 'relic', [T.MOTHER]: 'core' };
+  for (let i = 0; i < map.nodeAmt.length; i++) {
+    const key = keys[map.tiles[i]], amount = Math.max(0, map.nodeAmt[i] || 0);
+    if (!key || !amount) continue;
+    const x = i % map.w, y = (i / map.w) | 0;
+    let hasReachableStand = !!seen[i];
+    for (let oy = -1; !hasReachableStand && oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) {
+      if ((!ox && !oy) || !map.isWalk(x + ox, y + oy)) continue;
+      if (seen[(y + oy) * map.w + x + ox]) { hasReachableStand = true; break; }
+    }
+    if (hasReachableStand) out[key] += amount;
+  }
+  return out;
+}
+
+function auditSurfaceChunk(seed, cx, cy, biome) {
+  const map = genMap(SURVIVAL.CHUNK.WIDTH, SURVIVAL.CHUNK.HEIGHT, surfaceChunkMapSeed(seed, cx, cy), biome);
+  // 与 ensureSurfaceChunk 的出口清理保持一致，只对临时审计图执行，不碰 state。
+  const mx = map.w / 2 | 0, my = map.h / 2 | 0, edge = SURVIVAL.CHUNK.EXIT_CORRIDOR;
+  for (let d = -3; d <= 3; d++) {
+    for (let x = 0; x < edge; x++) map.nodeAmt[(my + d) * map.w + x] = 0;
+    for (let x = map.w - edge; x < map.w; x++) map.nodeAmt[(my + d) * map.w + x] = 0;
+    for (let y = 0; y < edge; y++) map.nodeAmt[y * map.w + mx + d] = 0;
+    for (let y = map.h - edge; y < map.h; y++) map.nodeAmt[y * map.w + mx + d] = 0;
+  }
+  const nightLayer = { map, nightops: null };
+  ensureNightOps(nightLayer, surfaceChunkNightOpsSeed(seed, cx, cy));
+  const blooms = nightLayer.nightops && nightLayer.nightops.blooms || [];
+  const firstDuskPlants = Math.min(blooms.length, NIGHTBLOOM.base);
+  return {
+    ...resourceProfile(map),
+    reachable: reachableResourceProfile(map),
+    nightBloom: {
+      plants: blooms.length,
+      firstDuskYieldUpper: firstDuskPlants * NIGHTBLOOM.charges * NIGHTBLOOM.yield,
+      allPlantsYieldUpper: blooms.length * NIGHTBLOOM.charges * NIGHTBLOOM.yield,
+      note: '确定性点位上限；实际产出还受夜间光照与存活条件影响',
+    },
+  };
+}
+
+export function siteAnchorAudit(state, probe) {
+  const id = `${probe.x},${probe.y}`;
+  const stored = state.chunkStore && state.chunkStore[id];
+  const map = stored && stored.map
+    ? stored.map
+    : genMap(SURVIVAL.CHUNK.WIDTH, SURVIVAL.CHUNK.HEIGHT, surfaceChunkMapSeed(state.seed, probe.x, probe.y), probe.biome);
+  const chunk = stored || { map, buildings: [], beacons: [], nightops: null };
+  const nightOpsView = chunk.nightops ? chunk : { map, nightops: null };
+  if (!nightOpsView.nightops) ensureNightOps(nightOpsView, surfaceChunkNightOpsSeed(state.seed, probe.x, probe.y));
+  const occupied = new Set();
+  for (const b of [...(chunk.buildings || []), ...(chunk.beacons || [])]) if (b && Number.isInteger(b.x) && Number.isInteger(b.y)) occupied.add(`${b.x},${b.y}`);
+  for (const v of nightOpsView.nightops && nightOpsView.nightops.vents || []) if (v) occupied.add(`${v.x},${v.y}`);
+  for (const b of nightOpsView.nightops && nightOpsView.nightops.blooms || []) if (b) occupied.add(`${b.x},${b.y}`);
+  const edge = SURVIVAL.CHUNK.EXIT_CORRIDOR;
+  const mx = map.w / 2 | 0, my = map.h / 2 | 0;
+  let legalAnchors = 0;
+  for (let y = 1; y < map.h - 1; y++) for (let x = 1; x < map.w - 1; x++) {
+    if (map.get(x, y) !== T.FLOOR || occupied.has(`${x},${y}`)) continue;
+    if (map.occBuild && map.occBuild[y * map.w + x] || map.occWalk && map.occWalk[y * map.w + x]) continue;
+    if (map.blight && map.blight[y * map.w + x] > 0) continue;
+    if ((x < edge && Math.abs(y - my) <= 3) || (x >= map.w - edge && Math.abs(y - my) <= 3)
+      || (y < edge && Math.abs(x - mx) <= 3) || (y >= map.h - edge && Math.abs(x - mx) <= 3)) continue;
+    legalAnchors++;
+  }
+  return { legalAnchors, chunkState: stored ? '已保存区块（按现状避让）' : '未探索区块（确定性基图）', blocked: legalAnchors === 0 };
+}
+
+function auditResourceSeed(seed) {
+  const total = { ore: 0, vine: 0, relic: 0, core: 0 };
+  const nightBloomUpper = { firstDusk: 0, allPlants: 0 };
+  const routes = {};
+  const add = (profile) => {
+    for (const key of Object.keys(total)) total[key] += profile[key] || 0;
+    nightBloomUpper.firstDusk += profile.nightBloom && profile.nightBloom.firstDuskYieldUpper || 0;
+    nightBloomUpper.allPlants += profile.nightBloom && profile.nightBloom.allPlantsYieldUpper || 0;
+  };
+  for (const site of ENDGAME.SITE_CHUNK_PROBES) {
+    routes[site.id] = auditSurfaceChunk(seed, site.x, site.y, site.biome);
+    add(routes[site.id]);
+  }
+  for (let index = 1; index <= 3; index++) {
+    const id = `depth${index}`;
+    const meta = LAYER_META[id];
+    if (meta) {
+      const map = genDepth(meta.w, meta.h, (seed ^ (0x9e3779b9 * index)) >>> 0, index);
+      routes[id] = { ...resourceProfile(map), reachable: reachableResourceProfile(map) };
+      add(routes[id]);
+    }
+  }
+  // R4-A 真实首选路线从苔原原点沿相邻区块到碎岩台地；通道区块也能采档案，需计入共享研究/建站预算。
+  const second = ENDGAME.SITE_CHUNK_PROBES.find((site) => site.id === 'second') || { x: 0, y: 0 };
+  const corridor = [{ x: 0, y: 0 }];
+  let cx = 0, cy = 0;
+  while (cx !== second.x) { cx += Math.sign(second.x - cx); corridor.push({ x: cx, y: cy }); }
+  while (cy !== second.y) { cy += Math.sign(second.y - cy); corridor.push({ x: cx, y: cy }); }
+  const accessRoute = { chunks: corridor, resources: { ore: 0, vine: 0, relic: 0 } };
+  for (const p of corridor) {
+    const profile = auditSurfaceChunk(seed, p.x, p.y, biomeOf(p.x, p.y).id);
+    for (const key of Object.keys(accessRoute.resources)) accessRoute.resources[key] += profile.reachable?.[key] || 0;
+  }
+  return { total, routes, nightBloomUpper, accessRoute };
+}
+
+export function resonanceSitePrepBudget(siteId) {
+  const siteCost = ENDGAME.SITE_COSTS[siteId] || {};
+  const lamp = BUILD.lamp || {};
+  const furnace = BUILD.furnace || {};
+  const fuelRecipe = RECIPES.find((recipe) => recipe.id === 'fuel' && recipe.out === 'fuel');
+  const tideSeconds = Math.max(0, TIDE_END - TIDE_START);
+  const fuelOut = fuelRecipe && fuelRecipe.n || 0;
+  const fuelOre = fuelRecipe && fuelRecipe.cost && fuelRecipe.cost.ore || 0;
+  const trialFuel = ENDGAME.TRIAL_START_COST.fuel || 0;
+  const levels = LIGHT_LEVELS.map((level) => {
+    const lampFuelForTide = lamp.burnSec > 0 ? Math.ceil(tideSeconds * level.burn / lamp.burnSec) : null;
+    const totalFuel = lampFuelForTide == null ? null : trialFuel + lampFuelForTide;
+    const fuelBatches = totalFuel != null && fuelOut > 0 ? Math.ceil(totalFuel / fuelOut) : null;
+    const oreForFuel = fuelBatches == null ? null : fuelBatches * fuelOre;
+    return {
+      level: level.name,
+      burnMultiplier: level.burn,
+      secondsPerFuel: lamp.burnSec > 0 ? lamp.burnSec / level.burn : null,
+      lampFuelForTide,
+      trialFuel,
+      totalFuel,
+      fuelBatches,
+      oreForFuel,
+      minimumOre: oreForFuel == null ? null : (siteCost.ore || 0) + (lamp.cost?.ore || 0)
+        + (furnace.cost?.ore || 0) + oreForFuel,
+    };
+  });
+  return {
+    tideSeconds,
+    beaconProvidesLight: !!(BUILD.resonanceBeacon && BUILD.resonanceBeacon.power > 0),
+    lampCost: { ...(lamp.cost || {}) },
+    furnaceCost: { ...(furnace.cost || {}) },
+    furnaceFireMat: furnace.fireMat || 'vine',
+    furnaceIgnitionUnits: 1,
+    fuelRecipe: fuelRecipe ? { input: { ...fuelRecipe.cost }, output: fuelOut } : null,
+    importedFuelPlan: levels.map((level) => ({
+      level: level.level,
+      fuelToBring: level.totalFuel,
+      fuelOnlyPackLoads: level.totalFuel == null ? null : Math.ceil(level.totalFuel / PACK_CAP),
+      siteOreMinimum: (siteCost.ore || 0) + (lamp.cost?.ore || 0),
+      upstreamOreEquivalent: level.oreForFuel,
+      note: '燃料在出发前备好时，本站可省去熔炉与现场炼油；包数仅按燃料单独计算，不含其他物资',
+    })),
+    levels,
+    note: '灯具燃料是从蚀潮起点计、burnT=0 的理论下界；真实预算须覆盖点灯时机/余烬计时、研究节油与防守消耗。信标本身不发光。',
+  };
+}
+
+function resonanceMaterialBudget(resourceAudit = []) {
+  const construction = Object.values(ENDGAME.SITE_COSTS);
+  const total = {};
+  for (const cost of construction) for (const [key, amount] of Object.entries(cost)) total[key] = (total[key] || 0) + amount;
+  for (const [key, amount] of Object.entries(ENDGAME.TRIAL_START_COST)) total[key] = (total[key] || 0) + amount * ENDGAME.BEACON_COUNT;
+  // 初始预算中的燃料可由既有炼油配方制作；这里只计算理论等价，不替代实地采集/加工验证。
+  const fuelRecipe = RECIPES.find((recipe) => recipe.out === 'fuel' && recipe.id === 'fuel');
+  const fuelOut = fuelRecipe && fuelRecipe.n || 0;
+  const fuelInput = fuelRecipe && fuelRecipe.cost || {};
+  const fuelInputPerOutput = fuelOut > 0 ? Object.fromEntries(Object.entries(fuelInput).map(([key, amount]) => [key, amount / fuelOut])) : {};
+  const fuelBatches = fuelOut > 0 ? Math.ceil((total.fuel || 0) / fuelOut) : 0;
+  const oreForFuel = fuelBatches * (fuelInput.ore || 0);
+  const storeKitUnits = Object.values(BUILD.store.cost || {}).reduce((sum, n) => sum + n, 0);
+  // Research sections are gated by actual layer access: mining is visible on the surface,
+  // while deep/deeper are only available after entering depth1.
+  const surfaceAccessResearch = RESEARCH.mining?.cost?.data || 0;
+  const depth1AccessResearch = (RESEARCH.deep?.cost?.data || 0) + (RESEARCH.deeper?.cost?.data || 0);
+  const siteDataCost = Object.values(ENDGAME.SITE_COSTS).reduce((sum, cost) => sum + (cost.data || 0), 0);
+  const surfaceRouteDataRequired = surfaceAccessResearch + siteDataCost;
+  const surfaceRouteDataMin = Math.min(...resourceAudit.map((row) => row.resources?.accessRoute?.resources?.relic ?? Infinity));
+  const surfaceSiteIds = ENDGAME.SITE_CHUNK_PROBES.map((site) => site.id);
+  const surfaceSupplyMin = Object.fromEntries(['ore', 'vine', 'relic'].map((key) => [key,
+    Math.min(...resourceAudit.map((row) => surfaceSiteIds.reduce((sum, id) => sum + (row.resources?.routes?.[id]?.reachable?.[key] || 0), 0)))]));
+  const depth1DataMin = Math.min(...resourceAudit.map((row) => row.resources?.routes?.depth1?.reachable?.relic ?? Infinity));
+  const depth1SupplyMin = Object.fromEntries(['ore', 'vine', 'relic'].map((key) => [key,
+    Math.min(...resourceAudit.map((row) => row.resources?.routes?.depth1?.reachable?.[key] ?? Infinity))]));
+  const depth2CoreMin = Math.min(...resourceAudit.map((row) => row.resources?.routes?.depth2?.reachable?.core ?? Infinity));
+  const depth2CoreNeeded = (ENDGAME.SITE_COSTS.second?.core || 0) + (ENDGAME.SITE_COSTS.third?.core || 0);
+  const shaftCost = { ...(BUILD.shaft?.cost || {}) };
+  const siteLogistics = Object.fromEntries(ENDGAME.SITE_CHUNK_PROBES.map((site) => {
+    const cost = ENDGAME.SITE_COSTS[site.id] || {};
+    const constructionUnits = Object.values(cost).reduce((sum, n) => sum + n, 0);
+    const trialUnits = Object.values(ENDGAME.TRIAL_START_COST).reduce((sum, n) => sum + n, 0);
+    const stockUnits = constructionUnits + trialUnits;
+    const siteStoreCap = site.id === 'third' ? CAMP_CAP : STORE_CAP;
+    const fuelAtSite = (cost.fuel || 0) + (ENDGAME.TRIAL_START_COST.fuel || 0);
+    const siteFuelBatches = fuelOut > 0 ? Math.ceil(fuelAtSite / fuelOut) : 0;
+    const siteFuelOre = siteFuelBatches * (fuelInput.ore || 0);
+    return [site.id, {
+      stockUnits,
+      containerCap: siteStoreCap,
+      stockFitsContainer: stockUnits <= siteStoreCap,
+      remoteStoreKitUnits: site.id === 'third' ? 0 : storeKitUnits,
+      remoteStoreKitPackLoads: site.id === 'third' ? 0 : Math.ceil(storeKitUnits / PACK_CAP),
+      fullStockPackLoadsIfShipped: site.id === 'third' ? 0 : Math.ceil(stockUnits / PACK_CAP),
+      fuelOreProcessedBeforeShipping: siteFuelOre,
+      trialPrep: resonanceSitePrepBudget(site.id),
+      note: '目的地库存只计已加工后的施工/预约物品；燃料原料在出发前加工，不额外占目的地容器格',
+    }];
+  }));
+  return {
+    total,
+    fuelRecipe: fuelRecipe ? { id: fuelRecipe.id, input: { ...fuelInput }, output: fuelOut } : null,
+    fuelBatches,
+    fuelInputPerOutput,
+    oreForFuel,
+    oreIncludingFuel: (total.ore || 0) + oreForFuel,
+    logistics: {
+      packCap: PACK_CAP,
+      storeCap: STORE_CAP,
+      storeKitUnits,
+      siteLogistics,
+      note: '远端首次须先带够建箱材料；全包运输次数是假设物资都从原点携带的容量下界，不含往返时间、局部采集顺序与战斗风险',
+    },
+    nightBloomPerSite: Object.fromEntries(ENDGAME.SITE_CHUNK_PROBES.map((site) => {
+      const cost = ENDGAME.SITE_COSTS[site.id] || {};
+      return [site.id, (cost.night || 0) + (ENDGAME.TRIAL_START_COST.night || 0)];
+    })),
+    access: {
+      depth2Entry: {
+        surfaceResearch: { mining: RESEARCH.mining?.cost?.data || 0,
+          totalData: surfaceAccessResearch, auditedSupplyMin: surfaceSupplyMin.relic,
+          covered: Number.isFinite(surfaceSupplyMin.relic) && surfaceSupplyMin.relic >= surfaceAccessResearch },
+        surfaceDataRoute: { requiredForResearchAndAllSites: surfaceRouteDataRequired,
+          auditedSupplyMin: Number.isFinite(surfaceRouteDataMin) ? surfaceRouteDataMin : null,
+          chunks: resourceAudit[0]?.resources?.accessRoute?.chunks || [],
+          covered: Number.isFinite(surfaceRouteDataMin) && surfaceRouteDataMin >= surfaceRouteDataRequired,
+          note: '固定首选路线：从(0,0)按X后Y走到碎岩台地首选探针；含沿途区块档案，候选点回退后的路线须在实测中重新核对' },
+        depth1Research: { deep: RESEARCH.deep?.cost?.data || 0, deeper: RESEARCH.deeper?.cost?.data || 0,
+          totalData: depth1AccessResearch, auditedSupplyMin: depth1DataMin,
+          covered: Number.isFinite(depth1DataMin) && depth1DataMin >= depth1AccessResearch },
+        depth1Shaft: { ...shaftCost, auditedDepth1SupplyMin: { ore: depth1SupplyMin.ore, vine: depth1SupplyMin.vine },
+          covered: ['ore', 'vine'].every((key) => Number.isFinite(depth1SupplyMin[key]) && depth1SupplyMin[key] >= (shaftCost[key] || 0)) },
+        depth2Core: { source: 'depth2', requiredAcrossSecondAndThird: depth2CoreNeeded, minimumByAuditSeeds: Number.isFinite(depth2CoreMin) ? depth2CoreMin : null,
+          covered: Number.isFinite(depth2CoreMin) && depth2CoreMin >= depth2CoreNeeded },
+        note: '研究分区有实际解锁顺序：地表先研究高效采掘（6档案），天然竖井首潜后才开放深渊分区，再研究深潜学（16）与深层深潜（20）；竖井材料从 depth1 供给审计。随后进入 depth2 一次采回后续站点母髓。此为必经访问成本，尚未计工具、照明、燃料、防守与食物',
+      },
+    },
+    note: '含三座施工与三次预约的直接需求；访问深层的研究/竖井必需成本另列 access，仍未计工具、照明、燃料、防守与食物消耗',
+  };
+}
+
+const lightRound = (value) => Number.isFinite(value) ? +value.toFixed(3) : null;
+
+function isolatedResonanceLight(state, index, groups) {
+  const n = state.map.w * state.map.h;
+  // `computeLight` lazily caches lava sources on the map object. Clone the map
+  // shell so this read-only counterfactual cannot add even that cache to game state.
+  const map = { ...state.map };
+  const player = state.player ? { ...state.player,
+    lamp: { ...(state.player.lamp || {}), power: groups.player ? (state.player.lamp?.power || 0) : 0 } } : null;
+  const beacons = groups.camp ? (state.beacons || []).map((b) => ({ ...b })) : [];
+  const buildings = groups.buildings ? (state.buildings || []).map((b) => ({ ...b })) : [];
+  const graves = groups.graves ? (state.graves || []).map((g) => ({ ...g })) : [];
+  const isolated = { ...state, map, player, beacons, buildings, graves,
+    light: new Float32Array(n), discovered: state.discovered ? new Uint8Array(n) : null };
+  computeLight(isolated);
+  return isolated.light[index] || 0;
+}
+
+// 潮夜诊断用：以生产光照计算器做只读反事实，区分玩家提灯、营火和建筑光。
+// 光照按最大贡献合成，因此各来源值不可相加；本函数不改原 state/光图/建筑。
+export function resonanceLightReport(state, requestedSite = null) {
+  const activeTrial = state.resonance?.trial;
+  const siteId = activeTrial && ['reserved', 'active'].includes(activeTrial.status)
+    ? activeTrial.siteId : liveResonanceStatus(state).id;
+  const site = requestedSite || state.resonance?.sites?.[siteId] || null;
+  const base = { siteId, layer: state.layerId, chunk: { x: state.chunkX | 0, y: state.chunkY | 0 }, loaded: false };
+  if (!site || !Number.isInteger(site.x) || !Number.isInteger(site.y)
+    || state.layerId !== 'surface' || (state.chunkX | 0) !== site.chunkX || (state.chunkY | 0) !== site.chunkY
+    || !state.map || !state.player) return base;
+  const index = site.y * state.map.w + site.x;
+  if (index < 0 || index >= state.map.w * state.map.h) return base;
+  const gridValue = state.light && Number.isFinite(state.light[index]) ? state.light[index] : null;
+  const activeBuildingSources = (state.buildings || []).filter((b) => {
+    const def = BUILD[b.type];
+    return !b.site && !b.off && (b.fuel || 0) > 0 && def?.power > 0 && !def.decoy;
+  });
+  const playerLamp = state.player.lamp || {};
+  const sourceRows = {
+    playerLamp: { active: (playerLamp.power || 0) > 0, power: playerLamp.power || 0,
+      radius: playerLamp.radius || 0, x: lightRound(state.player.x), y: lightRound(state.player.y) },
+    campLights: (state.beacons || []).filter((b) => (b.power || 0) > 0).map((b) => ({
+      x: b.x, y: b.y, power: b.power, radius: b.radius || 0, type: b.type || 'camp light',
+    })),
+    placedLights: activeBuildingSources.map((b) => ({ x: b.x, y: b.y, type: b.type,
+      power: BUILD[b.type].power, radius: BUILD[b.type].radius || 0, fuel: b.fuel })),
+    graves: (state.graves || []).map((g) => ({ x: g.x, y: g.y, day: g.day || state.day })),
+  };
+  const all = { player: true, camp: true, buildings: true, graves: true };
+  const counterfactual = {
+    allSources: isolatedResonanceLight(state, index, all),
+    playerOnly: isolatedResonanceLight(state, index, { player: true, camp: false, buildings: false, graves: false }),
+    campOnly: isolatedResonanceLight(state, index, { player: false, camp: true, buildings: false, graves: false }),
+    buildingsOnly: isolatedResonanceLight(state, index, { player: false, camp: false, buildings: true, graves: false }),
+    nonPlayerSources: isolatedResonanceLight(state, index, { player: false, camp: true, buildings: true, graves: true }),
+    playerAndGraves: isolatedResonanceLight(state, index, { player: true, camp: false, buildings: false, graves: true }),
+  };
+  return { ...base, loaded: true, anchor: { x: site.x, y: site.y },
+    threshold: ENDGAME.STANDARD_TRIAL.minLight, gridValue: lightRound(gridValue),
+    recomputedValue: lightRound(counterfactual.allSources),
+    lit: (gridValue == null ? counterfactual.allSources : gridValue) >= ENDGAME.STANDARD_TRIAL.minLight,
+    sources: sourceRows,
+    counterfactual: Object.fromEntries(Object.entries(counterfactual).map(([key, value]) => [key, lightRound(value)])),
+    method: '生产光照计算器反事实；来源光值取最大值，不相加',
+  };
+}
+
+export function resonanceReport(state) {
+  const milestone = state.milestone || {};
+  const progress = Object.fromEntries(ENDGAME.SITE_CHUNK_PROBES.map((probe) => {
+    const site = state.resonance?.sites?.[probe.id];
+    return [probe.id, site ? { ...site, trial: site.trial ? { ...site.trial } : null } : { id: probe.id, status: 'locked' }];
+  }));
+  const sites = ENDGAME.SITE_CHUNK_PROBES.map((p) => ({
+    id: p.id,
+    biome: p.biome,
+    chunk: { x: p.x, y: p.y },
+    actualBiome: biomeOf(p.x, p.y).id,
+    hops: Math.max(Math.abs(p.x), Math.abs(p.y)),
+    reachableBySurfaceExits: biomeOf(p.x, p.y).id === p.biome,
+    ...siteAnchorAudit(state, p),
+    role: p.id === 'first' ? '首站：邻近群系远征' : p.id === 'second' ? '二站：高风险深入' : '终站：回营地完成共鸣',
+  }));
+  const survey = ENDGAME.RESOURCE_AUDIT_SEEDS.map((seed) => ({ seed, resources: auditResourceSeed(seed) }));
+  return {
+    version: ENDGAME.VERSION,
+    milestone: {
+      bossDefeated: !!milestone.bossDefeated,
+      bossDay: Number.isFinite(milestone.bossDay) ? milestone.bossDay : 7,
+      // 老档可能只有已击败标记、没有历史日期；不要伪造为第 0 天。
+      clearedDay: Number.isFinite(milestone.clearedDay) && milestone.clearedDay > 0 ? milestone.clearedDay : null,
+    },
+    trial: state.resonance?.trial ? { ...state.resonance.trial } : { status: 'idle', attempts: 0, result: null },
+    sites: { required: ENDGAME.BEACON_COUNT, probes: sites, progress, distinctBiomes: new Set(sites.map((p) => p.actualBiome)).size },
+    resourceAudit: { seeds: survey, scope: '3 个群系探针区块 + depth1–3；确定性生成、包含现行出口清理；分路线给出节点总量与夜辉草产出上限' },
+    stock: Object.fromEntries(['ore', 'vine', 'fuel', 'data', 'core', 'food', 'night'].map((key) => [key, Math.max(0, Number(state.res && state.res[key]) || 0)])),
+    costs: {
+      status: 'R0 首轮预算；失败不额外扣料，预约费不退，R3 固定种子闭环后校准',
+      construction: Object.fromEntries(Object.entries(ENDGAME.SITE_COSTS).map(([id, cost]) => [id, { ...cost }])),
+      trialStart: { ...ENDGAME.TRIAL_START_COST },
+      totalConstruction: Object.values(ENDGAME.SITE_COSTS).reduce((sum, cost) => {
+        for (const [key, value] of Object.entries(cost)) sum[key] = (sum[key] || 0) + value;
+        return sum;
+      }, {}),
+      fullRouteBudget: resonanceMaterialBudget(survey),
+    },
+    status: 'R0 基线；未探索区块用确定性基图审计，已保存区块避让现有占格；不载入、不写入或修改真实区块/存档',
+    firstSite: state.resonance?.sites?.first ? { ...state.resonance.sites.first } : null,
+    siteProgress: progress,
+  };
 }
 
 // —— W15-C 生态观测台（E0：只读地基）——

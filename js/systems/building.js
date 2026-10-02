@@ -1,6 +1,6 @@
 // systems/building.js —— 建造放置逻辑（合法性 + 落位）
-import { BUILD, canAfford, DEMOLISH_REFUND, DEMOLISH_RANGE, workOf, towerHp, upgradeCostFor, TOWER_LV_MAX } from '../data/buildings.js';
-import { payBuild, deposit, withdraw } from './storage.js';
+import { BUILD, DEMOLISH_REFUND, DEMOLISH_RANGE, workOf, towerHp, upgradeCostFor, TOWER_LV_MAX } from '../data/buildings.js';
+import { payBuild, deposit, withdraw, canWithdraw } from './storage.js';
 import { RES_NAME } from '../data/storage.js';
 import { T } from '../world/map.js';
 import { hasTech } from './research.js';
@@ -8,12 +8,34 @@ import { LAYER_ORDER } from '../data/layers.js';
 import { sfx } from '../core/audio.js';
 import { SURVIVAL } from '../data/survival.js';
 import { advanceFirstSlice } from './firstSlice.js';
+import { liveResonanceStatus, markResonanceBuilding, resonancePlaceError, resonanceSiteForBuild, retryPendingResonanceSite } from './resonance.js';
+import { ENDGAME } from '../data/endgame.js';
 
 export const PLACE_RANGE = 6;                 // 距玩家最大放置距离（tile）
+
+export function buildCostOf(state, type, x = null, y = null) {
+  const def = BUILD[type];
+  if (!def) return {};
+  if (type !== 'resonanceBeacon') return def.cost || {};
+  const id = Number.isInteger(x) && Number.isInteger(y)
+    ? resonanceSiteForBuild(state, x, y) : liveResonanceStatus(state).id;
+  return ENDGAME.SITE_COSTS[id] || def.cost || {};
+}
+
+function costOfInstance(b) {
+  if (b && b.type === 'resonanceBeacon' && b.resonanceSiteId)
+    return ENDGAME.SITE_COSTS[b.resonanceSiteId] || BUILD[b.type].cost;
+  return BUILD[b && b.type]?.cost || {};
+}
 
 // 研究锁：竖井还需按当前层判定（与 placeError 保持一致）
 export function lockedByResearch(state, type) {
   const def = BUILD[type];
+  if (type === 'resonanceBeacon') {
+    const site = liveResonanceStatus(state);
+    if (!state.milestone?.bossDefeated || site.status === 'locked' || site.status === 'pending' || site.status === 'complete') return true;
+    if (site.status === 'building' || site.status === 'built') return true;
+  }
   if (def && def.locked && !hasTech(state, def.locked)) return true;
   if (type === 'shaft') {
     const li = LAYER_ORDER.indexOf(state.layerId);
@@ -38,6 +60,8 @@ export function placeError(state, type, tx, ty, opts) {
   const o = opts || {};
   const m = state.map;
   const def = BUILD[type];
+  const resonanceError = resonancePlaceError(state, type, tx, ty);
+  if (resonanceError) return resonanceError;
   if (def && def.locked && !hasTech(state, def.locked)) return '需研究解锁';
   if (def && def.deepOnly && state.layerId === 'surface') return '只能建在深渊';
   if (type === 'mycobed' && (state.buildings || []).filter((b) => b.type === 'mycobed' && !b.site).length >= SURVIVAL.REGEN.MAX_BEDS) return `菌床已达本图上限 ${SURVIVAL.REGEN.MAX_BEDS}`;
@@ -59,7 +83,7 @@ export function placeError(state, type, tx, ty, opts) {
   if (Math.floor(p.x) === tx && Math.floor(p.y) === ty) return '脚下';
   const d = Math.hypot(tx + 0.5 - p.x, ty + 0.5 - p.y);
   if (d > PLACE_RANGE) return '太远';
-  if (!o.ignoreCost && !canAfford(state.res, type)) return '资源不足';
+  if (!o.ignoreCost && !canWithdraw(state, buildCostOf(state, type, tx, ty))) return '资源不足';
   return null;
 }
 
@@ -70,7 +94,7 @@ export function tryPlace(state, type, tx, ty) {
   const err = placeError(state, type, tx, ty);
   if (err) { sfx('deny'); return err; }
   const d = BUILD[type];
-  payBuild(state, type);                   // 从最近的容器扣料
+  payBuild(state, type, buildCostOf(state, type, tx, ty)); // 从最近的容器扣除本站成本
   const m = state.map;
   const i = ty * m.w + tx;
   if (m.occBuild) m.occBuild[i] = 1;      // 占「建筑格」：不能重复建、不刷怪、不刷游荡点（occWalk 不动）
@@ -84,7 +108,9 @@ export function tryPlace(state, type, tx, ty) {
     stock: d.store ? {} : null,           // 容器类建筑的存货（暂存箱也一样要有）
     mods: d.dmg ? [] : null,              // 塔的载荷（修饰器槽；W14-A 第 2 步：空载 = 今天的塔）
     open: d.gate ? d.openDefault !== false : undefined,
+    resonanceSiteId: type === 'resonanceBeacon' ? resonanceSiteForBuild(state, tx, ty) : null,
   });
+  if (type === 'resonanceBeacon') markResonanceBuilding(state, state.buildings[state.buildings.length - 1], 'building');
   // 记一个「撤销点」：放错了 Ctrl+Z 可以整单退回（30 秒内、只能撤最近一次）
   state.undo = { x: tx, y: ty, type, at: performance.now() };
   sfx('place', { x: tx + 0.5, y: ty + 0.5 });
@@ -101,7 +127,8 @@ export function undoPlace(state) {
   const b = buildingAt(state, u.x, u.y);
   if (!b || b.type !== u.type) return '那里已经不是刚放下的建筑了';
   const def = BUILD[u.type];
-  for (const k in def.cost) if (def.cost[k]) deposit(state, k, def.cost[k], u.x + 0.5, u.y + 0.5);
+  const cost = costOfInstance(b);
+  for (const k in cost) if (cost[k]) deposit(state, k, cost[k], u.x + 0.5, u.y + 0.5);
   removeBuilding(state, b);
   state.floaties.push({ x: u.x + 0.5, y: u.y - 0.3, txt: `已撤销 ${def.name}`, color: '#9fe8ff', t: 0, life: 1.1 });
   return null;
@@ -138,6 +165,7 @@ export function completeBuilding(state, b) {
   if (def.solid || (def.gate && !b.open)) m.occWalk[i] = 1;
   if (def.block) m.blockLight[i] = 1;
   sfx('built', { x: b.x + 0.5, y: b.y + 0.5 });
+  markResonanceBuilding(state, b, 'built');
   state.floaties.push({ x: b.x + 0.5, y: b.y - 0.3, txt: `${def.name} 建成`, color: '#9ef7d8', t: 0, life: 1.2 });
   if (b.type === 'lamp' || b.type === 'purifier') advanceFirstSlice(state, 'lit');
   ejectFromTile(state, b.x, b.y);          // 别把人封在墙里
@@ -196,8 +224,9 @@ export function demolish(state, b) {
   const frac = b.site ? 1 : DEMOLISH_REFUND;      // 蓝图还没开工 —— 材料原样退回
   sfx('demolish', { x: b.x + 0.5, y: b.y + 0.5 });
   const back = {};
-  for (const k in def.cost) {
-    const n = Math.floor(def.cost[k] * frac);
+  const cost = costOfInstance(b);
+  for (const k in cost) {
+    const n = Math.floor(cost[k] * frac);
     if (n > 0) { deposit(state, k, n, b.x + 0.5, b.y + 0.5); back[k] = n; }   // 退回到最近的容器
   }
   removeBuilding(state, b);
@@ -243,7 +272,7 @@ export function upgradeError(state, b) {
   if (lv >= TOWER_LV_MAX) return `${def.name} 已满级（Lv${TOWER_LV_MAX}）`;
   const cost = upgradeCostFor(b.type, lv);
   if (!cost) return '没有可升的等级';
-  for (const k in cost) if ((state.res[k] || 0) < cost[k]) return `材料不足（需 ${costTextOf(cost)}）`;
+  if (!canWithdraw(state, cost)) return `材料不足（需 ${costTextOf(cost)}）`;
   return null;
 }
 
@@ -294,6 +323,10 @@ export function removeBuilding(state, b) {
   //    否则 deposit 会把它自己当成"最近的容器"又塞回去（它此刻已被清空、看着还有空间），
   //    紧接着建筑消失 —— 东西照样丢，只是丢得更隐蔽。
   spillStock(state, b, '拆卸');
+  if (b.type === 'resonanceBeacon') markResonanceBuilding(state, b, 'revealed');
+  // 旧存档的终站位置可能被普通建筑占住。移除任意普通建筑后都重试一次待定选址；
+  // 非 pending 时 retryPendingResonanceSite 是纯 no-op。
+  retryPendingResonanceSite(state);
   return true;
 }
 

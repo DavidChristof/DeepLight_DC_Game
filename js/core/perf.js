@@ -13,6 +13,7 @@ const stages = {};                 // name → { ms, n, max }
 let frames = 0;
 let wallMs = 0;
 let on = true;
+const slowFrames = [];             // 只保留最慢的 8 帧，不随运行时间增长
 
 export const perfOn = (v) => { on = v == null ? !on : !!v; return on; };
 export const perfEnabled = () => on;
@@ -21,8 +22,9 @@ export const pnow = () => (on ? performance.now() : 0);
 export function pmark(name, t0) {
   if (!on || !t0) return;
   const dt = performance.now() - t0;
-  const s = stages[name] || (stages[name] = { ms: 0, n: 0, max: 0 });
+  const s = stages[name] || (stages[name] = { ms: 0, n: 0, max: 0, frameMs: 0 });
   s.ms += dt;
+  s.frameMs += dt;
   s.n += 1;
   if (dt > s.max) s.max = dt;
 }
@@ -32,12 +34,22 @@ export function pframe(dtMs) {
   if (!on) return;
   frames += 1;
   wallMs += dtMs;
+  const total = stages['frame.total']?.frameMs || 0;
+  if (total && (slowFrames.length < 8 || total > slowFrames[slowFrames.length - 1].totalMs)) {
+    const row = { frame: frames, totalMs: +total.toFixed(3), stages: {} };
+    for (const k in stages) if (stages[k].frameMs) row.stages[k] = +stages[k].frameMs.toFixed(3);
+    slowFrames.push(row);
+    slowFrames.sort((a, b) => b.totalMs - a.totalMs);
+    if (slowFrames.length > 8) slowFrames.pop();
+  }
+  for (const k in stages) stages[k].frameMs = 0;
 }
 
 export function perfReset() {
   for (const k in stages) delete stages[k];
   frames = 0;
   wallMs = 0;
+  slowFrames.length = 0;
 }
 
 // seconds = 这段统计覆盖的真实秒数；framesHint = 这段时间里跑了多少"帧"（压力测试里 = 模拟步数）
@@ -64,8 +76,10 @@ export function perfReport(seconds, framesHint) {
     frames,
     fps,
     frameMs: frames ? +(wallMs / frames).toFixed(2) : null,
-    budget: { pctOf16ms: rows.reduce((a, r) => a + r.msPerFrame, 0) / 16.6 * 100 | 0 },
+    // 分项含父子计时，不能相加；没有真实帧样本时不伪造帧预算占用。
+    budget: { pctOf16ms: rows.find((r) => r.stage === 'frame.total')?.msPerFrame / 16.6 * 100 | 0 },
     rows,
+    slowFrames: slowFrames.map((r) => ({ ...r, stages: { ...r.stages } })),
   };
 }
 

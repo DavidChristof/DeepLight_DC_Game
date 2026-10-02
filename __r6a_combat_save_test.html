@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>R6-A 战斗存档回归</title>
+<body style="margin:16px;background:#101923;color:#e5edf5;font:13px Consolas,monospace">
+<h1>R6-A · 战斗敌人存档与深潜层恢复</h1>
+<p id="status" style="color:#cbb981">正在备份并隔离正式存档…</p>
+<details open><summary>回归明细</summary><pre id="out" style="max-height:280px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere">准备测试…</pre></details>
+<iframe id="game" title="R6-A 隔离游戏实例" style="width:min(960px,96vw);height:min(640px,80vh);border:1px solid #607080"></iframe>
+<script type="module">
+(() => {
+  const officialKeys = ['deep-light-saves-v2', 'deep-light-settings-v1', 'deep-light-ui-v1'];
+  const recoveryKey = '__deep_light_r6a_storage_backup_v1';
+  const out = document.getElementById('out');
+  const status = document.getElementById('status');
+  const frame = document.getElementById('game');
+  const emit = (name, value) => {
+    out.textContent += `\n${name}: ${JSON.stringify(value, null, 2)}`;
+    if (name === 'R6-A browser regression result') {
+      status.textContent = value.ok ? 'R6-A 通过 · 地表/深潜战斗存读、Boss 引用、旧档与通用回归通过 · 正式存档已恢复' : 'R6-A 未通过 · 请展开回归明细';
+      status.style.color = value.ok ? '#91d7ad' : '#ff9c8c';
+    } else if (name === 'R6-A browser regression failed') {
+      status.textContent = 'R6-A 未通过 · 正式存档已尝试恢复，请核对明细';
+      status.style.color = '#ff9c8c';
+    }
+  };
+  const rawOfficial = () => Object.fromEntries(officialKeys.map((key) => [key, localStorage.getItem(key)]));
+  const restoreOfficial = () => {
+    let backup;
+    try { backup = JSON.parse(localStorage.getItem(recoveryKey) || 'null'); } catch (_) { }
+    if (!backup || !backup.keys) return { restored: false, reason: '缺少 R6-A 恢复备份，请保留页面并检查' };
+    for (const key of officialKeys) {
+      const raw = backup.keys[key];
+      raw == null ? localStorage.removeItem(key) : localStorage.setItem(key, raw);
+    }
+    const unchanged = Object.fromEntries(officialKeys.map((key) => [key, localStorage.getItem(key) === backup.keys[key]]));
+    localStorage.removeItem(recoveryKey);
+    return { restored: true, unchanged };
+  };
+  if (localStorage.getItem(recoveryKey)) emit('recovered stale R6-A backup', restoreOfficial());
+  const storageBefore = rawOfficial();
+  try {
+    localStorage.setItem(recoveryKey, JSON.stringify({ version: 1, createdAt: Date.now(), keys: storageBefore }));
+    const settings = storageBefore['deep-light-settings-v1'] ? JSON.parse(storageBefore['deep-light-settings-v1']) : {};
+    localStorage.setItem('deep-light-settings-v1', JSON.stringify({ ...settings, autosave: false }));
+  } catch (error) { emit('setup failed', String(error && error.message || error)); return; }
+  window.addEventListener('beforeunload', () => { if (!out.dataset.done) restoreOfficial(); });
+
+  frame.addEventListener('load', async () => {
+    const game = frame.contentWindow;
+    const results = { ok: false, states: [], surface: null, depth: null, legacyDepth: null, source: null, replay: null, watch: null };
+    try {
+      game.__settings.autosave = false;
+      const check = (label) => {
+        const row = { state: label, check: game.__check() };
+        results.states.push(row);
+        if (!row.check?.ok || row.check.fails?.length) throw new Error(`${label} __check 失败：${JSON.stringify(row.check)}`);
+      };
+      check('menu');
+
+      const clone = (value) => JSON.parse(JSON.stringify(value));
+      const enemyRows = (list) => (list || []).filter((e) => e && e.alive).map((e) => ({
+        kind: e.ekind, x: e.x, y: e.y, hp: e.hp, maxHp: e.maxHp, dmg: e.dmg, fuelDmg: e.fuelDmg,
+        atkT: e.atkT, wob: e.wob, slowT: e.slowT, stuck: e.stuck, summonT: e.summonT,
+        tier: e.tier, windT: e.windT, dashT: e.dashT, dashVX: e.dashVX, dashVY: e.dashVY,
+        fuseT: e.fuseT, auraT: e.auraT, bossPhase: e.bossPhase, dawnA: e.dawnA, leaked: !!e.leaked,
+        bvx: e._bvx || 0, bvy: e._bvy || 0,
+      }));
+      const saveActive = async (layer) => {
+        const state = game.__state;
+        state.enemies.length = 0;
+        state.day = 7; state.t = 360; state.wasTide = true; state.wasDawn = false;
+        state.bossSpawnedThisNight = true; state.spawnT = 80; state.noSpawnT = 0; state.bossTier = 2;
+        const regular = game.__spawn('bud', state.player.x + 3, state.player.y + 2);
+        regular.hp = Math.max(1, regular.maxHp * 0.43); regular.slowT = 0.73; regular.atkT = 1.1; regular.wob = 0.987;
+        const boss = game.__spawn('core', state.player.x + 7, state.player.y + 5);
+        boss.hp = Math.max(1, boss.maxHp * 0.37); boss.tier = 1; boss.summonT = 2.55; boss.bossPhase = 2; boss.atkT = 3.1;
+        state.bossRef = boss;
+        let remoteBefore = null;
+        if (layer === 'surface') {
+          const { ensureSurfaceChunk } = await import('/js/world/chunks.js');
+          const { Enemy } = await import('/js/entities/enemy.js');
+          const remote = ensureSurfaceChunk(state, 1, 0);
+          remote.enemies = [new Enemy('shell', remote.map.w / 2 + 0.5, remote.map.h / 2 + 0.5, 1.234)];
+          remote.enemies[0].hp *= 0.61;
+          remoteBefore = enemyRows(remote.enemies);
+        }
+        const before = enemyRows(state.enemies);
+        const snapshot = game.__saveSlot('s3');
+        if (!snapshot) throw new Error(`${layer} 没有生成存档快照`);
+        const loaded = game.__loadSlot('s3');
+        game.__settings.autosave = false;
+        if (!loaded) throw new Error(`${layer} 生产 s3 槽读档失败`);
+        const after = enemyRows(game.__state.enemies);
+        if (JSON.stringify(before) !== JSON.stringify(after)) throw new Error(`${layer} 敌人状态存读不一致：${JSON.stringify({ before, after })}`);
+        const remoteAfter = enemyRows(game.__state.chunkStore['1,0']?.enemies);
+        if (layer === 'surface' && JSON.stringify(remoteBefore) !== JSON.stringify(remoteAfter))
+          throw new Error(`休眠地表区块的敌人存读不一致：${JSON.stringify({ remoteBefore, remoteAfter })}`);
+        const activeBoss = game.__state.enemies.find((e) => e.def?.boss);
+        if (!activeBoss || game.__state.bossRef !== activeBoss) throw new Error(`${layer} Boss 引用没有指向读回实体`);
+        const expected = layer === 'surface' ? snapshot.chunks.find((c) => c.x === game.__state.chunkX && c.y === game.__state.chunkY)?.enemies : snapshot.activeEnemies;
+        if (!Array.isArray(expected) || expected.length !== 2) throw new Error(`${layer} 敌人快照数量异常：${JSON.stringify(expected)}`);
+        game.__steps(1, 0);
+        const postLoad = { total: game.__state.enemies.length, bosses: game.__state.enemies.filter((e) => e.def?.boss).length,
+          bossSpawnedThisNight: game.__state.bossSpawnedThisNight };
+        if (postLoad.total !== 2 || postLoad.bosses !== 1 || !postLoad.bossSpawnedThisNight)
+          throw new Error(`${layer} 存读后首个模拟步重复生成或清除战斗实体：${JSON.stringify(postLoad)}`);
+        if (layer === 'depth1' && (game.__state.map !== game.__state.layers.depth1.map || game.__state.map.w !== 88 || game.__state.map.h !== 64))
+          throw new Error(`深潜读档后活动地图没有恢复为 depth1：${game.__state.map.w}×${game.__state.map.h}`);
+        return { loaded, layer: game.__state.layerId, count: after.length, bossRef: game.__state.bossRef.ekind,
+          hp: after.map((e) => e.hp), snapshotCount: expected.length, remoteChunkEnemies: remoteAfter.length, postLoad, map: `${game.__state.map.w}x${game.__state.map.h}` };
+      };
+
+      game.__newGame(4242, 'normal'); game.__settings.autosave = false;
+      check('new-game');
+      results.surface = await saveActive('surface');
+      check('surface-combat-save-load');
+      const surfaceRoundtrip = game.__check({ includeKnown: true, roundtrip: true });
+      results.states.push({ state: 'surface-enemy-roundtrip', check: surfaceRoundtrip });
+      if (!surfaceRoundtrip?.ok || surfaceRoundtrip.fails?.length) throw new Error(`地表战斗态 roundtrip 失败：${JSON.stringify(surfaceRoundtrip)}`);
+
+      game.__newGame(4242, 'normal'); game.__settings.autosave = false;
+      const descend = game.__descend();
+      if (descend !== null || game.__state.layerId !== 'depth1') throw new Error(`首潜调试入口未到 depth1：${String(descend)}`);
+      results.depth = await saveActive('depth1');
+      check('depth-combat-save-load');
+      const depthRoundtrip = game.__check({ includeKnown: true, roundtrip: true });
+      results.states.push({ state: 'depth-enemy-roundtrip', check: depthRoundtrip });
+      if (!depthRoundtrip?.ok || depthRoundtrip.fails?.length) throw new Error(`深潜战斗态 roundtrip 失败：${JSON.stringify(depthRoundtrip)}`);
+
+      const legacy = clone(game.__checkpoint());
+      delete legacy.activeEnemies;
+      for (const chunk of legacy.chunks || []) delete chunk.enemies;
+      if (!game.__restoreCheckpoint(legacy)) throw new Error('旧格式深潜快照恢复入口拒绝有效快照');
+      game.__settings.autosave = false;
+      if (game.__state.layerId !== 'depth1' || game.__state.map !== game.__state.layers.depth1.map)
+        throw new Error('没有敌人字段的旧深潜档未能保留正确层与地图绑定');
+      results.legacyDepth = { layer: game.__state.layerId, map: `${game.__state.map.w}x${game.__state.map.h}`, generatedGuards: game.__state.enemies.length };
+
+      const replay = game.__replay({ seed: 4242, diff: 'normal', days: 3, policy: 'home' });
+      game.__watch(true, 20); game.__steps(1200);
+      results.watch = { classes: game.__testLogRaw().length, summary: game.__testLog() };
+      game.__watch(false);
+      const replayCheck = game.__check();
+      results.replay = { ranDays: replay.ranDays, steps: replay.steps, deaths: replay.deaths, kills: replay.kills };
+      results.states.push({ state: 'three-day-replay', check: replayCheck, replay: results.replay });
+      if (!replayCheck?.ok || replayCheck.fails?.length || results.watch.classes !== 0)
+        throw new Error(`三日回放或1200步观察器失败：${JSON.stringify({ replayCheck, watch: results.watch })}`);
+      results.source = await game.__srcCheck();
+      if (!results.source?.ok || results.source.fails?.length) throw new Error(`__srcCheck 失败：${JSON.stringify(results.source)}`);
+
+      const restored = restoreOfficial();
+      results.storageRestored = restored;
+      results.autosaveDisabled = game.__settings.autosave === false;
+      results.ok = results.states.every((row) => row.check?.ok && !row.check.fails?.length)
+        && results.surface.count === 2 && results.depth.count === 2 && results.legacyDepth.layer === 'depth1'
+        && results.source.ok && results.watch.classes === 0 && restored.restored
+        && Object.values(restored.unchanged).every(Boolean) && results.autosaveDisabled;
+      emit('R6-A browser regression result', results);
+      out.dataset.done = 'true'; out.dataset.result = results.ok ? 'passed' : 'failed';
+    } catch (error) {
+      game.__watch(false);
+      results.error = String(error && error.stack || error);
+      results.storageRestored = restoreOfficial();
+      emit('R6-A browser regression failed', results);
+      out.dataset.done = 'true'; out.dataset.result = 'failed';
+    }
+  }, { once: true });
+  frame.src = '/';
+})();
+</script>
+</body>
+</html>
