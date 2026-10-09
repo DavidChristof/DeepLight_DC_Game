@@ -569,7 +569,7 @@ export function updateWorkers(state, dt) {
     if (w.outpostTravel) {
       w.job = 'outpost';
       w.target = null; w.crop = null; w.site = null; w.furnace = null; w.smelter = null; w.path = [];
-      syncTask(w, null, w.outpostTravel.blocked ? '等待活跃区块名额' : '正在前往前哨');
+      syncTask(w, null, w.directive && w.directive.returnHome ? (w.task && w.task.reason || '返营中') : (w.outpostTravel.blocked ? '等待活跃区块名额' : '正在前往前哨'));
       continue;
     }
     w.flash = Math.max(0, w.flash - dt);

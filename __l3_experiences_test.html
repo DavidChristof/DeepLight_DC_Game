@@ -1,0 +1,108 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>L3 真实经历验收</title>
+<body style="background:#101923;color:#e5edf5;font:14px monospace;margin:12px">
+<h1>L3 · 有界真实经历</h1><p>受控开发场景；调度在游戏名册中实际点击。不是从零远征。</p>
+<button id="run">开始验收</button><button id="next" disabled>验证并继续</button><button id="regression" disabled>运行回归</button><button id="end" disabled>恢复并结束</button>
+<button data-size="1280,720">1280×720</button><button data-size="1920,1080">1920×1080</button><button id="layout">检查布局</button>
+<p id="status">等待开始</p><pre id="out" style="white-space:pre-wrap;max-height:180px;overflow:auto"></pre>
+<iframe id="game" title="经历测试游戏" style="width:1280px;max-width:98vw;height:720px"></iframe>
+<script type="module">
+const keys=['deep-light-saves-v2','deep-light-settings-v1','deep-light-ui-v1'], backupKey='__deep_light_l3_backup_v1';
+const frame=document.querySelector('#game'),out=document.querySelector('#out'),status=document.querySelector('#status');
+let active=false,g,s,c,t,save,ui,e,data,inspect,replay,report,id,stage=0;
+const assert=(v,msg)=>{if(!v)throw Error(msg);};
+const show=()=>{out.textContent=JSON.stringify(report,null,2);localStorage.setItem('__deep_light_l3_evidence_v1',out.textContent);};
+function restore(){const b=JSON.parse(localStorage.getItem(backupKey)||'null');if(!b)return null;for(const k of keys)b[k]==null?localStorage.removeItem(k):localStorage.setItem(k,b[k]);const r=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)===b[k]]));if(Object.values(r).every(Boolean))localStorage.removeItem(backupKey);return r;}
+function finish(){if(g?.__settings){g.__settings.autosave=false;g.__quick(true);}active=false;frame.src='about:blank';report.storage=restore();show();}
+function fail(err){report.error=String(err.stack||err);status.textContent='失败 · 正式三键恢复';finish();}
+window.addEventListener('beforeunload',()=>{if(active)restore();});
+const fresh=()=>{g.__newGame(4242,'normal');g.__settings.autosave=false;g.__steps(1);g.__quick(true);s=g.__state;return s.workers[0];};
+const check=(name,opts={})=>{const r=g.__check(opts);report.checks.push({name,...r});assert(r.ok,name+JSON.stringify(r.fails));};
+const test=(name,fn)=>{fn();report.cases.push({name,ok:true});};
+const find=workerId=>t.allCrewWorkers(s).find(w=>w.crew.id===workerId);
+const events=w=>JSON.stringify(w.crew.events);
+const eventCount=(w,kind)=>w.crew.events.filter(v=>v.kind===kind).length;
+const snap=()=>{const r=save.snapshot(s);delete r.at;return r;};
+function load(){g.__saveSlot('s3');assert(g.__loadSlot('s3'),'真实存读失败');g.__settings.autosave=false;g.__quick(true);s=g.__state;}
+function remote(mode='gather'){
+ const w=fresh(),q=c.ensureSurfaceChunk(s,1,0);t.setDirective(w,{outpost:{x:1,y:0},outpostMode:mode},s);c.updateOutpostTravel(s,8);
+ assert(w.chunkX===1,'受控抵达失败');q.buildings=[];q.beacons=[{hp:100,power:6,stock:{}}];q.ecoPatches=[];w.hunger=40;
+ return {w,q};
+}
+document.querySelector('#run').onclick=()=>{if(active)return;if(localStorage.getItem(backupKey))restore();const b=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)]));localStorage.setItem(backupKey,JSON.stringify(b));localStorage.setItem(keys[1],JSON.stringify({...JSON.parse(b[keys[1]]||'{}'),autosave:false}));active=true;report={cases:[],checks:[],trusted:[],layouts:[]};frame.src='/?l3-test='+Date.now();};
+frame.onload=async()=>{if(!active)return;g=frame.contentWindow;try{
+g.__settings.autosave=false;[c,t,save,ui,e,data,inspect,replay]=await g.eval(`Promise.all([import('/js/world/chunks.js'),import('/js/systems/taskBoard.js'),import('/js/core/save.js'),import('/js/ui/panels.js'),import('/js/systems/expedition.js'),import('/js/data/colonists.js'),import('/js/ui/inspect.js'),import('/js/dev/replay.js')])`);
+check('menu');g.__newGame(4242,'normal');g.__settings.autosave=false;check('new');
+test('01 发令不冒充抵达',()=>{const w=fresh();t.setDirective(w,{outpost:{x:1,y:0}},s);assert(eventCount(w,'outpostArrival')===0&&w.chunkX===0,'发令误记');});
+test('02 实际抵达记录地点日期',()=>{const w=fresh();s.day=2;t.setDirective(w,{outpost:{x:1,y:0}},s);c.updateOutpostTravel(s,8);const a=w.crew.events.at(-1);assert(a.kind==='outpostArrival'&&a.day===2&&a.chunkX===1&&a.chunkY===0&&a.command===1,'抵达');});
+test('03 重复迁移更新不重记',()=>{const {w}=remote();const before=events(w);for(let i=0;i<5;i++)c.updateOutpostTravel(s,8);assert(events(w)===before,'重复抵达');});
+test('04 在途存读只记录真实完成',()=>{const w=fresh(),workerId=w.crew.id;t.setDirective(w,{outpost:{x:1,y:0}},s);c.updateOutpostTravel(s,3);const before=events(w);load();const loaded=find(workerId);assert(events(loaded)===before&&loaded.outpostTravel.t===5,'在途加载');c.updateOutpostTravel(s,5);assert(eventCount(loaded,'outpostArrival')===1,'完成');});
+test('05 到达后连续存读不重记',()=>{let {w}=remote();const workerId=w.crew.id,before=events(w);load();w=find(workerId);c.updateOutpostTravel(s,8);load();assert(events(find(workerId))===before,'读档重复');});
+test('06 取消记录原地而非返营',()=>{const {w}=remote();t.setDirective(w,{outpost:null,outpostMode:null},s);assert(w.chunkX===1&&eventCount(w,'outpostCancel')===1&&eventCount(w,'outpostReturn')===0,'取消');});
+test('07 重复取消不新增',()=>{const {w}=remote();t.setDirective(w,{outpost:null},s);const before=events(w);t.setDirective(w,{outpost:null},s);assert(events(w)===before,'重复取消');});
+test('08 实际返营记录并清命令',()=>{const {w}=remote();assert(t.requestReturnHome(s,w)===null,'返营请求');assert(eventCount(w,'outpostReturn')===0,'提前返营');c.updateOutpostTravel(s,8);assert(w.chunkX===0&&!w.directive.outpost&&eventCount(w,'outpostReturn')===1,'实际返营');});
+test('09 返营完成存读与重复更新幂等',()=>{let {w}=remote();t.requestReturnHome(s,w);c.updateOutpostTravel(s,8);const workerId=w.crew.id,before=events(w);load();w=find(workerId);c.updateOutpostTravel(s,8);assert(events(w)===before&&t.requestReturnHome(s,w)==='已在营地','返营幂等');});
+test('10 深潜暂停不记完成',()=>{const {w}=remote();t.requestReturnHome(s,w);s.layerId='depth1';c.updateOutpostTravel(s,20);assert(w.chunkX===1&&eventCount(w,'outpostReturn')===0,'深潜');s.layerId='surface';});
+test('11 同目标重复派驻沿用命令',()=>{const {w}=remote();const before=JSON.stringify(w.crew);t.setDirective(w,{outpost:{x:1,y:0}},s);assert(JSON.stringify(w.crew)===before,'重复命令');});
+test('12 再次派驻可记录新抵达',()=>{const {w}=remote();t.requestReturnHome(s,w);c.updateOutpostTravel(s,8);t.setDirective(w,{outpost:{x:1,y:0}},s);c.updateOutpostTravel(s,8);assert(eventCount(w,'outpostArrival')===2,'新抵达被旧去重吞掉');});
+test('13 实际缺粮且节点不消耗',()=>{const {w,q}=remote();const nodes=Array.from(q.map.nodeAmt);c.updateOutpostSettlement(s,12);const a=w.crew.events.at(-1);assert(a.reason==='food'&&a.text==='缺粮，采掘暂停'&&a.chunkX===1&&q.outpost.lastNeeds.foodShort===1&&JSON.stringify(nodes)===JSON.stringify(Array.from(q.map.nodeAmt)),'缺粮');});
+test('14 同日多次失败只记一条',()=>{const {w}=remote();for(let i=0;i<10;i++)c.updateOutpostSettlement(s,12);assert(eventCount(w,'outpostStop')===1,'同日重复');});
+test('15 跨日真实失败可再记',()=>{const {w}=remote();c.updateOutpostSettlement(s,12);s.day++;c.updateOutpostSettlement(s,12);assert(eventCount(w,'outpostStop')===2&&w.crew.events.at(-1).day===2,'跨日');});
+test('16 实际缺燃料只记录守灯失败',()=>{const {w,q}=remote('guard');w.hunger=80;c.updateOutpostSettlement(s,12);assert(w.crew.events.at(-1).reason==='fuel'&&q.outpost.lastNeeds.fuel===1&&q.outpost.lastNeeds.foodShort===0,'守灯');});
+test('17 静默缺粮不冒充采掘停工',()=>{const {w}=remote('silent');c.updateOutpostSettlement(s,12);assert(w.crew.events.at(-1).text==='缺粮，未能进食','静默');});
+test('18 满仓失败不挖空节点',()=>{const {w,q}=remote();w.hunger=80;const m=q.map,i=m.tiles.findIndex((v,j)=>v===2&&m.nodeAmt[j]>0);assert(i>=0,'缺测试矿');q.ecoPatches=[{x:i%m.w,y:Math.floor(i/m.w)}];q.beacons=[];q.buildings=[{type:'store',x:6,y:36,hp:100,stock:{food:60}}];const before=m.nodeAmt[i];c.updateOutpostSettlement(s,12);assert(w.crew.events.at(-1).reason==='storage'&&m.nodeAmt[i]===before&&q.buildings[0].stock.food===60,'满仓');});
+test('19 无资源节点不编补给短缺',()=>{const {w}=remote();w.hunger=80;c.updateOutpostSettlement(s,12);assert(eventCount(w,'outpostStop')===0,'无节点');});
+test('20 未轮到者不记录失败',()=>{const {w,q}=remote();const second=s.workers[0];s.workers.splice(s.workers.indexOf(second),1);q.workers.push(second);second.chunkX=1;second.chunkY=0;second.hunger=40;t.setDirective(second,{outpost:{x:1,y:0},outpostMode:'gather'},s);w.hunger=80;c.updateOutpostSettlement(s,12);assert(eventCount(second,'outpostStop')===0&&second.hunger===40,'提前break');});
+test('21 无人休眠不新增经历',()=>{const {w}=remote();t.setDirective(w,{outpost:null},s);const before=events(w);c.updateOutpostSettlement(s,120);assert(events(w)===before,'休眠');});
+test('22 读取报告和界面完全只读',()=>{const {w}=remote();c.updateOutpostSettlement(s,12);const before=JSON.stringify(snap());for(let i=0;i<5;i++){g.__crew();g.__outposts();e.crewSupplyOf(s,w);inspect.workerTip(s,w);ui.renderPanelHost(s);}assert(JSON.stringify(snap())===before,'报告写模拟');});
+test('23 停工存读保留非连续去重',()=>{let {w}=remote();c.updateOutpostSettlement(s,12);const workerId=w.crew.id;data.recordCrewEvent(w,'role','测试改岗',1);load();w=find(workerId);const before=events(w);c.updateOutpostSettlement(s,12);assert(events(w)===before,'停工读档');});
+test('24 12条满额仍保留同日去重',()=>{const {w}=remote();c.updateOutpostSettlement(s,12);for(let i=0;i<14;i++)data.recordCrewEvent(w,'role','测试改岗'+i,1);const before=events(w);c.updateOutpostSettlement(s,12);assert(w.crew.events.length===12&&events(w)===before,'12条');});
+test('25 去重索引有界且跨日重置',()=>{const w=fresh();for(let i=0;i<20;i++)data.recordOutpostEvent(w,'outpostStop',{x:i,y:0},1,'food');assert(w.crew.dispatchMemory.stopKeys.length===12,'索引');assert(data.recordOutpostEvent(w,'outpostStop',{x:0,y:0},1,'food')===null,'索引淘汰');assert(data.recordOutpostEvent(w,'outpostStop',{x:20,y:0},2,'food')&&w.crew.dispatchMemory.stopKeys.length===1,'次日重置');});
+test('26 旧档无新字段不补猜经历',()=>{const w=fresh();g.__saveSlot('s3');const slots=JSON.parse(localStorage.getItem(keys[0]));for(const v of slots.s3.workers){delete v.crew.dispatchMemory;v.crew.events=v.crew.events.filter(a=>!a.kind.startsWith('outpost'));}localStorage.setItem(keys[0],JSON.stringify(slots));g.__loadSlot('s3');g.__settings.autosave=false;g.__quick(true);s=g.__state;const loaded=find(w.crew.id);assert(!loaded.crew.dispatchMemory&&!loaded.crew.events.some(a=>a.kind.startsWith('outpost')),'旧档历史');});
+test('27 索引异常字段与原型原因拒绝',()=>{const w=fresh(),m=data.dispatchMemoryOf({command:Infinity,recorded:['x','outpostArrival','outpostArrival'],stopKeys:['x','1,0:food','1,0:food'],stopDay:-1});assert(m.command===0&&m.recorded.length===1&&m.stopKeys.length===1&&m.stopDay===0,'异常索引');assert(!data.recordOutpostEvent(w,'outpostStop',{x:1,y:0},1,'toString'),'原型原因');});
+test('28 详情与名册共用经历来源',()=>{const {w}=remote();c.updateOutpostSettlement(s,12);assert(inspect.workerTip(s,w).notes.includes(data.crewEventLine(w.crew.events.at(-1))),'详情');ui.togglePanel(s,'crew');ui.renderPanelHost(s);const card=g.document.querySelector(`[data-crew-history="${w.crew.id}"]`);assert(card?.textContent.includes(data.crewEventLine(w.crew.events.at(-1))),'名册');});
+// 对照仅去掉本批新增的四处生产记录调用；保留整份原生产算法，不另写简化模拟。
+const moduleUrl=new URL('/js/world/chunks.js',location.href), original=await (await fetch(moduleUrl)).text();
+// L3-P独立渲染对照：把一次群系解析还原为原逐格算法，逐像素比较完整输出。
+const miniUrl=new URL('/js/systems/minimap.js',location.href),miniSource=await(await fetch(miniUrl)).text();
+assert(miniSource.includes('let floorRGB = RGB[T.FLOOR];'),'迷你图优化对照接线失效');
+const miniReference=miniSource.replace(/    \/\/ 群系固有[\s\S]*?(?=    let o = 0;)/,'').replace('if (tiles[i] === T.FLOOR) rgb = floorRGB;',`if (tiles[i] === T.FLOOR && m.biome && BIOMES[m.biome]) {
+          const tint = BIOMES[m.biome].color.match(/[0-9a-f]{2}/gi).map((v) => parseInt(v, 16));
+          rgb = [Math.round((rgb[0] + tint[0]) * 0.5), Math.round((rgb[1] + tint[1]) * 0.5), Math.round((rgb[2] + tint[2]) * 0.5)];
+        }`).replace(/from\s+(['"])(\.\.?\/[^'"]+)\1/g,(_,quote,path)=>'from '+quote+new URL(path,miniUrl).href+quote);
+assert(!miniReference.includes('floorRGB'),'原迷你图算法还原失败');const miniBlob=URL.createObjectURL(new Blob([miniReference],{type:'text/javascript'}));let miniOld,miniNew,mapData,ecoData;
+try{[miniOld,miniNew,mapData,ecoData]=await g.eval(`Promise.all([import(${JSON.stringify(miniBlob)}),import('/js/systems/minimap.js'),import('/js/world/map.js'),import('/js/data/ecology.js')])`);}finally{URL.revokeObjectURL(miniBlob);}
+const miniBiomes=[...Object.keys(ecoData.BIOMES),null,'unknown'];
+for(const biome of miniBiomes){const map=mapData.createMap(24,24);map.biome=biome;map.blight=new Uint8Array(576);const discovered=new Uint8Array(576);for(let i=0;i<576;i++){map.tiles[i]=i%7;map.blight[i]=i%4;discovered[i]=i%3?1:0;}const S={...s,map,discovered,buildings:[],beacons:[],workers:[],enemies:[],player:{x:8,y:8},camera:{x:12,y:12}};const canvases=[g.document.createElement('canvas'),g.document.createElement('canvas')];for(const cv of canvases){cv.width=720;cv.height=480;}miniOld.drawMinimap(canvases[0].getContext('2d'),S);miniNew.drawMinimap(canvases[1].getContext('2d'),S);const pixels=canvases.map(cv=>cv.getContext('2d').getImageData(0,0,720,480).data);assert(pixels[0].every((v,i)=>v===pixels[1][i]),'迷你图像素不一致：'+biome);}
+report.minimapComparison={pixelEqual:true,biomes:miniBiomes,pixelsPerMap:720*480,blightLevels:[0,1,2,3],tileKinds:7,discoveredAndHidden:true};report.cases.push({name:'34 群系颜色解析优化完整像素等价',ok:true});
+const arrivalCall="recordOutpostEvent(w, returning ? 'outpostReturn' : 'outpostArrival', target, state.day);";
+assert(original.includes(arrivalCall),'抵达对照接线失效');
+let reference=original.replace(arrivalCall,'');const stopPattern=/recordOutpostEvent\(w, 'outpostStop', \{ x: chunk.cx, y: chunk.cy \}, state.day, '(food|storage|fuel)', d.outpostMode\);/g;
+assert((reference.match(stopPattern)||[]).length===3,'停工对照必须精确移除三处记录');reference=reference.replace(stopPattern,'').replace(/from\s+(['"])(\.\.?\/[^'"]+)\1/g,(_,quote,path)=>'from '+quote+new URL(path,moduleUrl).href+quote);
+const blobUrl=URL.createObjectURL(new Blob([reference],{type:'text/javascript'}));let baseline;
+try{baseline=await g.eval(`import(${JSON.stringify(blobUrl)})`);}finally{URL.revokeObjectURL(blobUrl);}
+const w0=fresh(),workerId=w0.crew.id,q0=c.ensureSurfaceChunk(s,1,0);q0.buildings=[];q0.beacons=[{hp:100,power:6,stock:{}}];q0.ecoPatches=[];g.__saveSlot('s3');
+function runBranch(engine){assert(g.__loadSlot('s3'),'对照检查点');g.__settings.autosave=false;g.__quick(true);s=g.__state;const w=find(workerId),q=s.chunkStore['1,0'];t.setDirective(w,{outpost:{x:1,y:0},outpostMode:'gather'},s);engine.updateOutpostTravel(s,8);w.hunger=40;for(let i=0;i<3;i++)engine.updateOutpostSettlement(s,12);s.day=2;engine.updateOutpostSettlement(s,12);w.hunger=80;t.setDirective(w,{outpostMode:'guard'},s);engine.updateOutpostSettlement(s,12);t.setDirective(w,{outpostMode:'gather'},s);const m=q.map,index=m.tiles.findIndex((v,j)=>v===2&&m.nodeAmt[j]>0);assert(index>=0,'对照资源');q.ecoPatches=[{x:index%m.w,y:Math.floor(index/m.w)}];q.beacons=[];q.buildings=[{type:'store',x:6,y:36,hp:100,stock:{food:60}}];engine.updateOutpostSettlement(s,12);assert(t.requestReturnHome(s,w)===null,'对照返营');engine.updateOutpostTravel(s,8);return snap();}
+const logged=runBranch(c),unlogged=runBranch(baseline),newKinds=['outpostArrival','outpostReturn','outpostCancel','outpostStop'];
+const loggedEvents=logged.workers.find(w=>w.crew.id===workerId).crew.events,unloggedEvents=unlogged.workers.find(w=>w.crew.id===workerId).crew.events;
+assert(loggedEvents.some(v=>v.kind==='outpostArrival')&&loggedEvents.some(v=>v.kind==='outpostReturn')&&['food','fuel','storage'].every(reason=>loggedEvents.some(v=>v.reason===reason)),'对照没有真实记录负载');assert(!unloggedEvents.some(v=>newKinds.includes(v.kind)),'对照移除失败');
+const simulationSnapshot=raw=>{const copy=JSON.parse(JSON.stringify(raw));for(const w of copy.workers){delete w.crew.dispatchMemory;w.crew.events=w.crew.events.filter(v=>!newKinds.includes(v.kind));}return copy;};
+assert(JSON.stringify(simulationSnapshot(logged))===JSON.stringify(simulationSnapshot(unlogged)),'记录改变完整生产状态');report.productionComparison={equal:true,removedCalls:4,loggedEvents,unloggedEvents,excludedFields:['workers[].crew.dispatchMemory','workers[].crew.events 中四种新增事件'],snapshotFields:Object.keys(logged)};report.cases.push({name:'33 四处记录开关完整生产快照一致',ok:true});
+check('controlled-roundtrip',{roundtrip:true});check('after-load');
+const w=fresh(),q=c.ensureSurfaceChunk(s,1,0);id=w.crew.id;report.workerId=id;report.workerName=w.name;c.bindSurfaceChunk(s,q);s.player.chunkX=1;s.player.chunkY=0;ui.togglePanel(s,'crew');ui.renderPanelHost(s);
+g.document.addEventListener('click',ev=>{const b=ev.target.closest('[data-crew-outpost], [data-crew-history] summary');if(ev.isTrusted&&b){report.trusted.push({id:b.dataset.worker||b.closest('[data-crew-history]')?.dataset.crewHistory,action:b.dataset.crewOutpost||'history'});show();if(stage===3&&b.matches('summary')&&b.closest('[data-crew-history]').dataset.crewHistory===id)g.requestAnimationFrame(()=>{try{const w=find(id),el=b.closest('[data-crew-history]');assert(el.open&&g.document.activeElement===b,'原生展开未获得焦点');const before=events(w);for(let i=0;i<8;i++)ui.renderPanelHost(s);assert(events(w)===before,'浏览写经历');t.setDirective(w,{outpost:{x:1,y:0}},s);c.updateOutpostTravel(s,8);ui.renderPanelHost(s);const next=g.document.querySelector(`[data-crew-history="${id}"]`);report.historyRefresh={open:next.open,focus:g.document.activeElement===next.querySelector('summary'),events:w.crew.events.length};assert(report.historyRefresh.open&&report.historyRefresh.focus,'刷新丢展开或焦点');report.history=[...w.crew.events];show();}catch(err){fail(err);}});}});
+document.querySelector('#next').disabled=false;document.querySelector('#end').disabled=false;status.textContent='请在名册中对第一人点击“派往此区块”';show();
+}catch(err){fail(err);}};
+document.querySelector('#next').onclick=()=>{try{const w=find(id),actions=report.trusted.filter(v=>v.id===id).map(v=>v.action);
+if(stage===0){assert(actions.includes('assign'),'未可信派驻');assert(!eventCount(w,'outpostArrival'),'点击提前抵达');c.updateOutpostTravel(s,8);assert(w.chunkX===1&&eventCount(w,'outpostArrival')===1,'真实抵达');ui.renderPanelHost(s);report.cases.push({name:'29 可信派驻实际抵达',ok:true});status.textContent='请点击第一人的“取消驻守”';}
+else if(stage===1){assert(actions.includes('withdraw'),'未可信取消');assert(w.chunkX===1&&eventCount(w,'outpostCancel')===1,'取消记录');report.cases.push({name:'30 可信取消原地记录',ok:true});status.textContent='请在第一人的“返回营地”按钮按Enter';}
+else if(stage===2){assert(actions.includes('return'),'未可信返营');c.updateOutpostTravel(s,8);assert(w.chunkX===0&&eventCount(w,'outpostReturn')===1,'返营记录');ui.renderPanelHost(s);report.cases.push({name:'31 可信返营实际完成',ok:true});status.textContent='请展开第一人的全部经历';}
+else if(stage===3){assert(actions.includes('history')&&report.historyRefresh?.open&&report.historyRefresh?.focus,'未完成游戏内焦点验证');report.cases.push({name:'32 可信历史展开且保留焦点',ok:true});report.inputVerified=true;document.querySelector('#regression').disabled=false;status.textContent='真实操作通过 · 可检查布局和运行回归';}
+stage++;report.stage=stage;show();}catch(err){fail(err);}};
+document.querySelectorAll('[data-size]').forEach(b=>b.onclick=()=>{const [w,h]=b.dataset.size.split(',');frame.style.width=w+'px';frame.style.height=h+'px';frame.style.maxWidth='none';});
+document.querySelector('#layout').onclick=()=>{try{const d=g.document,p=d.querySelector('#panel'),r=p.getBoundingClientRect();assert(r.left>=0&&r.right<=d.documentElement.clientWidth&&r.top>=0&&r.bottom<=d.documentElement.clientHeight,'面板越界');for(const el of p.querySelectorAll('.crew-history'))assert(el.scrollWidth<=el.clientWidth+1,'经历横向裁切');report.layouts.push({width:d.documentElement.clientWidth,height:d.documentElement.clientHeight});show();}catch(err){fail(err);}};
+document.querySelector('#regression').onclick=async()=>{try{assert(report.inputVerified,'先真实输入');check('input-roundtrip',{roundtrip:true});report.source=await g.__srcCheck();assert(report.source.ok,'源码'+JSON.stringify(report.source.fails));
+const a=g.__replay({seed:4242,diff:'normal',days:3,policy:'home'});g.__settings.autosave=false;s=g.__state;const sa=snap();check('replay');let opened=false;const b=g.__replay({seed:4242,diff:'normal',days:3,policy:(S,api,ctx)=>{replay.POLICIES.home(S,api,ctx);if(!opened){ui.togglePanel(S,'crew');opened=true;}ui.renderPanelHost(S);}});g.__settings.autosave=false;s=g.__state;const sb=snap();check('open-replay');
+const sig=r=>{const z={...r};delete z.ms;delete z.policy;return JSON.stringify(z);};assert(sig(a)===sig(b)&&JSON.stringify(sa)===JSON.stringify(sb),'界面开关改变模拟');assert(a.steps===72001&&a.deaths===0&&a.minHp===54&&a.kills===118,'D323基线');report.replay={...a,panelSignatureEqual:true,snapshotEqual:true};check('replay-roundtrip',{roundtrip:true});g.__watch(true,20);g.__steps(1200);g.__watch(false);report.watch=g.__testLog();assert(report.watch.length===1&&report.watch[0].includes('0 类'),'watch');status.textContent='专项与回归通过 · 请恢复结束';show();
+}catch(err){fail(err);}};
+document.querySelector('#end').onclick=()=>{finish();status.textContent='已结束 · 正式三键已恢复';};
+</script></body></html>

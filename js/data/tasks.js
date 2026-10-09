@@ -3,6 +3,8 @@
 // 任务只是“意图与解释”的稳定投影；它不拥有寻路、不直接执行生产，也不改变旧 AI 的选择顺序。
 // 所有任务标签、优先级和可抢占规则集中在这里，避免 UI / NPC 各写一套名字。
 
+import { EXPEDITION } from './expedition.js';
+
 export const TASKS = Object.freeze({
   VERSION: 1,
   MAX_ACTIVE_PER_WORKER: 1,
@@ -44,7 +46,7 @@ export const DIRECTIVES = Object.freeze({
   CARE: Object.freeze({ neutral: '常规', medical: '治疗优先', rescue: '救援优先', guard: '仅守灯' }),
   CARE_PRIORITY: Object.freeze({ medical: 0, neutral: 1, rescue: 2, guard: 3 }),
   // N6a：前哨是可解释的驻守意图；本步只记录，不瞬移、不跨区块结算。
-  OUTPOST: Object.freeze({ guard: '守灯', gather: '采掘', silent: '静默撤离' }),
+  OUTPOST: Object.freeze({ guard: '守灯', gather: '采掘', silent: '静默驻守' }),
   VERSION: 1,
 });
 
@@ -75,6 +77,7 @@ export function directiveFromSave(raw) {
     area,
     outpost,
     outpostMode,
+    returnHome: r.returnHome === true && !!outpost && outpost.x === EXPEDITION.HOME_CHUNK.x && outpost.y === EXPEDITION.HOME_CHUNK.y,
     noNight: !!r.noNight,
     rescue,
     care,

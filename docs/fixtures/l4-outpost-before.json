@@ -1,0 +1,123 @@
+{
+  "scope": "controlled fresh-save/bind/legacy-alert diagnosis, not gameplay acceptance",
+  "menu": {
+    "ok": true,
+    "ran": 86,
+    "ms": 94.7,
+    "fails": [],
+    "knownCount": 0,
+    "baselineSize": 0
+  },
+  "codeFingerprint": "45e27812",
+  "freshRoundtrip": {
+    "beforeHash": "5bb3572f",
+    "afterHash": "27ecd566",
+    "differences": [
+      {
+        "path": ".chunks.0.outpost",
+        "before": null,
+        "after": {
+          "alerts": [],
+          "frontDebt": 0,
+          "lastEcology": {},
+          "lastNeeds": {},
+          "lastReason": "等待有人驻守",
+          "lastYield": {},
+          "lightPressure": 0,
+          "nextT": 12,
+          "ticks": 0
+        }
+      }
+    ]
+  },
+  "noAlertBind": {
+    "beforeDefined": false,
+    "before": null,
+    "after": {
+      "nextT": 12,
+      "ticks": 0,
+      "lastYield": {},
+      "lastNeeds": {},
+      "lightPressure": 0,
+      "frontDebt": 0,
+      "lastEcology": {},
+      "alerts": [],
+      "lastReason": "等待有人驻守"
+    }
+  },
+  "legacyAlert": {
+    "controlledFields": [
+      "chunk.outpost.alerts (one old-format blight alert)"
+    ],
+    "workerBefore": {
+      "id": "crew-c630s4",
+      "hp": 90,
+      "downed": false
+    },
+    "workerAfter": {
+      "id": "crew-c630s4",
+      "hp": 0,
+      "downed": true
+    },
+    "first": {
+      "alerts": [
+        {
+          "id": "l4-legacy-diagnostic",
+          "kind": "blight",
+          "day": 1,
+          "t": 0,
+          "workerId": "crew-c630s4",
+          "workerName": "",
+          "message": "受控旧告警",
+          "status": "resolved",
+          "rescuePending": false
+        }
+      ],
+      "nextT": 12,
+      "ticks": 0,
+      "lastYield": {},
+      "lastNeeds": {},
+      "lightPressure": 0,
+      "frontDebt": 0,
+      "lastEcology": {},
+      "lastReason": "等待有人驻守"
+    },
+    "second": {
+      "alerts": [
+        {
+          "id": "l4-legacy-diagnostic",
+          "kind": "blight",
+          "day": 1,
+          "t": 0,
+          "workerId": "crew-c630s4",
+          "workerName": "",
+          "message": "受控旧告警",
+          "status": "resolved",
+          "rescuePending": false
+        }
+      ],
+      "nextT": 12,
+      "ticks": 0,
+      "lastYield": {},
+      "lastNeeds": {},
+      "lightPressure": 0,
+      "frontDebt": 0,
+      "lastEcology": {},
+      "lastReason": "等待有人驻守"
+    },
+    "secondBindUnchanged": true
+  },
+  "after": {
+    "ok": true,
+    "ran": 86,
+    "ms": 82.7,
+    "fails": [],
+    "knownCount": 0,
+    "baselineSize": 0
+  },
+  "storage": {
+    "deep-light-saves-v2": true,
+    "deep-light-settings-v1": true,
+    "deep-light-ui-v1": true
+  }
+}

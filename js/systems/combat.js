@@ -10,6 +10,8 @@ import { unmount } from './carry.js';                                   // 阵�
 import { PULSE, REWARD, TYPES, armorMul } from '../data/combat.js';
 import { SURVIVAL } from '../data/survival.js';
 import { revealFirstResonanceSite } from './resonance.js';
+import { resolvePlayerDeath } from './survival.js';
+import { ENDGAME } from '../data/endgame.js';
 
 // 数值统一从 data/combat.js 读（W14-A 第 0 步：战斗数值中央化）——本文件不再写魔数
 const RANGE = PULSE.RANGE;
@@ -110,6 +112,7 @@ export function updatePlayerSkill(state, dt) {
 // 死亡结算：退回营地、天快亮、蚀兽退散、燃料减半
 export function handleDeath(state) {
   if (!state.playerDead) return;
+  resolvePlayerDeath(state); // 中断挑战和记溃退必须先于复归、清场与跳潮。
   // 第 3 步：先把玩家背包与手持工具封存到死亡点，避免死亡变成免费传送。
   const packStock = Object.assign({}, (state.pack && state.pack.stock) || {});
   const held = state.equip && state.equip.held || null;
@@ -140,7 +143,10 @@ export function handleDeath(state) {
   //   · 白天死亡（深渊被岩浆烧死）→ 实测最多白丢 290s 白天
   //   · 黎明死亡（t>390）→ 时间倒流，一天就不再是 400s
   const inNightBattle = state.t >= DUSK_START && state.t < TIDE_END;
+  if (inNightBattle && !(state.resonance?.trial?.status === 'failed' && state.resonance.trial.activeDay === state.day)) {
+    state.banner = { title: '潮夜溃退', sub: '整理补给，再守下一夜', t: 0, life: ENDGAME.NIGHT_OUTCOME.BANNER_LIFE };
+  }
   if (inNightBattle) state.t = DAWN_T;             // 直接跳到黎明，蚀潮结束
   withdrawFraction(state, 'fuel', SURVIVAL.DEATH.FUEL_LOSS);            // 燃料减半（从最近的容器里扣）
-  state.floaties.push({ x: cx + 1, y: cy - 0.8, txt: hasPack ? '你被冲回营地…遗落包留在原地' : '你被冲回营地…燃料减半', color: '#ffb3a0', t: 0, life: 1.4 });
+  state.floaties.push({ x: cx + 1, y: cy - 0.8, txt: hasPack ? '在本区复归 · 遗落包留在原地' : '在本区复归 · 燃料减半', color: '#ffb3a0', t: 0, life: 1.4 });
 }

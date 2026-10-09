@@ -19,6 +19,8 @@ import { isTide, DAWN_T, TIDE_START } from '../core/time.js';
 import { RETREAT } from '../data/combat.js';
 import { BUILD } from '../data/buildings.js';
 import { sfx } from '../core/audio.js';
+import { interruptStandardTrial } from './resonance.js';
+import { recordNightOutcome } from './nightOutcome.js';
 
 // 一盏"可封"的灯 = 有 power（真的在发光）、不是诱饵灯（它不提供视野）、还有油
 function litLamps(state) {
@@ -79,6 +81,8 @@ export function updateSeal(state, dt, holding) {
 // 真正执行：把灯油倒掉、全队受挫、潮提前退去。成功返回 true。
 export function sealNow(state) {
   if (sealError(state)) return false;
+  interruptStandardTrial(state, '封灯撤退');
+  recordNightOutcome(state, 'seal');
   const lamps = litLamps(state);
   let oil = 0;
   for (const b of lamps) { oil += b.fuel || 0; b.fuel = 0; }          // ① 灯油全部倒掉（灯当场灭）

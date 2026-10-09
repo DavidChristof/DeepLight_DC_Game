@@ -1,0 +1,121 @@
+{
+  "file": "docs/fixtures/l4-ledger-full.deflate.b64",
+  "ok": true,
+  "fails": [],
+  "scope": "one current three-day supply continuation plus observation-off control",
+  "source": "45e27812",
+  "startHash": "5479c839",
+  "endHash": "6be3c1c0",
+  "steps": 63792,
+  "rngCalls": 1006,
+  "events": 432,
+  "counts": {
+    "localMine": 113,
+    "localCharge": 113,
+    "construction": 2,
+    "remoteMine": 39,
+    "remoteCharge": 39,
+    "fireTransfer": 24,
+    "recipe": 42,
+    "transfer": 4,
+    "burn": 43,
+    "refuel": 4,
+    "eat": 4,
+    "deathMove": 2,
+    "deathPenalty": 3
+  },
+  "totals": {
+    "localMine": {
+      "vine": 64,
+      "ore": 49
+    },
+    "localCharge": {
+      "2": -49,
+      "3": -64
+    },
+    "construction": {
+      "ore": -2,
+      "vine": -3
+    },
+    "remoteMine": {
+      "vine": 39
+    },
+    "remoteCharge": {
+      "3": -39
+    },
+    "fireTransfer": {
+      "vine": 0
+    },
+    "recipe": {
+      "ore": -21,
+      "fuel": 42
+    },
+    "transfer": {
+      "fuel": 0
+    },
+    "burn": {
+      "vine": -12,
+      "fuel": -31
+    },
+    "refuel": {
+      "fuel": 0
+    },
+    "eat": {
+      "food": -4
+    },
+    "deathMove": {
+      "pick": 0
+    },
+    "deathPenalty": {
+      "fuel": -25
+    }
+  },
+  "recipeBatches": 21,
+  "penalties": [
+    {
+      "event": 330,
+      "day": 1,
+      "chunk": "0,0",
+      "available": 20,
+      "paid": 10,
+      "expected": 10
+    },
+    {
+      "event": 427,
+      "day": 2,
+      "chunk": "0,0",
+      "available": 20,
+      "paid": 10,
+      "expected": 10
+    },
+    {
+      "event": 431,
+      "day": 3,
+      "chunk": "0,0",
+      "available": 10,
+      "paid": 5,
+      "expected": 5
+    }
+  ],
+  "unknown": [],
+  "initialTotals": {
+    "ore": 175,
+    "vine": 124,
+    "food": 4,
+    "fuel": 31,
+    "pick": 2
+  },
+  "finalTotals": {
+    "ore": 201,
+    "vine": 212,
+    "fuel": 17,
+    "pick": 2
+  },
+  "notOriginal83InputLedger": true,
+  "notAllThreeStrategiesEventJournal": true,
+  "formalKeysUnchanged": {
+    "deep-light-saves-v2": true,
+    "deep-light-settings-v1": true,
+    "deep-light-ui-v1": true
+  }
+}

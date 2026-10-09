@@ -13,6 +13,7 @@ import { ECOLOGY } from '../data/ecology.js';
 import { lockNightChallenge } from './ecoPressure.js';
 import { lockStandardTrialAtTide, settleStandardTrialAtDawn, updateStandardTrial } from './resonance.js';
 import { ensureNightSpawnBudget, recordNightSpawn, remainingNightSpawnBudget, screenEnemyRoom } from './spawnBudget.js';
+import { recordNightOutcome } from './nightOutcome.js';
 
 export function updateWaves(state, dt) {
   if (state.noSpawnT > 0) state.noSpawnT -= dt;
@@ -29,6 +30,7 @@ export function updateWaves(state, dt) {
   // 白天一睁眼世界就干净了。现在改成一段看得见的消解：按最大生命的百分比持续扣血
   // （= 强制处决，你杀了它也一样死），脆的先化、硬的撑到最后 —— 曲线由 dawnFade 决定。
   if (inDawn) {
+    if (state.wasTide && state.layerId === 'surface' && !state.playerDead && state.playerHp > 0) recordNightOutcome(state, 'dawn');
     settleStandardTrialAtDawn(state);
     if (!state.wasDawn) {
       state.wasDawn = true;

@@ -904,7 +904,7 @@ canvas#game {
 .wbar i { display: block; height: 100%; }
 
 /* 拓荒队调度面板（N2） */
-#panel.crew-wide { min-width: 430px; max-width: 560px; }
+#panel.crew-wide { width: min(560px, calc(100vw - 28px)); min-width: 0; max-width: 560px; top: 64px; bottom: 112px; }
 .crewcard { margin: 0 0 9px; padding: 8px 9px; border: 1px solid rgba(160, 190, 230, 0.18); background: rgba(12, 20, 32, 0.42); border-radius: 4px; }
 .crewcard:hover { border-color: rgba(160, 210, 255, 0.42); background: rgba(24, 38, 58, 0.58); }
 .crewcard.dead { opacity: .58; }
@@ -961,3 +961,31 @@ canvas#game {
 
 .cx-d b { color: #ffe9a8; }
 .cx-d.dim { color: #6d7787; }
+/* W21-P P2：复用夜行面板，备战卡不覆盖世界视野。 */
+.prep-entry { font: inherit; cursor: pointer; pointer-events: auto; background: transparent; border: 1px solid #526272; border-radius: 5px; }
+.prep-entry:hover, .prep-entry:focus-visible { background: #26374a; outline: 1px solid #d9bc80; }
+.prep-threat { color: #f0d2a4; font-size: 17px; margin: 8px 0; }
+.prep-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+[data-preparation] button, [data-prep-panel] { cursor: pointer; padding: 5px 8px; background: #263444; color: #dfe7ef; border: 1px solid #65717e; border-radius: 4px; }
+[data-preparation] button:focus-visible, [data-prep-panel]:focus-visible { outline: 2px solid #e4bc77; }
+.prep-device { margin: 8px 0; padding: 8px; border: 1px solid #465868; border-radius: 5px; background: #192530; }
+.prep-device.warn { border-color: #bd8053; }
+.prep-device-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; }
+.prep-device small, .prep-threat small { font-size: 12px; color: #aab6c2; }
+#panel.preparation-wide { width: min(480px, calc(100vw - 28px)); top: 64px; bottom: 72px; }
+.prep-devices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.prep-devices .prep-device { margin: 0 0 6px; }
+@media (max-width: 620px) { .prep-devices { grid-template-columns: 1fr; } }
+#recovery-note { position: absolute; top: 84px; left: 12px; max-width: min(580px, calc(100% - 24px)); color: #e6cfa9; font-size: 12px; pointer-events: auto; }
+#recovery-note button { background: #263444; color: #e5edf5; border: 1px solid #65717e; border-radius: 4px; cursor: pointer; margin-left: 6px; }
+.crew-supply { padding: 10px; margin-bottom: 10px; background: #192530; border: 1px solid #596b7b; border-radius: 6px; }
+.crew-supply-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 14px; }
+.crew-supply-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 4px 0; min-width: 0; font-size: 12px; }
+.crew-supply-row span { color: #aab6c2; }
+.crew-supply-row b { font-weight: 500; color: #e7dfce; overflow-wrap: anywhere; }
+.crew-supply-devices { border-top: 1px solid #394b59; margin-top: 8px; }
+.crew-history { color: #adbdcc; font-size: 11px; padding: 5px 0; }
+.crew-history summary { cursor: pointer; color: #dbc49c; }
+.crew-history > div { padding: 4px 0; overflow-wrap: anywhere; }
+[data-crew-select][aria-pressed="true"] { border-color: #ddb674; color: #f4d39a; }
+@media (max-width: 620px) { .crew-supply-grid { grid-template-columns: 1fr; } }

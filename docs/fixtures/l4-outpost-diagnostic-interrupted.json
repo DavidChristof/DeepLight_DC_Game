@@ -1,0 +1,39 @@
+{
+  "scope": "controlled fresh-save/bind/legacy-alert diagnosis, not gameplay acceptance",
+  "menu": {
+    "ok": true,
+    "ran": 86,
+    "ms": 115,
+    "fails": [],
+    "knownCount": 0,
+    "baselineSize": 0
+  },
+  "codeFingerprint": "45e27812",
+  "freshRoundtrip": {
+    "beforeHash": "a3bd7815",
+    "afterHash": "a171d7bc",
+    "differences": [
+      {
+        "path": ".chunks.0.outpost",
+        "before": null,
+        "after": {
+          "alerts": [],
+          "frontDebt": 0,
+          "lastEcology": {},
+          "lastNeeds": {},
+          "lastReason": "等待有人驻守",
+          "lastYield": {},
+          "lightPressure": 0,
+          "nextT": 12,
+          "ticks": 0
+        }
+      }
+    ]
+  },
+  "error": "SyntaxError: \"undefined\" is not valid JSON\n    at JSON.parse (<anonymous>)\n    at copy (http://localhost:8000/__l4_outpost_roundtrip_test.html:11:20)\n    at frame.onload (http://localhost:8000/__l4_outpost_roundtrip_test.html:39:62)",
+  "storage": {
+    "deep-light-saves-v2": true,
+    "deep-light-settings-v1": true,
+    "deep-light-ui-v1": true
+  }
+}

@@ -10,6 +10,10 @@ import { CARRY } from '../data/combat.js';
 import { CAMP_CAP, PACK_CAP } from '../data/storage.js';
 import { SURVIVAL } from '../data/survival.js';
 import { directiveFromSave } from '../data/tasks.js';
+import { ECOLOGY } from '../data/ecology.js';
+import { roleOf, personalityOf } from '../data/colonists.js';
+import { activeSurfaceChunks, stationedOutpostWorkers, remoteFoodNeed } from '../world/chunks.js';
+import { deviceStatusOf } from './preparation.js';
 
 const keyOf = (state) => `${state.chunkX | 0},${state.chunkY | 0}`;
 const aliveBeacon = (b) => !!b && (b.hp == null || b.hp > 0);
@@ -31,6 +35,12 @@ export function localOutpostOf(state) {
   const chunk = currentChunkOf(state);
   const beacons = chunk ? (chunk.beacons || []) : (state && state.beacons || []);
   const buildings = chunk ? (chunk.buildings || []) : (state && state.buildings || []);
+  return { ...chunkSupplyOf({ beacons, buildings }), pack: packSupplyOf(state) };
+}
+
+export function chunkSupplyOf(chunk) {
+  const beacons = chunk && chunk.beacons || [];
+  const buildings = chunk && chunk.buildings || [];
   const containers = [];
   for (const b of beacons) if (aliveBeacon(b)) containers.push({ ref: b, cap: CAMP_CAP, kind: 'camp' });
   for (const b of buildings) {
@@ -55,11 +65,6 @@ export function localOutpostOf(state) {
     lights.push({ kind: b.type, power: nonNegative(d.power), active: b.fuel > 0 && !b.off });
   }
   const lit = lights.filter((x) => x.active);
-  const pack = state && state.pack;
-  const packStock = stockOf(pack);
-  const lost = state && state.carried ? CARRY.PACK_SLOTS : 0;
-  const packCap = Math.max(0, (pack && Number.isFinite(pack.cap) ? pack.cap : PACK_CAP) - lost);
-  const packUsed = Object.values(packStock).reduce((sum, n) => sum + nonNegative(n), 0);
   return {
     containers: containers.length,
     used,
@@ -71,7 +76,54 @@ export function localOutpostOf(state) {
     lights: { total: lights.length, lit: lit.length, power: lit.reduce((sum, x) => sum + x.power, 0) },
     food: nonNegative(stock.food),
     fuel: nonNegative(stock.fuel),
-    pack: { used: packUsed, cap: packCap, free: Math.max(0, packCap - packUsed), food: nonNegative(packStock.food), fuel: nonNegative(packStock.fuel) },
+  };
+}
+
+function packSupplyOf(state) {
+  const pack = state && state.pack, stock = stockOf(pack);
+  const cap = Math.max(0, (pack && Number.isFinite(pack.cap) ? pack.cap : PACK_CAP) - (state && state.carried ? CARRY.PACK_SLOTS : 0));
+  const used = Object.values(stock).reduce((sum, n) => sum + nonNegative(n), 0);
+  return { used, cap, free: Math.max(0, cap - used), food: nonNegative(stock.food), fuel: nonNegative(stock.fuel) };
+}
+
+// L2：已有目标的只读投影。不要调用ensureSurfaceChunk/ensureOutpostState。
+export function crewSupplyOf(state, worker) {
+  if (!state || !worker) return null;
+  const d = directiveFromSave(worker.directive);
+  const actual = { x: worker.chunkX | 0, y: worker.chunkY | 0 };
+  const target = d.outpost ? { ...d.outpost } : actual;
+  const key = `${target.x},${target.y}`;
+  const chunk = state.chunkStore && state.chunkStore[key];
+  const local = state.layerId === 'surface' && key === keyOf(state);
+  const eligible = chunk ? stationedOutpostWorkers(chunk) : [];
+  const active = !!chunk && state.layerId === 'surface' && activeSurfaceChunks(state).includes(chunk);
+  const remoteRunning = active && !local && eligible.length > 0;
+  const candidates = eligible.slice(0, ECOLOGY.OUTPOST_MAX_WORKERS_PER_TICK);
+  const supply = chunk ? chunkSupplyOf(chunk) : null;
+  const buildings = chunk && chunk.buildings || [];
+  const caches = buildings.filter(b => b.type === 'cache' && !b.site && b.fuel > 0);
+  const food = candidates.map(w => {
+    const need = remoteFoodNeed(w);
+    return { id: w.crew && w.crew.id || w.name, name: w.name,
+      mode: directiveFromSave(w.directive).outpostMode, current: Number.isFinite(w.hunger) ? w.hunger : SURVIVAL.WORKER.START_HUNGER,
+      hunger: need.hunger, needsFood: need.needsFood, rate: need.rate };
+  });
+  return { id: worker.crew && worker.crew.id || worker.name, name: worker.name,
+    role: roleOf(worker).name, roleNote: roleOf(worker).note,
+    personality: personalityOf(worker).name, personalityNote: personalityOf(worker).note,
+    actual, target, hasCommand: !!d.outpost, mode: d.outpostMode,
+    task: { ...(worker.task || {}) }, returnHome: d.returnHome,
+    travel: worker.outpostTravel ? { ...worker.outpostTravel } : null,
+    known: !!chunk, local, active, running: remoteRunning,
+    pausedReason: !chunk ? '尚未探索' : state.layerId !== 'surface' ? '深潜期间暂停' : local ? '本区按实际行动' : !active ? '区块已暂停' : !eligible.length ? '等待有人驻守' : '',
+    supply, devices: buildings.filter(b => BUILD[b.type]?.burnSec).map(b => deviceStatusOf(state, b, supply.stock, caches)),
+    campLights: chunk ? (chunk.beacons || []).filter(aliveBeacon).length : 0,
+    nextSec: remoteRunning ? nonNegative(chunk.outpost?.nextT ?? ECOLOGY.OUTPOST_SETTLE_SEC) : null,
+    food: { candidates: food, eligible: eligible.length, skipped: Math.max(0, eligible.length - candidates.length),
+      conditionalMax: food.filter(w => w.needsFood).length, threshold: SURVIVAL.WORKER.EAT_AT, conditional: true },
+    guardFuelMax: candidates.filter(w => directiveFromSave(w.directive).outpostMode === 'guard').length * ECOLOGY.OUTPOST_GUARD_FUEL_PER_TICK,
+    lastReason: chunk?.outpost?.lastReason || '', lastNeeds: { ...(chunk?.outpost?.lastNeeds || {}) },
+    alerts: (chunk?.outpost?.alerts || []).map(a => ({ ...a })),
   };
 }
 

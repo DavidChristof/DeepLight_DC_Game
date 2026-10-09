@@ -1,0 +1,111 @@
+{
+  "layouts": [
+    {
+      "width": 1280,
+      "height": 720,
+      "panel": {
+        "left": 426.66668701171875,
+        "top": 184,
+        "right": 988.0000610351562,
+        "bottom": 488
+      },
+      "histories": 2,
+      "eventsEach": 12,
+      "scrollTop": 1190.6666259765625,
+      "scrollHeight": 1463,
+      "clientHeight": 273,
+      "focus": "采掘",
+      "focusPreserved": true,
+      "scrollPreserved": true,
+      "noHorizontalClip": true,
+      "inputs": 6
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "panel": {
+        "left": 1106.666748046875,
+        "top": 124,
+        "right": 1668.0001220703125,
+        "bottom": 908
+      },
+      "histories": 2,
+      "eventsEach": 12,
+      "scrollTop": 710.6666870117188,
+      "scrollHeight": 1463,
+      "clientHeight": 753,
+      "focus": "采掘",
+      "focusPreserved": true,
+      "scrollPreserved": true,
+      "noHorizontalClip": true,
+      "inputs": 9
+    }
+  ],
+  "inputs": [
+    {
+      "type": "click",
+      "text": "查看补给",
+      "select": "crew-c630s4"
+    },
+    {
+      "type": "click",
+      "text": "查看全部经历 · 12/12",
+      "history": "crew-d01tv1"
+    },
+    {
+      "type": "click",
+      "text": "查看全部经历 · 12/12",
+      "history": "crew-c630s4"
+    },
+    {
+      "type": "key",
+      "key": "End",
+      "text": "查看全部经历 · 12/12"
+    },
+    {
+      "type": "key",
+      "key": "Tab",
+      "text": "查看全部经历 · 12/12"
+    },
+    {
+      "type": "key",
+      "key": "F8",
+      "text": "采掘"
+    },
+    {
+      "type": "key",
+      "key": "End",
+      "text": "查看全部经历 · 12/12"
+    },
+    {
+      "type": "key",
+      "key": "Tab",
+      "text": "查看全部经历 · 12/12"
+    },
+    {
+      "type": "key",
+      "key": "F8",
+      "text": "采掘"
+    },
+    {
+      "type": "key",
+      "key": "Home",
+      "text": "查看全部经历 · 12/12"
+    },
+    {
+      "type": "key",
+      "key": "Home",
+      "text": "查看全部经历 · 12/12"
+    }
+  ],
+  "scope": "controlled UI fixture; seeded 12-event histories are not natural expedition evidence",
+  "workerIds": [
+    "crew-d01tv1",
+    "crew-c630s4"
+  ],
+  "storage": {
+    "deep-light-saves-v2": true,
+    "deep-light-settings-v1": true,
+    "deep-light-ui-v1": true
+  }
+}

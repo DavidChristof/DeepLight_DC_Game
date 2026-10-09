@@ -1,0 +1,997 @@
+{
+  "started": "2026-10-08T09:29:53.152Z",
+  "mode": "proofRecheck",
+  "recoveredStorage": null,
+  "source": {
+    "seed": 4242,
+    "diff": "normal",
+    "resourceInjection": false,
+    "teleport": false,
+    "syntheticGameInput": false,
+    "codeFingerprint": "45e27812",
+    "sourceFiles": 95,
+    "version": "0.8.0-alpha.1"
+  },
+  "inputs": [],
+  "checks": [
+    {
+      "label": "menu",
+      "ok": true,
+      "ran": 86,
+      "ms": 78.6,
+      "fails": [],
+      "knownCount": 0,
+      "baselineSize": 0
+    },
+    {
+      "label": "restored",
+      "ok": true,
+      "ran": 86,
+      "ms": 71.5,
+      "fails": [],
+      "knownCount": 0,
+      "baselineSize": 0
+    },
+    {
+      "label": "roundtrip",
+      "ok": true,
+      "ran": 86,
+      "ms": 66.4,
+      "fails": [],
+      "knownCount": 0,
+      "baselineSize": 0
+    }
+  ],
+  "checkpoints": [],
+  "recheckSource": {
+    "proofId": "l4-independent-input-2026-10-08T08:52:22.085Z",
+    "oldFingerprint": "4b01428d",
+    "originalHash": "a28554f",
+    "reconstructedHash": "a6bfd407",
+    "semanticReconstructionOnly": true,
+    "restoredOnly": [
+      {
+        "path": ".firstSlice.startedT",
+        "before": 0,
+        "after": 110.41666666666168
+      },
+      {
+        "path": ".resonance.sites.first.trial",
+        "before": null,
+        "after": {
+          "siteId": "first",
+          "status": "idle",
+          "targetDay": null,
+          "activeDay": null,
+          "attempts": 0,
+          "result": null,
+          "failureReason": null,
+          "themeId": null,
+          "lightPressure": null,
+          "challengeMul": null,
+          "completedDay": null
+        }
+      }
+    ],
+    "notNewInputRun": true,
+    "restoredExact": true
+  },
+  "current": {
+    "day": 4,
+    "t": 20.017,
+    "chunk": [
+      0,
+      0
+    ],
+    "player": {
+      "x": 49,
+      "y": 36,
+      "hp": 54,
+      "hunger": 72.90683333327352
+    },
+    "res": {
+      "ore": 0,
+      "vine": 47,
+      "fuel": 58,
+      "food": 45,
+      "stone": 0,
+      "coal": 0,
+      "data": 0,
+      "core": 0,
+      "night": 0,
+      "pick": 0
+    },
+    "pack": {
+      "fuel": 23,
+      "ore": 0,
+      "vine": 1
+    },
+    "buildSelection": null,
+    "paused": true,
+    "interact": {
+      "kind": "payload"
+    },
+    "nodes": [
+      {
+        "x": 40,
+        "y": 57,
+        "tile": 4,
+        "amount": 3,
+        "distance": 23.12,
+        "point": {
+          "cx": 499,
+          "cy": 1092,
+          "inside": false
+        }
+      },
+      {
+        "x": 71,
+        "y": 42,
+        "tile": 4,
+        "amount": 3,
+        "distance": 23.42,
+        "point": {
+          "cx": 995,
+          "cy": 852,
+          "inside": false
+        }
+      }
+    ],
+    "clear": [
+      {
+        "x": 47,
+        "y": 34,
+        "point": {
+          "cx": 611,
+          "cy": 724,
+          "inside": true
+        }
+      },
+      {
+        "x": 48,
+        "y": 34,
+        "point": {
+          "cx": 627,
+          "cy": 724,
+          "inside": true
+        }
+      },
+      {
+        "x": 49,
+        "y": 34,
+        "point": {
+          "cx": 643,
+          "cy": 724,
+          "inside": true
+        }
+      },
+      {
+        "x": 50,
+        "y": 34,
+        "point": {
+          "cx": 659,
+          "cy": 724,
+          "inside": true
+        }
+      },
+      {
+        "x": 51,
+        "y": 34,
+        "point": {
+          "cx": 675,
+          "cy": 724,
+          "inside": true
+        }
+      },
+      {
+        "x": 47,
+        "y": 35,
+        "point": {
+          "cx": 611,
+          "cy": 740,
+          "inside": true
+        }
+      },
+      {
+        "x": 48,
+        "y": 35,
+        "point": {
+          "cx": 627,
+          "cy": 740,
+          "inside": true
+        }
+      },
+      {
+        "x": 49,
+        "y": 35,
+        "point": {
+          "cx": 643,
+          "cy": 740,
+          "inside": true
+        }
+      },
+      {
+        "x": 50,
+        "y": 35,
+        "point": {
+          "cx": 659,
+          "cy": 740,
+          "inside": true
+        }
+      },
+      {
+        "x": 51,
+        "y": 35,
+        "point": {
+          "cx": 675,
+          "cy": 740,
+          "inside": true
+        }
+      },
+      {
+        "x": 49,
+        "y": 36,
+        "point": {
+          "cx": 643,
+          "cy": 756,
+          "inside": true
+        }
+      },
+      {
+        "x": 50,
+        "y": 36,
+        "point": {
+          "cx": 659,
+          "cy": 756,
+          "inside": true
+        }
+      },
+      {
+        "x": 51,
+        "y": 36,
+        "point": {
+          "cx": 675,
+          "cy": 756,
+          "inside": true
+        }
+      },
+      {
+        "x": 47,
+        "y": 37,
+        "point": {
+          "cx": 611,
+          "cy": 772,
+          "inside": true
+        }
+      },
+      {
+        "x": 48,
+        "y": 37,
+        "point": {
+          "cx": 627,
+          "cy": 772,
+          "inside": true
+        }
+      },
+      {
+        "x": 49,
+        "y": 37,
+        "point": {
+          "cx": 643,
+          "cy": 772,
+          "inside": true
+        }
+      },
+      {
+        "x": 50,
+        "y": 37,
+        "point": {
+          "cx": 659,
+          "cy": 772,
+          "inside": true
+        }
+      },
+      {
+        "x": 51,
+        "y": 37,
+        "point": {
+          "cx": 675,
+          "cy": 772,
+          "inside": true
+        }
+      },
+      {
+        "x": 47,
+        "y": 38,
+        "point": {
+          "cx": 611,
+          "cy": 788,
+          "inside": true
+        }
+      },
+      {
+        "x": 48,
+        "y": 38,
+        "point": {
+          "cx": 627,
+          "cy": 788,
+          "inside": true
+        }
+      },
+      {
+        "x": 49,
+        "y": 38,
+        "point": {
+          "cx": 643,
+          "cy": 788,
+          "inside": true
+        }
+      },
+      {
+        "x": 50,
+        "y": 38,
+        "point": {
+          "cx": 659,
+          "cy": 788,
+          "inside": true
+        }
+      },
+      {
+        "x": 51,
+        "y": 38,
+        "point": {
+          "cx": 675,
+          "cy": 788,
+          "inside": true
+        }
+      }
+    ],
+    "buildings": [
+      {
+        "type": "shaft",
+        "x": 70,
+        "y": 54,
+        "site": false,
+        "fuel": 0,
+        "hp": 140,
+        "stock": null,
+        "point": {
+          "cx": 979,
+          "cy": 1044,
+          "inside": false
+        }
+      },
+      {
+        "type": "furnace",
+        "x": 52,
+        "y": 36,
+        "site": false,
+        "fuel": 0,
+        "stock": null,
+        "point": {
+          "cx": 691,
+          "cy": 756,
+          "inside": true
+        }
+      },
+      {
+        "type": "lamp",
+        "x": 46,
+        "y": 36,
+        "site": false,
+        "fuel": 20,
+        "stock": null,
+        "point": {
+          "cx": 595,
+          "cy": 756,
+          "inside": true
+        }
+      },
+      {
+        "type": "towerGlow",
+        "x": 48,
+        "y": 36,
+        "site": false,
+        "fuel": 0,
+        "hp": 120,
+        "stock": null,
+        "point": {
+          "cx": 627,
+          "cy": 756,
+          "inside": true
+        }
+      },
+      {
+        "type": "lamp",
+        "x": 49,
+        "y": 39,
+        "site": false,
+        "fuel": 19,
+        "stock": null,
+        "point": {
+          "cx": 643,
+          "cy": 804,
+          "inside": true
+        }
+      },
+      {
+        "type": "farm",
+        "x": 47,
+        "y": 36,
+        "site": false,
+        "fuel": 0,
+        "hp": 60,
+        "stock": null,
+        "point": {
+          "cx": 611,
+          "cy": 756,
+          "inside": true
+        }
+      },
+      {
+        "type": "farm",
+        "x": 46,
+        "y": 37,
+        "site": false,
+        "fuel": 0,
+        "hp": 48.76266666666692,
+        "stock": null,
+        "point": {
+          "cx": 595,
+          "cy": 772,
+          "inside": true
+        }
+      }
+    ],
+    "containers": [
+      {
+        "kind": "camp",
+        "stock": {
+          "ore": 0,
+          "vine": 46,
+          "fuel": 4,
+          "food": 45,
+          "pick": 0
+        },
+        "x": 45,
+        "y": 36
+      },
+      {
+        "kind": "camp",
+        "stock": {
+          "fuel": 31,
+          "vine": 0,
+          "ore": 0
+        },
+        "x": 51,
+        "y": 36
+      }
+    ],
+    "crew": [
+      {
+        "id": "crew-c630s4",
+        "name": "拓荒者 A",
+        "x": 51.5438389807778,
+        "y": 36.493013106853,
+        "chunk": [
+          0,
+          0
+        ],
+        "alive": true,
+        "downed": false,
+        "directive": {
+          "version": 1,
+          "mode": "auto",
+          "area": null,
+          "outpost": null,
+          "outpostMode": null,
+          "returnHome": false,
+          "noNight": false,
+          "rescue": "normal",
+          "care": "neutral"
+        },
+        "events": [
+          {
+            "day": 1,
+            "kind": "join",
+            "text": "加入拓荒队"
+          }
+        ]
+      },
+      {
+        "id": "crew-d01tv1",
+        "name": "拓荒者 B",
+        "x": 51.89817439810083,
+        "y": 35.534650911819334,
+        "chunk": [
+          0,
+          0
+        ],
+        "alive": true,
+        "downed": false,
+        "directive": {
+          "version": 1,
+          "mode": "auto",
+          "area": null,
+          "outpost": null,
+          "outpostMode": null,
+          "returnHome": false,
+          "noNight": false,
+          "rescue": "normal",
+          "care": "neutral"
+        },
+        "events": [
+          {
+            "day": 1,
+            "kind": "join",
+            "text": "加入拓荒队"
+          }
+        ]
+      }
+    ]
+  },
+  "outposts": {
+    "capacity": 3,
+    "active": [
+      {
+        "x": 0,
+        "y": 0,
+        "id": "0,0",
+        "residents": 2
+      }
+    ],
+    "assignments": [],
+    "counts": {
+      "assigned": 0,
+      "stationed": 0,
+      "traveling": 0,
+      "capacity": 0,
+      "pending": 0
+    }
+  },
+  "runStats": {
+    "version": 1,
+    "maxLightPressure": 18,
+    "nightHarvests": 0,
+    "rescues": 0,
+    "hollowings": 0,
+    "soothings": 0,
+    "workerDeaths": 0,
+    "revivals": 0
+  },
+  "deathEvidence": {
+    "nightOutcomes": {
+      "version": 1,
+      "knownSinceDay": 1,
+      "history": [
+        {
+          "day": 1,
+          "result": "survived",
+          "cause": "dawn",
+          "layerId": "surface",
+          "chunkX": 0,
+          "chunkY": 0
+        },
+        {
+          "day": 2,
+          "result": "survived",
+          "cause": "dawn",
+          "layerId": "surface",
+          "chunkX": 0,
+          "chunkY": 0
+        },
+        {
+          "day": 3,
+          "result": "survived",
+          "cause": "dawn",
+          "layerId": "surface",
+          "chunkX": 0,
+          "chunkY": 0
+        }
+      ]
+    },
+    "deathPack": null,
+    "injury": 1
+  },
+  "crewVitals": [
+    {
+      "id": "crew-c630s4",
+      "hp": 90,
+      "maxHp": 90,
+      "hunger": 86.993333333581,
+      "downT": 0,
+      "rescueWound": 0,
+      "rescueRestT": 0
+    },
+    {
+      "id": "crew-d01tv1",
+      "hp": 90,
+      "maxHp": 90,
+      "hunger": 86.9933333335822,
+      "downT": 0,
+      "rescueWound": 0,
+      "rescueRestT": 0
+    }
+  ],
+  "roundtrip": {
+    "before": "21a434e5",
+    "after": "21a434e5",
+    "byteExact": true,
+    "semanticExact": true,
+    "differences": []
+  },
+  "regression": {
+    "checks": [
+      {
+        "label": "new",
+        "ok": true,
+        "ran": 86,
+        "ms": 62.1,
+        "fails": [],
+        "knownCount": 0,
+        "baselineSize": 0
+      },
+      {
+        "label": "loaded",
+        "ok": true,
+        "ran": 86,
+        "ms": 61.1,
+        "fails": [],
+        "knownCount": 0,
+        "baselineSize": 0
+      },
+      {
+        "label": "replay",
+        "ok": true,
+        "ran": 86,
+        "ms": 65.7,
+        "fails": [],
+        "knownCount": 0,
+        "baselineSize": 0
+      }
+    ],
+    "source": {
+      "ok": true,
+      "files": 95,
+      "fails": [],
+      "handles": [
+        "js/dev/selftest.js: __checkpoint __restoreCheckpoint",
+        "js/main.js: __abilities __ambient __ambientBeds __assets __audio __blight __blightDbg __bodies __body __camPan __carry __checkpoint __chunk __click __combat __cost __crew __cycleCat __demolish __descend __dps __eat __eco __endgameCheckpoint __ending __equip __expedition __finish __fire __focus __forecast __give __goto __grantRelic __graves __held __hint __hot __hoverInfo __keys __knowSeen __knowledge __lab __lamp __load __loadSlot __mind __move __music __musicDir __musicTick __newGame __observe __outposts __overlap __path __patrolHit __pause __perf __perfTable __place __prep __quick __rclick __recovery __recruit __refineCheck __relics __reload __replay __rescue __research __resolve __resonance __restoreCheckpoint __revive __saveSlot __screenOf __screens __seal __sect __seen __selectHot __series __settings __sfx __sfxBank __showEnding __sites __slice __soothe __spawn __state __step __steps __store __stress __survival __take __tasks __toast __undo __undoInfo __unequip __upgrade __visual __wave __wipe __zoom"
+      ],
+      "handleFiles": 2
+    },
+    "watch": {
+      "steps": 1200,
+      "log": [
+        "共 0 类"
+      ]
+    },
+    "replay": {
+      "seed": 4242,
+      "diff": "normal",
+      "policy": "home",
+      "days": 3,
+      "ranDays": 4,
+      "steps": 72001,
+      "secs": 1200,
+      "ms": 2989,
+      "deaths": 0,
+      "minHp": 54,
+      "minHpDay": 3,
+      "workersStart": 2,
+      "workersEnd": 2,
+      "gravesEnd": 0,
+      "blightEnd": 2,
+      "blightL3End": 0,
+      "litEnd": 2,
+      "towersEnd": 1,
+      "fuelEnd": 58,
+      "foodEnd": 45,
+      "kills": 118,
+      "sealDay": 0,
+      "lightPressureMax": 18,
+      "challengeMulMax": 1.48,
+      "chunksVisited": [
+        "0,0"
+      ],
+      "nights": [
+        {
+          "day": 1,
+          "tide": 1,
+          "bossNight": false,
+          "themeId": "swarm",
+          "trialStatus": "idle",
+          "trialSiteId": "first",
+          "spawnCap": 26,
+          "forecastIntervals": 22,
+          "lightPressure": 18,
+          "challengeMul": 1.48,
+          "spawned": 29,
+          "waveSpawned": 20,
+          "ventSpawned": 9,
+          "nonWaveSpawned": 9,
+          "bossSpawns": 0,
+          "sourceCounts": {
+            "wave": 20,
+            "vent": 9
+          },
+          "kindCounts": {
+            "bud": 29
+          },
+          "waveKindCounts": {
+            "bud": 20
+          },
+          "birthFrameCounts": {
+            "wave": {
+              "1": 16,
+              "2": 2
+            },
+            "vent": {
+              "4": 1,
+              "5": 1
+            }
+          },
+          "waveBatchCounts": {
+            "1": 16,
+            "2": 2
+          },
+          "peakAlive": 6,
+          "spawnBudget": 29,
+          "budgetUsed": 29,
+          "ended": "dawn",
+          "endAt": {
+            "day": 1,
+            "t": 380.02
+          }
+        },
+        {
+          "day": 2,
+          "tide": 2,
+          "bossNight": false,
+          "themeId": "moth",
+          "trialStatus": "idle",
+          "trialSiteId": "first",
+          "spawnCap": 32,
+          "forecastIntervals": 24,
+          "lightPressure": 18,
+          "challengeMul": 1.48,
+          "spawned": 32,
+          "waveSpawned": 20,
+          "ventSpawned": 12,
+          "nonWaveSpawned": 12,
+          "bossSpawns": 0,
+          "sourceCounts": {
+            "wave": 20,
+            "vent": 12
+          },
+          "kindCounts": {
+            "bud": 21,
+            "spitter": 4,
+            "moth": 7
+          },
+          "waveKindCounts": {
+            "bud": 9,
+            "spitter": 4,
+            "moth": 7
+          },
+          "birthFrameCounts": {
+            "wave": {
+              "1": 16,
+              "2": 2
+            },
+            "vent": {
+              "4": 3
+            }
+          },
+          "waveBatchCounts": {
+            "1": 16,
+            "2": 2
+          },
+          "peakAlive": 8,
+          "spawnBudget": 32,
+          "budgetUsed": 32,
+          "ended": "dawn",
+          "endAt": {
+            "day": 2,
+            "t": 380.02
+          }
+        },
+        {
+          "day": 3,
+          "tide": 3,
+          "bossNight": false,
+          "themeId": "shell",
+          "trialStatus": "idle",
+          "trialSiteId": "first",
+          "spawnCap": 38,
+          "forecastIntervals": 25,
+          "lightPressure": 18,
+          "challengeMul": 1.48,
+          "spawned": 58,
+          "waveSpawned": 50,
+          "ventSpawned": 8,
+          "nonWaveSpawned": 8,
+          "bossSpawns": 0,
+          "sourceCounts": {
+            "wave": 50,
+            "vent": 8
+          },
+          "kindCounts": {
+            "shell": 22,
+            "moth": 6,
+            "bud": 23,
+            "charger": 7
+          },
+          "waveKindCounts": {
+            "shell": 22,
+            "moth": 6,
+            "bud": 15,
+            "charger": 7
+          },
+          "birthFrameCounts": {
+            "wave": {
+              "2": 16,
+              "3": 6
+            },
+            "vent": {
+              "3": 1,
+              "5": 1
+            }
+          },
+          "waveBatchCounts": {
+            "2": 16,
+            "3": 6
+          },
+          "peakAlive": 10,
+          "spawnBudget": 58,
+          "budgetUsed": 58,
+          "ended": "dawn",
+          "endAt": {
+            "day": 3,
+            "t": 380.02
+          }
+        }
+      ],
+      "expedition": null,
+      "stats": {
+        "tryFurnace": 1,
+        "okFurnace": 1,
+        "tryLamp": 3,
+        "addFire": 175,
+        "craft": 180,
+        "craftFail": 3427,
+        "tryTower": 6,
+        "noTowerSpot": 5,
+        "okLamp": 2,
+        "okTower": 1,
+        "tryFarm": 2,
+        "okFarm": 2,
+        "harvest": 21,
+        "refuel": 254,
+        "pulse": 77
+      },
+      "rows": [
+        {
+          "day": 1,
+          "hp": 100,
+          "maxHp": 100,
+          "kills": 0,
+          "ore": 4,
+          "vine": 4,
+          "fuel": 2,
+          "food": 6,
+          "lamps": 0,
+          "lit": 0,
+          "towers": 0,
+          "farms": 0,
+          "workers": 2,
+          "hollow": 0,
+          "graves": 0,
+          "blight": 0,
+          "blightL3": 0,
+          "enemies": 0,
+          "sealUsed": 0,
+          "lightPressure": 0,
+          "challengeMul": 1,
+          "chunkX": 0,
+          "chunkY": 0
+        },
+        {
+          "day": 2,
+          "hp": 100,
+          "maxHp": 100,
+          "kills": 28,
+          "ore": 0,
+          "vine": 135,
+          "fuel": 311,
+          "food": 12,
+          "lamps": 2,
+          "lit": 2,
+          "towers": 1,
+          "farms": 2,
+          "workers": 2,
+          "hollow": 0,
+          "graves": 0,
+          "blight": 1,
+          "blightL3": 0,
+          "enemies": 0,
+          "sealUsed": 0,
+          "lightPressure": 18,
+          "challengeMul": 1.48,
+          "chunkX": 0,
+          "chunkY": 0,
+          "deaths": 0,
+          "atSecs": 400
+        },
+        {
+          "day": 3,
+          "hp": 84,
+          "maxHp": 100,
+          "kills": 60,
+          "ore": 0,
+          "vine": 91,
+          "fuel": 207,
+          "food": 30,
+          "lamps": 2,
+          "lit": 2,
+          "towers": 1,
+          "farms": 2,
+          "workers": 2,
+          "hollow": 0,
+          "graves": 0,
+          "blight": 2,
+          "blightL3": 0,
+          "enemies": 0,
+          "sealUsed": 0,
+          "lightPressure": 18,
+          "challengeMul": 1.48,
+          "chunkX": 0,
+          "chunkY": 0,
+          "deaths": 0,
+          "atSecs": 800
+        },
+        {
+          "day": 4,
+          "hp": 54,
+          "maxHp": 100,
+          "kills": 118,
+          "ore": 0,
+          "vine": 47,
+          "fuel": 58,
+          "food": 45,
+          "lamps": 2,
+          "lit": 2,
+          "towers": 1,
+          "farms": 2,
+          "workers": 2,
+          "hollow": 0,
+          "graves": 0,
+          "blight": 2,
+          "blightL3": 0,
+          "enemies": 0,
+          "sealUsed": 0,
+          "lightPressure": 18,
+          "challengeMul": 1.48,
+          "chunkX": 0,
+          "chunkY": 0,
+          "deaths": 0,
+          "atSecs": 1200
+        }
+      ]
+    },
+    "menu": {
+      "label": "menu",
+      "ok": true,
+      "ran": 86,
+      "ms": 78.6,
+      "fails": [],
+      "knownCount": 0,
+      "baselineSize": 0
+    }
+  },
+  "storage": {
+    "deep-light-saves-v2": true,
+    "deep-light-settings-v1": true,
+    "deep-light-ui-v1": true
+  }
+}

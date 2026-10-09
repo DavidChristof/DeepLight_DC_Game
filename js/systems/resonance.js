@@ -99,6 +99,12 @@ function failTrial(state, reason) {
   return true;
 }
 
+// 只中断已经开潮的试炼；未来预约与历史完成不因事后死亡回滚。
+export function interruptStandardTrial(state, reason) {
+  if (state?.resonance?.trial?.status !== 'active') return false;
+  return failTrial(state, reason);
+}
+
 function reachableMask(chunk) {
   const m = chunk && chunk.map;
   if (!m) return null;
@@ -153,7 +159,9 @@ export function initResonance(state, saved = null) {
   const sites = saved && saved.sites && typeof saved.sites === 'object' ? saved.sites : {};
   const normalizedSites = Object.fromEntries(SITE_PROBES.map((probe) => [probe.id, normalizeSite(probe, sites[probe.id]) ]));
   const legacyTrial = saved && saved.trial;
-  if (!normalizedSites.first.trial && legacyTrial) normalizedSites.first.trial = normalizeTrial({ ...legacyTrial, siteId: 'first' });
+  // Only pre-three-site saves need the global trial copied into the first site.
+  // A current save may deliberately have no site trial yet; loading it is not an attempt.
+  if (!saved?.sites && legacyTrial) normalizedSites.first.trial = normalizeTrial({ ...legacyTrial, siteId: 'first' });
   for (const site of Object.values(normalizedSites)) {
     if (site.trial?.status !== 'complete') continue;
     site.status = 'complete';
@@ -289,7 +297,7 @@ export function lockStandardTrialAtTide(state) {
   trial.lightPressure = state.nightLightPressure || 0;
   trial.challengeMul = state.nightChallengeMul || 1;
   persistTrial(state);
-  state.banner = { title: '反冲夜', sub: '守住信标直到黎明 · 离区或断光即告失败', t: 0, life: 3.5 };
+  state.banner = { title: '反冲夜', sub: '守住信标至黎明 · 阵亡或封灯即失败', t: 0, life: 3.5 };
   state._sidebarSig = null;
   return true;
 }
@@ -297,6 +305,7 @@ export function lockStandardTrialAtTide(state) {
 export function updateStandardTrial(state) {
   const trial = state && state.resonance && state.resonance.trial;
   if (!trial || trial.status !== 'active') return false;
+  if (state.playerDead || state.playerHp <= 0) return interruptStandardTrial(state, '玩家阵亡');
   const site = activeTrialSite(state);
   if (!site || state.layerId !== 'surface' || (state.chunkX | 0) !== site.chunkX || (state.chunkY | 0) !== site.chunkY) return failTrial(state, '离开信标区块');
   const beacon = beaconForSite(state, site);
@@ -308,6 +317,7 @@ export function updateStandardTrial(state) {
 export function settleStandardTrialAtDawn(state) {
   const trial = state && state.resonance && state.resonance.trial;
   if (!trial || trial.status !== 'active' || trial.activeDay !== (state.day | 0)) return false;
+  if (state.playerDead || state.playerHp <= 0) return interruptStandardTrial(state, '玩家阵亡');
   const site = activeTrialSite(state);
   if (!site || state.layerId !== 'surface' || (state.chunkX | 0) !== site.chunkX || (state.chunkY | 0) !== site.chunkY) return failTrial(state, '黎明前离开信标区块');
   const beacon = beaconForSite(state, site);

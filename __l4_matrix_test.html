@@ -1,0 +1,129 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>L4 三策略对照</title>
+<body style="background:#101923;color:#e5edf5;font:13px monospace;margin:8px">
+<h2>L4-B · 项目文件来源的三策略对照</h2>
+<p>受控策略操作，非真键鼠。相同健康来源／RNG4242，实际生产入口、距离和节拍；不赠送资源，不瞬移，不制造伤员。</p>
+<button id="short">三策略短校准（各两次）</button><button id="run">三策略三日（各两次）</button>
+<button id="continue">保留已完成轮次，补剩余策略</button>
+<button id="summary">查看六轮比较摘要</button>
+<button id="portable">导出完整六轮结果</button>
+<button id="ledgerExport" hidden>导出完整事件账本</button>
+<label>读取项目结果文件 <input id="artifactPath" value="docs/fixtures/l4-matrix-results.deflate.b64" size="48"></label><button id="readArtifact">读回并校验结果文件</button>
+<a id="artifactDownload" hidden>下载完整结果</a>
+<p id="status">未开始</p><pre id="out" style="white-space:pre-wrap;max-height:220px;overflow:auto"></pre>
+<iframe id="game" title="L4策略游戏" style="width:1280px;max-width:98vw;height:720px"></iframe>
+<script type="module">
+import { makeArtifact, auditArtifact } from './tools/l4_matrix_artifact.mjs';
+import { observeLedger } from './tools/l4_event_ledger.mjs';
+const ledgerMode=new URLSearchParams(location.search).has('ledger');
+const resultKey=()=>ledgerMode?(short?'__deep_light_l4_ledger_short_v1':'__deep_light_l4_ledger_evidence_v1'):(short?'__deep_light_l4_matrix_short_v1':'__deep_light_l4_matrix_evidence_v1');
+const keys=['deep-light-saves-v2','deep-light-settings-v1','deep-light-ui-v1'],backupKey='__deep_light_l4_matrix_backup_v1';
+const frame=document.querySelector('#game'),out=document.querySelector('#out'),status=document.querySelector('#status');
+const sourceFile='docs/fixtures/l4-healthy-checkpoint.deflate.b64',policies=['supply','return','onsite'];
+let active=false,report,source,g,oldRandom,short=false,index=0,carry=null;
+if(ledgerMode){document.querySelector('h2').textContent='L4-R2 · 补给链逐事件账本';document.querySelector('#short').textContent='账本短校准（观测开／关）';document.querySelector('#run').textContent='补给链三日账本（观测开／关）';for(const id of ['continue','summary','portable'])document.querySelector('#'+id).hidden=true;document.querySelector('#ledgerExport').hidden=false;}
+for(const k of ['__deep_light_l4_matrix_short_v1','__deep_light_l4_matrix_evidence_v1']){const previous=JSON.parse(localStorage.getItem(k)||'null');if(previous?.error){const archiveKey='__deep_light_l4_matrix_failures_v1',list=JSON.parse(localStorage.getItem(archiveKey)||'[]');if(!list.some(r=>JSON.stringify(r)===JSON.stringify(previous)))list.push(previous);localStorage.setItem(archiveKey,JSON.stringify(list.slice(-8)));}}
+const assert=(v,m)=>{if(!v)throw Error(m);};
+const copy=v=>JSON.parse(JSON.stringify(v));
+function canonical(v){if(Array.isArray(v))return v.map(canonical);if(v&&typeof v==='object')return Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])]));return v;}
+function digest(v){let h=2166136261;for(let i=0;i<v.length;i++)h=Math.imul(h^v.charCodeAt(i),16777619);return(h>>>0).toString(16);}
+function differences(a,b,path='',out=[]){if(out.length>=32||a===b)return out;if(!a||!b||typeof a!=='object'||typeof b!=='object'){out.push({path,before:a,after:b});return out;}for(const k of new Set([...Object.keys(a),...Object.keys(b)]))differences(a[k],b[k],path+'.'+k,out);return out;}
+function restore(){const b=JSON.parse(localStorage.getItem(backupKey)||'null');if(!b)return null;for(const k of keys)b[k]==null?localStorage.removeItem(k):localStorage.setItem(k,b[k]);const r=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)===b[k]]));if(Object.values(r).every(Boolean))localStorage.removeItem(backupKey);return r;}
+function publish(){const {runs,...rest}=report;out.textContent=JSON.stringify({...rest,runs:runs.map(({initial,end,ledger,...row})=>({...row,...(ledger?{ledger:{events:ledger.events.length,gaps:ledger.gaps,nodeEvents:ledger.nodeEvents,complete:ledger.complete}}:{})}))},null,2);localStorage.setItem(resultKey(),JSON.stringify(report));if(report.error){const archiveKey=ledgerMode?'__deep_light_l4_ledger_failures_v1':'__deep_light_l4_matrix_failures_v1',list=JSON.parse(localStorage.getItem(archiveKey)||'[]');list.push(copy(report));localStorage.setItem(archiveKey,JSON.stringify(list.slice(-8)));}}
+function close(){if(g){g.Math.random=oldRandom;g.__settings.autosave=false;g.__quick(true);}g=null;frame.src='about:blank';}
+function finish(e){if(e)report.error=String(e.stack||e);active=false;close();report.storage=restore();publish();status.textContent=e?'失败 · 原结果保留，正式三键恢复':ledgerMode?(short?'账本短校准完成 · 非三日验收':'补给链三日账本完成 · 待分类审计'):short?'三策略短校准完成 · 非三日验收':'六轮三日完成 · 待整合门';}
+window.addEventListener('beforeunload',()=>{if(active)restore();});
+async function begin(isShort){if(active)return;restore();short=isShort;index=0;report={scope:short?'三策略短校准':'三策略三日六轮',sourceFile,sourceHash:'790a3093',policyInput:'受控生产入口，不是真键鼠',runs:[],same:{}};try{const response=await fetch('/'+sourceFile);assert(response.ok,'来源文件缺失');const bytes=Uint8Array.from(atob((await response.text()).trim()),c=>c.charCodeAt(0));const data=JSON.parse(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'))).text());source=data.entry;assert(digest(JSON.stringify(source.snapshot))===source.hash&&source.hash==='790a3093','共同来源校验失败');report.inputHistory=data.inputHistory;const b=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)]));localStorage.setItem(backupKey,JSON.stringify(b));localStorage.setItem(keys[1],JSON.stringify({...JSON.parse(b[keys[1]]||'{}'),autosave:false}));active=true;next();}catch(e){finish(e);}}
+function next(){if(carry){assert(!short&&carry.sourceHash===report.sourceHash&&carry.codeFingerprint==='4b01428d','已完成结果来源或源码不匹配');const complete=carry.runs.filter(r=>!r.partial&&r.roundtripExact&&r.after?.ok);assert(complete.length===4&&complete.every((r,i)=>r.policy===policies[Math.floor(i/2)]&&r.repeat===i%2+1),'缺少连续四轮完整证据');assert(carry.same.supply&&carry.same.return,'已完成两策略未复放一致');report.runs=copy(complete);report.same=copy(carry.same);report.continuedFrom={error:carry.error,completed:complete.length,sourceUnchanged:true};index=complete.length;carry=null;publish();}frame.src='/?l4-matrix='+Date.now()+'-'+index;}
+document.querySelector('#short').onclick=()=>begin(true);document.querySelector('#run').onclick=()=>begin(false);
+document.querySelector('#ledgerExport').onclick=async()=>{if(active||!ledgerMode)return;try{const r=report||JSON.parse(localStorage.getItem(resultKey())||'null');assert(r?.runs?.length,'没有账本结果');const raw=JSON.stringify({format:'l4-ledger-results-v1',report:r}),bytes=new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream('deflate'))).arrayBuffer());const decoded=await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'))).text();assert(decoded===raw,'账本压缩读回不一致');let binary='';for(const b of bytes)binary+=String.fromCharCode(b);out.textContent=btoa(binary);status.textContent=JSON.stringify({format:'l4-ledger-results-v1',hash:digest(raw),rawBytes:new TextEncoder().encode(raw).length,compressedBytes:bytes.length,runs:r.runs.length,same:r.same,storage:r.storage,source:r.codeFingerprint,error:r.error||null});}catch(e){status.textContent=String(e);}};
+document.querySelector('#continue').onclick=()=>{if(active)return;carry=JSON.parse(localStorage.getItem('__deep_light_l4_matrix_evidence_v1')||'null');if(!carry){status.textContent='没有可续跑证据';return;}begin(false);};
+document.querySelector('#summary').onclick=()=>{if(active)return;const r=JSON.parse(localStorage.getItem('__deep_light_l4_matrix_evidence_v1')||'null');assert(r?.runs?.length,'没有结果');out.textContent=JSON.stringify({source:r.sourceHash,code:r.codeFingerprint,same:r.same,storage:r.storage,runs:r.runs.map(x=>({policy:x.policy,repeat:x.repeat,steps:x.steps,hash:x.endHash,roundtrip:x.roundtripExact,rngCalls:x.rngCalls,resource:x.end?.res,pack:x.end?.stores?.pack,playerHp:x.end?.playerHp,nightOutcomes:x.end?.nightOutcomes,memberDeath:x.memberDeath?{id:x.memberDeath.crewId,day:x.memberDeath.day,cause:x.memberDeath.cause}:null,rescues:x.naturalRescues,crew:x.crew?.map(w=>({id:w.id,hp:w.hp,hunger:w.hunger,chunk:w.chunk,alive:w.alive,events:w.events})),remote:x.end?.chunks?.find(c=>c.x===1&&c.y===0),commands:x.commands.filter(c=>['rescueAttempt','loadFuel','unloadFuel','paidRefuel','returnArrived','worldTimeJump','memberDeath'].includes(c.action))}))},null,2);status.textContent=r.error?'失败结果摘要':'六轮结果摘要 · 整合门尚未完成';};
+document.querySelector('#portable').onclick=async()=>{
+ if(active)return;
+ try{
+  const before=keys.map(k=>localStorage.getItem(k));
+  const r=JSON.parse(localStorage.getItem('__deep_light_l4_matrix_evidence_v1')||'null');
+  const artifact=makeArtifact(r),raw=JSON.stringify(artifact);
+  const packed=new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream('deflate'))).arrayBuffer());
+  const decoded=await new Response(new Blob([packed]).stream().pipeThrough(new DecompressionStream('deflate'))).text();
+  assert(decoded===raw&&auditArtifact(JSON.parse(decoded)).ok,'导出压缩读回失败');
+  let binary='';for(const byte of packed)binary+=String.fromCharCode(byte);
+  const base64=btoa(binary),link=document.querySelector('#artifactDownload');
+  link.href='data:text/plain;base64,'+btoa(base64+'\n');link.download='l4-matrix-results.deflate.b64';link.hidden=false;
+  const untouched=keys.every((k,i)=>localStorage.getItem(k)===before[i]);assert(untouched,'导出改动正式键');
+  out.textContent=JSON.stringify({format:artifact.format,reportHash:artifact.reportHash,audit:artifact.audit,
+   rawBytes:new TextEncoder().encode(raw).length,compressedBytes:packed.length,base64Chars:base64.length,formalKeysUnchanged:untouched,
+   base64},null,2);
+  status.textContent='完整结果已编码并无损自校验 · 尚未确认本地文件交付';
+ }catch(e){status.textContent='导出失败 · 原结果未覆盖';out.textContent=String(e.stack||e);}
+};
+document.querySelector('#readArtifact').onclick=async()=>{
+ if(active)return;
+ try{
+  const path=document.querySelector('#artifactPath').value;
+  assert(/^docs\/fixtures\/[a-zA-Z0-9_.-]+\.(b64|json)$/.test(path),'仅读取项目fixtures文件');
+  const response=await fetch('/'+path);assert(response.ok,'结果文件不存在');let raw=await response.text();
+  if(path.endsWith('.b64')){const bytes=Uint8Array.from(atob(raw.trim()),c=>c.charCodeAt(0));raw=await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'))).text();}
+  const checked=auditArtifact(JSON.parse(raw));out.textContent=JSON.stringify({path,...checked},null,2);
+  status.textContent=checked.ok?'项目文件读回校验通过 · 仅文件证据门':'项目文件校验失败';
+ }catch(e){status.textContent='项目文件读回失败';out.textContent=String(e.stack||e);}
+};
+frame.onload=async()=>{if(!active||frame.getAttribute('src')==='about:blank')return;g=frame.contentWindow;let row,trace;try{
+ g.__settings.autosave=false;g.__quick(true);
+ const [save,replay,tasks,storage,building,craft,interact,bd,survival]=await g.eval("Promise.all([import('/js/core/save.js'),import('/js/dev/replay.js'),import('/js/systems/taskBoard.js'),import('/js/systems/storage.js'),import('/js/systems/building.js'),import('/js/systems/craft.js'),import('/js/systems/interact.js'),import('/js/data/buildings.js'),import('/js/data/survival.js')])");
+ const menu=g.__check();assert(menu.ok,'菜单体检失败');const {SRC_FILES}=await import('/js/dev/filelist.js');const texts=await Promise.all(SRC_FILES.map(async f=>[f,await(await fetch('/'+f)).text()]));report.codeFingerprint=digest(JSON.stringify(texts));assert(report.codeFingerprint===(ledgerMode?'45e27812':'4b01428d'),'生产源码变化');report.sourceCompatibility=ledgerMode?'历史790a3093健康来源，当前45e27812兼容载入；不是从新局重建或原六轮复验':'a50829fe→4b01428d，仅完工work／当前夜行节点恢复与断言；共同文件不改';
+ oldRandom=g.Math.random;let calls=0;const rng=replay.makeRng(4242);g.Math.random=()=>{calls++;return rng();};
+ assert(g.__restoreCheckpoint(copy(source.snapshot)),'来源载入失败');g.__settings.autosave=false;g.__quick(true);let s=g.__state;
+ const snap=()=>{const v=save.snapshot(s);delete v.at;return canonical(v);};
+ const absolute=()=>400*(s.day-1)+s.t,initial=snap(),policy=ledgerMode?'supply':policies[Math.floor(index/2)];
+ row={policy,repeat:index%2+1,initialHash:digest(JSON.stringify(initial)),initial,end:null,steps:0,start:{day:s.day,t:s.t},commands:[],daily:[],stage:'start',rngCalls:0,menu};
+ if(ledgerMode){row.observed=index===0;report.scope=short?'独立补给链100秒观测开关校准':'独立补给链三日观测开关对照';if(row.observed)trace=observeLedger(s,storage.allContainers);}
+ const log=(action,result,extra={})=>row.commands.push({step:row.steps,day:s.day,t:s.t,chunk:[s.chunkX,s.chunkY],at:[s.player.x,s.player.y],action,result,...extra});
+ const move=(x,y)=>{const path=g.__goto(x,y);log('path',!!path,{target:[x,y]});assert(path,'路线不可达 '+x+','+y);};
+ const near=(x,y,r=1.7)=>Math.hypot(s.player.x-x,s.player.y-y)<=r;
+ const crew=()=>tasks.allCrewWorkers(s),a=()=>crew().find(w=>w.crew?.id==='crew-c630s4');
+ const home=()=>s.chunkX===0&&s.chunkY===0,remote=()=>s.chunkX===1&&s.chunkY===0;
+ let furnace,works=0,added=0,lastDay=s.day,freezeBaseline=null,stageSteps=0,rescueAttempt=false;
+ const stage=v=>{row.stage=v;stageSteps=row.steps;log('stage',v);};
+ const target=absolute()+(short?100:1200);
+ if(policy==='return'){assert(tasks.requestReturnHome(s,a())===null,'健康返营被拒绝');log('returnHome',null);move(48,36);stage('returning');}
+ else if(policy==='onsite'){move(95,36);stage('east');}
+ else {move(49,36);stage('home');}
+ function act(){
+  const matches=crew().filter(w=>w.crew?.id==='crew-c630s4');assert(matches.length<=1,'成员重复归属');
+  if(!matches.length){const record=(s.memorial||[]).find(r=>r.crewId==='crew-c630s4');assert(record,'成员消失但没有生产死亡履历');if(!row.memberDeath){row.memberDeath=copy(record);log('memberDeath',copy(record));}return;}
+  if(row.stage==='returning'&&a().chunkX===0&&!a().directive.returnHome&&!a().directive.outpost){log('returnArrived',true);stage('hold');freezeBaseline=JSON.stringify(snap().chunks.find(c=>c.x===1&&c.y===0));}
+  if(policy==='return'&&freezeBaseline)assert(JSON.stringify(snap().chunks.find(c=>c.x===1&&c.y===0))===freezeBaseline,'返营后无人前哨未冻结');
+  if(row.stage==='home'&&home()&&near(49.5,36.5)){
+   const result=building.tryPlace(s,'furnace',49,35);log('placeFurnace',result,{cost:bd.BUILD.furnace.cost});assert(result===null,'合法熔炉建造失败');furnace=s.buildings.find(b=>b.type==='furnace'&&b.x===49&&b.y===35);stage('build');
+  }else if(row.stage==='build'){
+   assert(home()&&near(furnace.x+.5,furnace.y+.5),'施工距离无效');interact.tick(s,{kind:'build',b:furnace});log('buildWork',furnace.work);if(!furnace.site){const got=craft.addFire(s,furnace,4);log('paidFire',got);assert(got>0,'炉具无火种');stage('craft');}
+  }else if(row.stage==='craft'){
+   assert(home()&&near(furnace.x+.5,furnace.y+.5),'制作距离无效');const before={...s.res},result=craft.workOnce(s,furnace);log('fuelRecipe',result,{before,after:{...s.res}});assert(result===null,'炼油支付失败');if(++works===6){stage('load');}
+  }else if(row.stage==='load'){
+   const pack=storage.packContainer(s),containers=storage.allContainers(s,true).filter(c=>near(c.x+.5,c.y+.5,4.5));let loaded=0;
+   for(const c of containers)loaded+=storage.transfer(s,c,pack,'fuel',12-loaded);
+   log('loadFuel',loaded,{pack:copy(s.pack.stock)});assert(loaded===12,'装包燃料不足');move(95,36);stage('east');
+  }else if(row.stage==='east'&&remote()){move(5,36);stage(policy==='supply'?'unload':'care');}
+  else if(row.stage==='unload'&&remote()&&near(4.5,37.5,4.5)){
+   const box=storage.allContainers(s,true).find(c=>c.kind==='store'&&c.x===4&&c.y===37);assert(box,'前哨箱不存在');const n=storage.transfer(s,storage.packContainer(s),box,'fuel',12);log('unloadFuel',n,{stock:copy(box.ref.stock)});assert(n===12,'运输途中燃料不足');stage('refuel');
+  }else if(row.stage==='refuel'){
+   const lamp=s.buildings.find(b=>b.type==='lamp'&&b.x===4&&b.y===35);assert(lamp&&near(lamp.x+.5,lamp.y+.5),'补灯距离无效');const before=lamp.fuel;if(before<bd.BUILD.lamp.maxFuel&&storage.canWithdraw(s,{fuel:1})){interact.tick(s,{kind:'refuel',b:lamp});log('paidRefuel',lamp.fuel-before);assert(lamp.fuel-before===1,'补灯未支付或未生效');added++;}else{log('remainingDepotFuel',storage.spendableOf(s).fuel||0);move(0,36);stage('west');}
+   if(added>=12){move(0,36);stage('west');}
+  }else if(row.stage==='west'&&home()){move(48,36);stage('hold');}
+  else if(row.stage==='care'&&remote()&&a().alive&&a().downed&&!rescueAttempt){
+   const w=a();if(!near(w.x,w.y,survival.SURVIVAL.RESCUE.PLAYER_RANGE)){move(Math.floor(w.x),Math.floor(w.y));}else{rescueAttempt=true;const before=copy(storage.spendableOf(s));interact.tick(s,{kind:'rescue',w});log('rescueAttempt',!!s.rescue,{before,after:copy(storage.spendableOf(s))});}
+  }
+  if(!['hold','care'].includes(row.stage)&&row.steps-stageSteps>7200)throw Error('策略阶段超时 '+row.stage);
+ }
+ while(active&&absolute()<target&&row.steps<80000){
+  trace?.sync(row.steps,'beforeAction');act();trace?.sync(row.steps,'afterAction');const before=absolute();g.__steps(24);row.steps+=24;trace?.sync(row.steps,'afterSimulation');const after=absolute();if(after-before>0.5)log('worldTimeJump',after-before,{nightOutcomes:copy(s.nightOutcomes)});
+  if(s.day!==lastDay){row.daily.push({day:s.day,t:s.t,hash:digest(JSON.stringify(snap())),res:{...s.res},nightOutcomes:copy(s.nightOutcomes)});lastDay=s.day;publish();}
+  if(row.steps%120===0){report.live={policy,repeat:row.repeat,steps:row.steps,day:s.day,t:s.t,stage:row.stage};status.textContent=`${short?'短校准':'三日'} ${index+1}/${ledgerMode?2:6} · ${policy} · ${row.steps}步 · 第${s.day}天 ${s.t.toFixed(1)}秒`;await new Promise(r=>setTimeout(r,0));}
+ }
+ assert(absolute()>=target,'模拟步数保护触发');row.end=snap();if(trace){row.ledger=trace.stop();trace=null;assert(JSON.stringify(snap())===JSON.stringify(row.end),'移除观测改变完整状态');assert(row.ledger.gaps.length===0,'账本出现未记录变化');}row.endHash=digest(JSON.stringify(row.end));row.rngCalls=calls;row.endAt={day:s.day,t:s.t};row.naturalRescues=s.runStats.rescues;row.crew=crew().map(w=>({id:w.crew.id,alive:w.alive,downed:w.downed,hp:w.hp,hunger:w.hunger,chunk:[w.chunkX,w.chunkY],directive:copy(w.directive),events:copy(w.crew.events)}));
+ const before=JSON.stringify(row.end);assert(g.__saveSlot('s3')!==false&&g.__loadSlot('s3'),'生产存读失败');g.__settings.autosave=false;g.__quick(true);s=g.__state;const restored=snap();row.roundtripExact=JSON.stringify(restored)===before;row.roundtripDifferences=differences(row.end,restored);assert(row.roundtripExact,'生产存读完整字段变化');row.after=g.__check({roundtrip:true});assert(row.after.ok,'终点断言失败');
+ report.runs.push(row);if(index%2===1){const first=report.runs.at(-2);report.same[policy]=JSON.stringify(first.initial)===JSON.stringify(row.initial)&&JSON.stringify(first.end)===JSON.stringify(row.end)&&JSON.stringify(first.commands)===JSON.stringify(row.commands)&&first.rngCalls===row.rngCalls;assert(report.same[policy],'策略复放完整状态或操作分歧 '+policy);}
+ publish();close();index++;if(index<(ledgerMode?2:6))next();else finish();
+ }catch(e){if(trace){row.ledger=trace.stop();trace=null;}if(row){row.partial=true;report.runs.push(row);}finish(e);}};
+</script></body></html>

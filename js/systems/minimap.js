@@ -48,14 +48,17 @@ export function drawMinimap(ctx, state) {
     c.at = now;
     const data = c.img.data;
     const bl = m.blight;
+    // 群系固有地面色只解析一次；原来每个已探索地面格重复正则/数组分配。
+    let floorRGB = RGB[T.FLOOR];
+    if (m.biome && BIOMES[m.biome]) {
+      const tint = BIOMES[m.biome].color.match(/[0-9a-f]{2}/gi).map((v) => parseInt(v, 16));
+      floorRGB = floorRGB.map((channel, i) => Math.round((channel + tint[i]) * 0.5));
+    }
     let o = 0;
     for (let i = 0; i < tiles.length; i++) {
       if (dis[i]) {
         let rgb = RGB[tiles[i]] || RGB[T.FLOOR];      // 新增地块务必在 RGB 登记（否则这里会炸）
-        if (tiles[i] === T.FLOOR && m.biome && BIOMES[m.biome]) {
-          const tint = BIOMES[m.biome].color.match(/[0-9a-f]{2}/gi).map((v) => parseInt(v, 16));
-          rgb = [Math.round((rgb[0] + tint[0]) * 0.5), Math.round((rgb[1] + tint[1]) * 0.5), Math.round((rgb[2] + tint[2]) * 0.5)];
-        }
+        if (tiles[i] === T.FLOOR) rgb = floorRGB;
         if (bl && bl[i] > 0) {
           const k = 0.35 + 0.2 * bl[i];
           rgb = [rgb[0] + (150 - rgb[0]) * k, rgb[1] + (70 - rgb[1]) * k, rgb[2] + (230 - rgb[2]) * k];

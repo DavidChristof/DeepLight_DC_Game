@@ -64,6 +64,7 @@ export const state = {
   milestone: { bossDefeated: false, bossDay: 7, clearedDay: 0 },
   resonance: null,        // W20-R：终局共鸣地点与施工状态（与营地 beacons 灯火分离）
   runStats: null,         // W20-R R5：本局有限统计；旧档缺失时保持未知
+  nightOutcomes: null,    // W21-P：最近16夜的玩家当地结果；旧历史不补猜
   ending: null,           // W20-R R5：三站完成后封存的一次性结局快照
   _endingPending: false,  // 结局展示边沿，不进存档
   playerMaxHp: 100,

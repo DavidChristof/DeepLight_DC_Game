@@ -62,7 +62,8 @@ export function normalizeFirstSlice(raw, activeDefault = false, day = 1, t = 0) 
     active: raw.active == null ? !!activeDefault : !!raw.active,
     phase,
     startedDay: Math.max(1, Number(raw.startedDay) | 0 || base.startedDay),
-    startedT: Math.max(0, Number(raw.startedT) || base.startedT),
+    startedT: raw.startedT != null && Number.isFinite(Number(raw.startedT))
+      ? Math.max(0, Number(raw.startedT)) : base.startedT,
     flags,
     history,
     choice: typeof raw.choice === 'string' && raw.choice.length <= 32 ? raw.choice : null,

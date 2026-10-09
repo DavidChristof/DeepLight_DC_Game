@@ -1,0 +1,85 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>P4 真实交互验收</title>
+<body style="background:#101923;color:#e5edf5;font:14px monospace;margin:12px">
+<h1>P4 · 搬运、补油与前哨调度</h1>
+<p>预置合法设施、补给与出口附近位置；操作使用真实点击和按键。不是从零施工试玩。</p>
+<button id="run">开始隔离测试</button><button id="next" disabled>验证并进入下一段</button><button id="finish" disabled>结束并恢复存档</button>
+<p id="status">等待运行</p><pre id="result" style="white-space:pre-wrap;max-height:180px;overflow:auto"></pre>
+<iframe id="game" title="P4 真实交互游戏" style="width:1280px;max-width:98vw;height:720px"></iframe>
+<script type="module">
+const keys=['deep-light-saves-v2','deep-light-settings-v1','deep-light-ui-v1'],backupKey='__deep_light_p4_input_backup_v1';
+const frame=document.querySelector('#game'),out=document.querySelector('#result'),status=document.querySelector('#status');
+let active=false,g,ui,chunks,stock,combat,s,remote,lamp,box,chosen,stage=0;
+let result={cases:[],checks:[],trustedClicks:[],trustedKeys:[]};
+const assert=(ok,msg)=>{if(!ok)throw Error(msg);},show=()=>{out.textContent=JSON.stringify(result,null,2);localStorage.setItem('__deep_light_p4_input_evidence_v1',out.textContent);};
+function restore(){const saved=JSON.parse(localStorage.getItem(backupKey)||'null');if(!saved)return null;
+  for(const k of keys)saved[k]==null?localStorage.removeItem(k):localStorage.setItem(k,saved[k]);
+  const exact=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)===saved[k]]));if(Object.values(exact).every(Boolean))localStorage.removeItem(backupKey);return exact;}
+const fail=e=>{result.error=String(e.stack||e);if(g){g.__quick(true);g.__settings.autosave=false;}result.storage=restore();active=false;status.textContent='失败 · 正式存档恢复';show();};
+window.addEventListener('beforeunload',()=>{if(active)restore();});
+const check=(label,opts={})=>{const r=g.__check(opts);result.checks.push({label,...r});assert(r.ok,label+JSON.stringify(r.fails));};
+const note=(name,data={})=>{result.cases.push({name,...data});show();};
+const focus=()=>{if(g.document.querySelector('#p4-input'))return;
+  const b=g.document.createElement('button');b.id='p4-input';b.textContent='聚焦交互测试';b.style='position:fixed;left:8px;bottom:8px;z-index:9999';g.document.body.append(b);};
+document.querySelector('#run').onclick=()=>{if(active)return;if(localStorage.getItem(backupKey))restore();
+  const saved=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)]));localStorage.setItem(backupKey,JSON.stringify(saved));
+  localStorage.setItem(keys[1],JSON.stringify({...JSON.parse(saved[keys[1]]||'{}'),autosave:false}));active=true;
+  frame.src='/?p4-input='+Date.now();};
+frame.onload=async()=>{if(!active)return;g=frame.contentWindow;try{
+  g.__settings.autosave=false;[ui,chunks,stock,combat]=await g.eval(`Promise.all([import('/js/ui/panels.js'),import('/js/world/chunks.js'),import('/js/systems/storage.js'),import('/js/systems/combat.js')])`);
+  check('menu');g.__newGame(4242,'normal');g.__settings.autosave=false;check('new');g.__steps(1);g.__quick(true);s=g.__state;
+  // 仅预置现场；后续搬运、加油和指令按钮不由脚本代按。
+  s.player.x=s.beacons[0].x+.5;s.player.y=s.beacons[0].y-.5;s.player.clearPath();g.__give('fuel',12);g.__give('food',12);
+  remote=chunks.ensureSurfaceChunk(s,1,0);const m=remote.map;
+  box={type:'store',x:4,y:36,site:false,level:1,fuel:0,stock:{}};
+  lamp={type:'lamp',x:4,y:35,site:false,level:1,fuel:0,burnT:0,off:false};remote.buildings.push(box,lamp);
+  for(const b of [box,lamp]){const i=b.y*m.w+b.x;m.set(b.x,b.y,0);m.nodeAmt[i]=0;m.occBuild[i]=1;m.occWalk[i]=1;}
+  chosen=s.workers[0];result.workerId=chosen.crew.id;
+  ui.openStorePanel(s,stock.allContainers(s,true).find(c=>c.ref===s.beacons[0]));focus();
+  g.document.addEventListener('click',e=>{if(!e.isTrusted)return;const t=e.target.closest('[data-act],[data-crew-outpost],[data-crew-outpost-mode]');
+    if(t){result.trustedClicks.push({text:t.textContent.trim(),act:t.dataset.act||t.dataset.crewOutpost||t.dataset.crewOutpostMode,k:t.dataset.k||null});show();}});
+  g.addEventListener('keydown',e=>{if(!e.isTrusted)return;result.trustedKeys.push(e.code);show();
+    if((stage===1&&e.code==='KeyD')||(stage===4&&e.code==='KeyA'))queueMicrotask(()=>g.__steps(60));
+    if(stage===2&&e.code==='KeyE')queueMicrotask(()=>g.__steps(1));
+  });
+  stage=0;status.textContent='从营地箱取燃料6、食物6到背包，再点击下一段';document.querySelector('#next').disabled=false;document.querySelector('#finish').disabled=false;show();
+}catch(e){fail(e);}};
+document.querySelector('#next').onclick=async()=>{try{
+  if(stage===0){assert(s.pack.stock.fuel===6&&s.pack.stock.food===6,'背包不是燃料6/食物6');
+    assert(result.trustedClicks.filter(x=>x.act==='pull').length>=12,'搬运缺少真实点击');note('真实逐个装包',{pack:{...s.pack.stock}});
+    ui.closePanel(s);s.player.x=s.map.w-2.5;s.player.y=s.map.h/2+.5;s.player.clearPath();s.dest=null;s.camera.x=s.player.x;s.camera.y=s.player.y;
+    stage=1;status.textContent='点击聚焦交互测试，然后按 D 通过东出口';
+  }else if(stage===1){assert(s.chunkX===1&&s.chunkY===0,'真实D未进入(1,0)');assert(s.pack.stock.fuel===6,'切区丢背包');
+    assert(g.document.querySelector('#sidebar').textContent.includes('本区暂无拓荒者'),'空区名册误报全队死亡');
+    note('真实D跨区',{chunk:[s.chunkX,s.chunkY],x:s.player.x,y:s.player.y});stage=2;status.textContent='按 E 给邻近灯柱加1燃料';
+  }else if(stage===2){assert(lamp.fuel===1&&s.pack.stock.fuel===5,'真实E未从背包加油');note('真实E补油',{lampFuel:lamp.fuel,packFuel:s.pack.stock.fuel});
+    s.player.x=3.5;s.player.y=36.5;s.player.clearPath();ui.openStorePanel(s,stock.allContainers(s,true).find(c=>c.ref===box));stage=3;status.textContent='把背包食物6、燃料5全部存入前哨箱';
+  }else if(stage===3){assert(box.stock.food===6&&box.stock.fuel===5&&(s.pack.stock.food||0)===0&&(s.pack.stock.fuel||0)===0,'远端卸货不一致');
+    note('真实卸货',{box:{...box.stock}});ui.closePanel(s);ui.togglePanel(s,'crew');stage=4;
+    status.textContent='第一名队员：派往此区块 → 采掘；然后关闭面板、聚焦并按 A 回原点';
+  }else if(stage===4){assert(s.chunkX===0,'真实A未返回原点');assert(chosen.directive.outpost?.x===1&&chosen.directive.outpostMode==='gather','未通过按钮派往采掘');
+    note('真实派遣与回程',{directive:chosen.directive,chunk:[s.chunkX,s.chunkY]});
+    g.__steps(60*75);assert(chosen.chunkX===1&&!chosen.outpostTravel,'未实际抵达');assert(remote.outpost?.ticks>0,'无前哨结算');
+    note('正式迁移生产',{ticks:remote.outpost.ticks,yield:remote.outpost.lastYield,box:{...box.stock}});
+    ui.togglePanel(s,'crew');stage=5;status.textContent='第一名队员改为守灯，再点击下一段';
+  }else if(stage===5){assert(chosen.directive.outpostMode==='guard','未切换守灯');
+    // 缺料边界夹具：用正式出库取走当地燃料，验证信息层不继续声称守灯成功。
+    const fuel=box.stock.fuel||0;assert(stock.withdrawFromChunk(s,remote,{fuel},box.x,box.y)===null,'清理燃料失败');g.__steps(60*13);
+    ui.renderPanelHost(s);assert(g.document.querySelector('#panel').textContent.includes('燃料不足，守灯暂停'),'面板隐藏守灯缺料');
+    note('真实守灯按钮与缺料提示',{needs:remote.outpost.lastNeeds,reason:remote.outpost.lastReason});stage=6;status.textContent='第一名队员改为静默驻守，再点击下一段';
+  }else if(stage===6){assert(chosen.directive.outpostMode==='silent','未切静默驻守');g.__steps(60*13);ui.renderPanelHost(s);
+    assert(chosen.chunkX===1,'静默模式错误迁离');assert(g.document.querySelector('#panel').textContent.includes('静默驻守'),'静默文字未更新');
+    note('静默驻守没有假撤离',{chunk:chosen.chunkX});stage=7;status.textContent='第一名队员取消驻守，再点击下一段';
+  }else if(stage===7){assert(!chosen.directive.outpost,'取消驻守未清命令');g.__steps(1);assert(chosen.chunkX===1,'取消命令误传送');
+    note('取消驻守不自动返营',{chunk:chosen.chunkX});
+    ui.closePanel(s);chunks.bindSurfaceChunk(s,remote);s.player.x=8;s.player.y=8;s.playerHp=0;s.playerDead=true;combat.handleDeath(s);
+    assert(s.chunkX===1&&s.player.x===49&&s.player.y===36,'复归位置改变');
+    assert(s.floaties.some(f=>f.txt==='在本区复归 · 燃料减半'||f.txt==='在本区复归 · 遗落包留在原地'),'复归文字错误');
+    note('远端复归说明与坐标一致');check('input');check('roundtrip',{roundtrip:true});
+    result.source=await g.__srcCheck();assert(result.source.ok,'源码检查失败');
+    result.replay=g.__replay({seed:4242,diff:'normal',days:3,policy:'home'});g.__quick(true);check('replay');
+    g.__watch(true,20);g.__steps(1200);g.__watch(false);result.watch=g.__testLog();assert(result.watch.length===1&&result.watch[0]==='共 0 类','监控存在违例');
+    stage=8;status.textContent='真实交互与说明通过 · 可结束恢复存档';document.querySelector('#next').disabled=true;show();
+  }
+}catch(e){fail(e);}};
+document.querySelector('#finish').onclick=()=>{if(g){g.__quick(true);g.__settings.autosave=false;}frame.src='about:blank';result.storage=restore();active=false;show();status.textContent='已结束 · 正式存档恢复完成';};
+</script>

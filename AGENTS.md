@@ -1,6 +1,6 @@
 # AGENTS.md · 《蚀渊拓荒者 Deep-Light》
 
-> 编码代理自动加载的**短入口**。动手改代码前读 [`docs/STATUS.md`](docs/STATUS.md) 和 [`HANDOFF.md`](HANDOFF.md) §0–3、§5–8；§4 的逐日历史按需查。当前阶段细节见 [`docs/ENDGAME.md`](docs/ENDGAME.md)。本文件只保留可执行的硬约束；与 `HANDOFF.md` 冲突时以其为准。
+> 编码代理自动加载的**短入口**。动手改代码前读 [`docs/STATUS.md`](docs/STATUS.md) 和 [`HANDOFF.md`](HANDOFF.md) §0–3、§5–8；§4 的逐日历史按需查。当前可玩性计划见 [`docs/PLAYABILITY.md`](docs/PLAYABILITY.md)，终局规则见 [`docs/ENDGAME.md`](docs/ENDGAME.md)。本文件只保留可执行的硬约束；与 `HANDOFF.md` 冲突时以其为准。
 
 ## 这是什么项目
 
@@ -23,9 +23,9 @@ ES Modules 不能走 `file://`，必须用这个服务器（它禁用了缓存�
 在浏览器 DevTools 控制台里跑：
 
 ```js
-__check()                   // 期望 {ok:true, ran:80, fails:[]}
+__check()                   // 期望 {ok:true, ran:86, fails:[]}
 __check({roundtrip:true})   // 额外验证「存档→读档」往返
-__srcCheck()                // 异步源码审计，期望 {ok:true, files:91, fails:[]}
+__srcCheck()                // 异步源码审计，期望 {ok:true, files:95, fails:[]}
 ```
 
 并且 **`__check()` 必须在四种局面各跑一次**：主菜单 / 新开一局 / 读档往返后 / `__replay()` 跑过几天后。

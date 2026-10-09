@@ -6,6 +6,8 @@
 export const EXPEDITION = Object.freeze({
   VERSION: 1,
   HOME_CHUNK: Object.freeze({ x: 0, y: 0 }),
+  RETURN_MAX_DISTANCE: 1,
+  RETURN_STAND_RADIUS: 0.34,
   // G1/G2 只提供信息，不锁输入、不自动传送。每区块的设施/补给提示会
   // 去重；黄昏提示按天重置，避免玩家在远征时被同一句话刷屏。
   GUIDE_COOLDOWN_SEC: 18,

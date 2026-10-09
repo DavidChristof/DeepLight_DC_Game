@@ -2,6 +2,7 @@
 // R0 只登记稳定规则；正式材料成本必须在固定种子资源审计后再填写。
 export const ENDGAME = Object.freeze({
   VERSION: 2,
+  NIGHT_OUTCOME: Object.freeze({ VERSION: 1, HISTORY_LIMIT: 16, BANNER_LIFE: 3.5, DEATH_FX_LIFE: 0.6, DEATH_FX_OFFSET: 0.3 }),
   BEACON_COUNT: 3,
   SITE_MARGIN: 2,
   SITE_TIE_BREAK: 0.01,

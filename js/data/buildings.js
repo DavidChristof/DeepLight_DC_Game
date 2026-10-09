@@ -20,7 +20,7 @@ export const BUILD = {
     name: '灯柱',
     cost: { ore: 2, vine: 2 },
     power: 9, radius: 7,
-    maxFuel: 30, burnSec: 18,   // 每 burnSec 秒消耗 1 燃料（按 140s/天 调）
+    maxFuel: 30, burnSec: 18,   // 中亮度、无节燃研究：每 18 秒消耗 1 燃料
     solid: true, block: false,  // 柱身占格，但不挡光
     color: '#aee9ff',
   },

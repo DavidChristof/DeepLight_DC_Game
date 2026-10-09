@@ -1,0 +1,131 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>P2 备战信息验收</title>
+<body style="background:#101923;color:#e5edf5;font:14px monospace;margin:16px">
+<h1>P2 · 备战信息验收</h1><button id="run">运行自动验收</button>
+<button id="sample" disabled>准备蛾潮样板</button><button id="finish" disabled>结束交互并恢复存档</button>
+<p id="status">等待运行</p><pre id="summary" style="white-space:pre-wrap;max-height:160px;overflow:auto"></pre>
+<details><summary>完整证据</summary><pre id="out" style="white-space:pre-wrap"></pre></details>
+<iframe id="game" title="P2 隔离实例" style="width:1280px;max-width:98vw;height:720px;border:1px solid #526272"></iframe>
+<script type="module">
+const keys=['deep-light-saves-v2','deep-light-settings-v1','deep-light-ui-v1'];
+const recoveryKey='__deep_light_p2_backup_v1';
+const frame=document.querySelector('#game'),out=document.querySelector('#out'),summary=document.querySelector('#summary'),status=document.querySelector('#status');
+let active=false,result=null,renderTimer=null,uiBefore=null;
+const clone=x=>JSON.parse(JSON.stringify(x)),assert=(ok,msg)=>{if(!ok)throw Error(msg);};
+const emit=(name,value)=>{out.textContent+=`${name}: ${JSON.stringify(value,null,2)}\n`;};
+function restore(){const saved=JSON.parse(localStorage.getItem(recoveryKey)||'null');if(!saved)return null;
+  for(const k of keys)saved[k]==null?localStorage.removeItem(k):localStorage.setItem(k,saved[k]);
+  const exact=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)===saved[k]]));
+  if(Object.values(exact).every(Boolean))localStorage.removeItem(recoveryKey);return exact;}
+window.addEventListener('beforeunload',()=>{if(active)restore();});
+function summarize(){summary.textContent=JSON.stringify({...result,replays:result.replays?.map(r=>({steps:r.steps,deaths:r.deaths,minHp:r.minHp,kills:r.kills})),checks:result.checks?.map(r=>({label:r.label,ok:r.ok,ran:r.ran})),source:result.source?{ok:result.source.ok,files:result.source.files,fails:result.source.fails}:null},null,2);}
+document.querySelector('#run').onclick=()=>{
+  if(active)return;if(localStorage.getItem(recoveryKey))emit('interrupted-recovery',restore());
+  active=true;out.textContent='';summary.textContent='';document.querySelector('#run').disabled=true;
+  const saved=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)]));localStorage.setItem(recoveryKey,JSON.stringify(saved));
+  localStorage.setItem(keys[1],JSON.stringify({...JSON.parse(saved[keys[1]]||'{}'),autosave:false}));
+  status.textContent='启动隔离实例';frame.src=`/?p2-test=${Date.now()}`;
+};
+frame.onload=async()=>{
+  if(!active)return;const g=frame.contentWindow;
+  result={ok:false,checks:[],cases:[],replays:[],clicks:[],storage:null};
+  try{
+    g.__settings.autosave=false;g.__quick(true);
+    const [{preparationOf},{buildingBurnSec,burnBuildingFuel},{BUILD,LIGHT_LEVELS},{FUELS},
+      {lampBurnMul,smeltBurnMul},{syncRes},{renderPanelHost,togglePanel,closePanel},{POLICIES},
+      {tryCrossSurfaceExit},{ensureLayer,bindLayer}]=await Promise.all([
+      import('/js/systems/preparation.js'),import('/js/systems/logistics.js'),import('/js/data/buildings.js'),
+      import('/js/data/fire.js'),import('/js/systems/research.js'),import('/js/systems/storage.js'),
+      import('/js/ui/panels.js'),import('/js/dev/replay.js'),import('/js/world/chunks.js'),import('/js/systems/layer.js')]);
+    // UI module must come from the iframe realm so its panel state belongs to this game.
+    const ui=await g.eval('import("/js/ui/panels.js")');
+    const {TOWER}=await import('/js/data/combat.js');
+    const check=(label,opts={})=>{const r=g.__check({includeKnown:true,...opts});result.checks.push({label,...r});assert(r.ok,label+JSON.stringify(r.fails));};
+    const report=(id,data)=>{result.cases.push({id,...data});emit(id,data);};
+    const fresh=()=>{g.__newGame(4242,'normal');g.__settings.autosave=false;g.__steps(1);g.__quick(true);return g.__state;};
+    check('menu');g.__newGame(4242,'normal');g.__settings.autosave=false;check('new');
+    g.__steps(1);g.__quick(true);let s=g.__state;check('roundtrip',{roundtrip:true});check('after-load');
+    // 耗率修复后按独立数据表计算；旧P2等价性证据只属于修复前版本。
+    let comparisons=0;
+    for(const type of Object.keys(BUILD).filter(k=>BUILD[k].burnSec))for(const mat of ['vine','coal','fuel'])for(const level of [0,1,2])for(const researched of [false,true]){
+      const b={type,fireMat:mat,level,fuel:3,burnT:1},st={research:{unlocked:researched?{lamp:true,lampSave2:true,smeltThrift:true}:{}}};
+      const def=BUILD[type],lv=LIGHT_LEVELS[level],expected=(def.fireMat?FUELS[mat].burnSec:def.burnSec)*lampBurnMul(st)*(def.fireMat?smeltBurnMul(st):1)/lv.burn;
+      assert(buildingBurnSec(b,st)===expected,'burn != independent data');
+      const delta=expected-1;burnBuildingFuel([b],st,delta);assert(b.fuel===2&&Math.abs(b.burnT)<1e-9,'actual burn != forecast');comparisons++;
+    }
+    report('same-source-burn',{comparisons});
+    for(const [day,kind,action] of [[1,'bud','swarm'],[2,'moth','lamp'],[3,'shell','wall'],[5,'owl','air'],[7,'core','boss']]){
+      s=fresh();s.day=day;s.t=100;const before=JSON.stringify(s),r=preparationOf(s);
+      assert(r.kind===kind&&r.actionId===action,'threat-action mismatch');assert(JSON.stringify(s)===before,'read mutated state');
+      report('night-'+day,{kind:r.kind,action:r.action.text,readonly:true});
+    }
+    s=fresh();s.buildings.push({type:'lamp',x:48,y:37,fuel:2,burnT:1,level:1},
+      {type:'furnace',x:49,y:37,fuel:3,burnT:2,fireMat:'coal',off:true},
+      {type:'lamp',x:50,y:37,fuel:0,level:2},{type:'decoy',x:51,y:37,fuel:3},
+      {type:'lamp',x:52,y:37,fuel:2,site:true},{type:'cache',x:49,y:38,fuel:4});
+    s.beacons[0].stock={fuel:5,coal:2};syncRes(s);const before=JSON.stringify(s),r=preparationOf(s);
+    assert(r.devices[0].seconds===35&&r.devices[0].cacheFuel===4&&r.devices[0].refill,'lamp forecast');
+    assert(r.devices[1].seconds===null&&!r.devices[1].light&&r.devices[1].cacheFuel===4,'off furnace');
+    assert(!r.devices[2].light&&!r.devices[3].light&&!r.devices[4].light,'empty/decoy/site light');
+    assert(r.campLights===2&&r.playerLamp&&JSON.stringify(s)===before,'special light/readonly');
+    report('device-states',r);
+    // Real production save/load; report is not serialized and is reconstructed from loaded truth.
+    const saved=JSON.stringify(preparationOf(s));assert(g.__saveSlot('s3')&&g.__loadSlot('s3'),'save/load');g.__settings.autosave=false;g.__quick(true);
+    assert(JSON.stringify(preparationOf(g.__state))===saved,'loaded report mismatch');report('save-load',{same:true});
+    // Live DOM must follow changing devices/research even while the world is paused.
+    s=g.__state;ui.togglePanel(s,'night');
+    const initialText=g.document.querySelector('[data-preparation]').textContent;
+    assert(initialText.includes('燃料 2/30')&&initialText.includes('施工中'),'initial device DOM');
+    s.buildings[0].fuel=0;s.research.unlocked.lamp=true;
+    await new Promise(resolve=>setTimeout(resolve,600));ui.renderPanelHost(s);
+    const changedText=g.document.querySelector('[data-preparation]').textContent;
+    assert(changedText.includes('燃料 0/30')&&changedText.includes('27.9s/个'),'live fuel/research DOM stale');
+    report('live-device-research-DOM',{updated:true});
+    s=fresh();s.day=5;s.t=100;s.buildings.push({type:'towerGlow',x:48,y:37,mods:[],level:1},
+      {type:'towerGlow',x:3,y:3,mods:[],level:1},{type:'towerShock',x:49,y:37,mods:[],level:1});
+    s.light.fill(0);s.light[37*s.map.w+48]=TOWER.LIGHT_MIN+1;s.light[37*s.map.w+49]=TOWER.LIGHT_MIN+1;
+    const air=preparationOf(s);assert(air.defense.total===2&&air.defense.ready===1,'air readiness counted unlit or ground-only tower');
+    ui.togglePanel(s,'night');assert(g.document.querySelector('[data-preparation]').textContent.includes('对空塔 1/2 可开火'),'air DOM');
+    report('air-defense',{installed:2,ready:1,groundExcluded:true});
+    s=fresh();s.player.x=s.map.w-.1;s.player.y=s.map.h/2;assert(tryCrossSurfaceExit(s),'chunk setup');
+    assert(preparationOf(s).chunkX===1&&preparationOf(s).devices.length===0&&preparationOf(s).campLights===0,'remote report stale');
+    ui.togglePanel(s,'night');assert(g.document.querySelector('[data-preparation]').textContent.includes('营地火 0'),'remote DOM stale');
+    s.player.x=.1;s.player.y=s.map.h/2;assert(tryCrossSurfaceExit(s)&&preparationOf(s).chunkX===0,'return report stale');
+    ui.renderPanelHost(s);assert(g.document.querySelector('[data-preparation]').textContent.includes('营地火 2'),'return DOM stale');
+    ensureLayer(s,'depth1');bindLayer(s,'depth1');assert(!preparationOf(s).surface,'depth applies surface rule');report('chunk-and-layer',{same:true});
+    // Entire replay state/metrics compared, not merely final kill count.
+    for(const withInfo of [false,true]){
+      const rr=g.__replay({seed:4242,diff:'normal',days:3,policy:withInfo?(st,api,ctx)=>{preparationOf(st);POLICIES.home(st,api,ctx);}:'home'});
+      result.replays.push(clone(rr));g.__settings.autosave=false;g.__quick(true);
+    }
+    const canonical=x=>{const c=clone(x);delete c.ms;delete c.policy;return JSON.stringify(c);};
+    assert(canonical(result.replays[0])===canonical(result.replays[1]),'info changed deterministic replay');
+    assert(result.replays[0].ranDays===4,'three-day replay incomplete');
+    report('replay-equality',{allMetricsEqual:true});check('replay');check('replay-roundtrip',{roundtrip:true});
+    result.source=await g.__srcCheck();assert(result.source.ok,'source audit');
+    g.__watch(true,20);g.__steps(1200);g.__watch(false);result.watch=g.__testLog();assert(g.__testLogRaw().length===0,'watch violation');
+    document.querySelector('#sample').disabled=false;document.querySelector('#finish').disabled=false;
+    document.querySelector('#sample').onclick=()=>{
+      s=fresh();s.day=2;s.t=310;s.buildings.push({type:'lamp',x:48,y:37,fuel:2,burnT:1,level:1},
+        {type:'furnace',x:50,y:37,fuel:3,burnT:0,fireMat:'coal',off:true});g.__steps(1);g.__quick(true);
+      ui.closePanel(s);uiBefore=JSON.stringify({fuel:s.res.fuel,devices:s.buildings.map(b=>[b.type,b.fuel,b.burnT]),position:[s.player.x,s.player.y]});
+      result.clicks=[];status.textContent='交互样板：点顶部蛾潮 → 定位 → 建造/研究/背包/拓荒队';
+      summarize();
+    };
+    g.document.addEventListener('click',e=>{
+      if(!e.isTrusted)return;const t=e.target.closest('#nighttheme, [data-prep-panel], [data-prep-build], [data-prep-locate]');if(!t)return;
+      result.clicks.push({text:t.textContent,panel:g.__state.activePanel,locate:t.dataset.prepLocate||null});summarize();
+    });
+    renderTimer=setInterval(()=>ui.renderPanelHost(g.__state),125);
+    document.querySelector('#finish').onclick=()=>{
+      clearInterval(renderTimer);g.__quick(true);g.__settings.autosave=false;
+      const st=g.__state,after=JSON.stringify({fuel:st.res.fuel,devices:st.buildings.map(b=>[b.type,b.fuel,b.burnT]),position:[st.player.x,st.player.y]});
+      const visited=new Set(result.clicks.map(c=>c.panel));
+      result.uiOk=uiBefore===after&&['night','build','research','pack','crew'].every(p=>visited.has(p))&&result.clicks.some(c=>c.locate);
+      result.storage=restore();result.ok=result.uiOk&&Object.values(result.storage||{}).every(Boolean);active=false;
+      emit('final',result);summarize();status.textContent=result.ok?'P2 验收通过 · 正式存储已恢复':'P2 交互未通过';
+      document.querySelector('#finish').disabled=true;document.querySelector('#sample').disabled=true;document.querySelector('#run').disabled=false;
+    };
+    status.textContent='自动验收通过 · 待真实点击验证';result.automaticOk=true;summarize();
+  }catch(e){clearInterval(renderTimer);result.failure=String(e.stack||e);result.storage=restore();active=false;emit('failure',result);summarize();status.textContent='未通过 · 正式存储已恢复';document.querySelector('#run').disabled=false;}
+};
+</script></body></html>

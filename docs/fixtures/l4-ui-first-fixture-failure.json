@@ -1,0 +1,41 @@
+{
+  "layouts": [],
+  "inputs": [
+    {
+      "type": "click",
+      "text": "查看补给",
+      "select": "crew-c630s4"
+    },
+    {
+      "type": "click",
+      "text": "查看全部经历 · 12/12",
+      "history": "crew-d01tv1"
+    },
+    {
+      "type": "click",
+      "text": "查看全部经历 · 12/12",
+      "history": "crew-c630s4"
+    },
+    {
+      "type": "key",
+      "key": "End",
+      "text": "查看全部经历 · 12/12"
+    },
+    {
+      "type": "key",
+      "key": "Tab",
+      "text": "查看全部经历 · 12/12"
+    }
+  ],
+  "scope": "controlled UI fixture; seeded 12-event histories are not natural expedition evidence",
+  "workerIds": [
+    "crew-d01tv1",
+    "crew-c630s4"
+  ],
+  "error": "Error: 键盘焦点不在游戏操作入口\n    at assert (http://localhost:8000/__l4_ui_test.html:8:34)\n    at document.querySelector.onclick (http://localhost:8000/__l4_ui_test.html:29:73)",
+  "storage": {
+    "deep-light-saves-v2": true,
+    "deep-light-settings-v1": true,
+    "deep-light-ui-v1": true
+  }
+}

@@ -13,6 +13,7 @@
 import { PULSE, TOWER, WAVES, BOSS, TYPES, TYPE_ORDER, TYPE_NAME, armorMul, LIGHT_FEAR_BURN, ABILITY, tideOf } from '../data/combat.js';
 import { BUILD, LIGHT_LEVELS } from '../data/buildings.js';
 import { EXPEDITION } from '../data/expedition.js';
+import { crewSupplyOf } from '../systems/expedition.js';
 import { ENDGAME } from '../data/endgame.js';
 import { CAMP_CAP, PACK_CAP, STORE_CAP } from '../data/storage.js';
 import { CARRY } from '../data/combat.js';
@@ -704,7 +705,7 @@ export function crewReport(state) {
         personality: card.personality, personalityName: COLONISTS.PERSONALITIES[card.personality].name,
         taboo: COLONISTS.PERSONALITIES[card.personality].taboo,
         origin: card.origin, joinedDay: card.joinedDay, palette: card.palette, portrait: card.portrait,
-        events: (card.events || []).map((e) => ({ day: e.day | 0, kind: e.kind, text: e.text })),
+        events: (card.events || []).map((e) => ({ ...e })),
       },
       status: {
         alive: !!w.alive, downed: !!w.downed, downT: +((w.downT || 0).toFixed(1)), rescueState: w.rescueState || 'none', rescueBed: w.rescueBed || null, rescueRestT: +((w.rescueRestT || 0).toFixed(1)), rescueWound: w.rescueWound | 0, medicalState: w.medicalState || 'none', medicalClinic: w.medicalClinic || null, medicalT: +((w.medicalT || 0).toFixed(1)),
@@ -715,6 +716,7 @@ export function crewReport(state) {
       },
       task: { id: task.id, job: task.job, label: task.label, priority: task.priority, status: task.status, reason: task.reason || taskReason(w), target: taskProjectionTarget(task, w), reservation: task.reservation || null, pathNodes: (w.path || []).length },
       directive: directiveFromSave(w.directive),
+      supply: crewSupplyOf(state, w),
       influence,
       risk,
       relation: { count: relations.length, strongest: relations },
@@ -723,7 +725,7 @@ export function crewReport(state) {
   });
   return {
     version: COLONISTS.VERSION,
-    schema: ['id', 'name', 'identity', 'status', 'task', 'directive', 'influence', 'risk', 'relation', 'location'],
+    schema: ['id', 'name', 'identity', 'status', 'task', 'directive', 'supply', 'influence', 'risk', 'relation', 'location'],
     bounds: { maxRelations: COLONISTS.MAX_RELATIONS, maxActiveTasks: COLONISTS.MAX_ACTIVE_TASKS, maxMemorialEvents: COLONISTS.MAX_MEMORIAL_EVENTS, maxEvents: COLONISTS.MAX_EVENTS, maxReviveUses: SURVIVAL.REVIVE.MAX_USES },
     memorial: (state.memorial || []).slice(-COLONISTS.MAX_MEMORIAL_EVENTS).map((m) => ({
       type: 'death', crewId: m.crewId || null, name: m.name, day: m.day | 0, x: m.x | 0, y: m.y | 0,
@@ -819,6 +821,7 @@ export function waveReport(state) {
   for (const k in dist) dist[k] = +(dist[k] / N).toFixed(3);
   return {
     天: state.day, t: +(state.t || 0).toFixed(1), 蚀潮中: isTide(state), 潮位: tide,
+    最近夜结果: state.nightOutcomes ? JSON.parse(JSON.stringify(state.nightOutcomes)) : null,
     今夜主题: plan.theme.name, 主题说明: plan.theme.note, 主题签名兵种: signatureOf(plan.theme).map((k) => ENEMIES[k].name),
     当前时段: plan.seg.name, 时段进度: `${plan.seg.upTo}s 前`,
     下波主力: ENEMIES[mainKindOf(plan)].name, 下波预告: hud.soon ? `剩 ${hud.secs}s` : '—',

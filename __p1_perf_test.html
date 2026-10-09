@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8">
+<title>P1 性能 多前哨与性能验收</title>
+<body style="background:#101923;color:#e5edf5;font:13px monospace;margin:16px">
+<h1>P1 性能 多前哨与性能</h1><p id="status">准备测试</p>
+<pre id="out" style="max-height:360px;overflow:auto;white-space:pre-wrap"></pre><pre id="json" hidden></pre>
+<iframe id="game" title="隔离游戏实例" style="width:960px;height:640px;border:1px solid #607080"></iframe>
+<script type="module">
+const keys = ['deep-light-saves-v2', 'deep-light-settings-v1', 'deep-light-ui-v1'];
+const recoveryKey = '__deep_light_p1perf_storage_backup_v1';
+const status = document.querySelector('#status'), out = document.querySelector('#out'), frame = document.querySelector('#game');
+const report = {events:[]};
+const emit = (label, data) => { report.events.push({label,data}); document.querySelector('#json').textContent=JSON.stringify(report); out.textContent += `${label}: ${JSON.stringify(data, null, 2)}\n`; };
+const assert = (ok, why) => { if (!ok) throw new Error(why); };
+function restore() {
+  const backup = JSON.parse(localStorage.getItem(recoveryKey) || 'null');
+  if (!backup) return null;
+  for (const key of keys) backup[key] == null ? localStorage.removeItem(key) : localStorage.setItem(key, backup[key]);
+  const unchanged = Object.fromEntries(keys.map(key => [key, localStorage.getItem(key) === backup[key]]));
+  localStorage.removeItem(recoveryKey);
+  return unchanged;
+}
+if (localStorage.getItem(recoveryKey)) emit('interrupted-run recovery', restore());
+const backup = Object.fromEntries(keys.map(key => [key, localStorage.getItem(key)]));
+localStorage.setItem(recoveryKey, JSON.stringify(backup));
+localStorage.setItem(keys[1], JSON.stringify({...JSON.parse(backup[keys[1]] || '{}'), autosave:false}));
+let done = false;
+window.addEventListener('beforeunload', () => { if (!done) restore(); });
+frame.addEventListener('load', async () => {
+  if(done) return;
+  const game = frame.contentWindow;
+  let ok = false;
+  try {
+    const l4 = new URLSearchParams(location.search).has('l4');
+    const budgetFailures = [], diagnose = l4 || new URLSearchParams(location.search).has('l3');
+    if(l4) {
+      const {SRC_FILES}=await import('/js/dev/filelist.js');let hash=2166136261;
+      const raw=JSON.stringify(await Promise.all(SRC_FILES.map(async path=>[path,await(await fetch('/'+path,{cache:'no-store'})).text()])));
+      for(let i=0;i<raw.length;i++)hash=Math.imul(hash^raw.charCodeAt(i),16777619)>>>0;
+      emit('production-fingerprint',{files:SRC_FILES.length,hash:hash.toString(16)});
+    }
+    game.__settings.autosave = false;
+    const [chunks, ecology, storage, tasks, saves, {BUILD}, {ECOLOGY}, {SURVIVAL}] = await Promise.all([
+      import('/js/world/chunks.js'), import('/js/systems/ecology.js'), import('/js/systems/storage.js'),
+      import('/js/systems/taskBoard.js'), import('/js/core/save.js'), import('/js/data/buildings.js'),
+      import('/js/data/ecology.js'), import('/js/data/survival.js'),
+    ]);
+    const check = (name, opts={}) => { const r=game.__check({includeKnown:true,...opts}); emit(name,r); assert(r.ok, `${name}: ${JSON.stringify(r.fails)}`); };
+    const start = () => { game.__newGame(4242,'normal'); game.__settings.autosave=false; game.__pause(true); return game.__state; };
+    const get = id => game.__state.chunkStore[id];
+    const createRemote = (S,cx,cy) => {
+      const c=chunks.ensureSurfaceChunk(S,cx,cy); ecology.ensureEcologyChunk(S,c);
+      const m=c.map, places=[];
+      for(let r=0;r<15&&places.length<2;r++) for(let y=36-r;y<=36+r&&places.length<2;y++) for(let x=48-r;x<=48+r&&places.length<2;x++) {
+        if(Math.max(Math.abs(x-48),Math.abs(y-36))!==r || !m.isWalk(x,y) || m.occBuild[y*m.w+x] || m.occWalk[y*m.w+x]) continue;
+        places.push({x,y,i:y*m.w+x});
+      }
+      assert(places.length===2,'前哨无合法夹具位置');
+      const [a,b]=places;
+      c.buildings.push({type:'store',x:a.x,y:a.y,hp:BUILD.store.hp,fuel:0,level:1,site:false,stock:{}},
+        {type:'lamp',x:b.x,y:b.y,hp:BUILD.lamp.hp,fuel:30,burnT:0,level:1,site:false,off:false});
+      for(const p of places) { m.occBuild[p.i]=1; m.occWalk[p.i]=1; }
+      assert(storage.depositToChunk(S,c,'food',24,a.x+0.5,a.y+0.5)===24,'前哨装箱失败');
+      return c;
+    };
+    const essential = c => JSON.stringify({nodes:Array.from(c.map.nodeAmt),blight:Array.from(c.map.blight||[]),fronts:c.map.blightFronts||[],
+      patches:c.ecoPatches,creatures:c.ecoCreatures,buildings:c.buildings.map(b=>({type:b.type,x:b.x,y:b.y,fuel:b.fuel,burnT:b.burnT||0,stock:b.stock||null})),outpost:c.outpost||null,
+      workers:c.workers.map(w=>({id:w.crew?.id,hunger:w.hunger,hp:w.hp,x:w.x,y:w.y,travel:w.outpostTravel}))});
+    const workerById = id => Object.values(game.__state.chunkStore).flatMap(c=>c.workers).find(w=>w.crew?.id===id);
+    const frames = n => new Promise(resolve => { const next=()=>{ if(--n<=0) resolve(); else game.requestAnimationFrame(next); }; game.requestAnimationFrame(next); });
+    const framesUntil = predicate => new Promise((resolve,reject) => { let n=0;const next=()=>{ if(predicate()) resolve();else if(++n>24) reject(new Error('24个渲染帧内未跨过模拟边界'));else game.requestAnimationFrame(next); };game.requestAnimationFrame(next); });
+    check('menu');
+    let S=start(); check('new-game');
+    status.textContent='验证派驻容量、冻结与恢复';
+    for(const [k,n] of [['ore',30],['food',12],['fuel',12]]) game.__give(k,n);
+    game.__recruit(); assert(S.workers.length===3,'生产招募未产生第三名拓荒者');
+    const ids=S.workers.map(w=>w.crew.id), targets=[[1,0],[0,1],[2,0]];
+    for(const [cx,cy] of targets) createRemote(S,cx,cy);
+    for(let i=0;i<3;i++) tasks.setDirective(S.workers[i],{outpost:{x:targets[i][0],y:targets[i][1]},outpostMode:'gather'});
+    game.__steps(600);
+    const active=chunks.activeSurfaceChunks(S).map(c=>c.id), blocked=workerById(ids[2]);
+    assert(active.length===ECOLOGY.MAX_ACTIVE_OUTPOSTS && active[0]==='0,0','玩家优先/三活跃区块失败');
+    emit('initial-dispatch',chunks.outpostReport(S));
+    assert(blocked.outpostTravel?.blocked && (blocked.chunkX|0)===0 && (blocked.chunkY|0)===0,'第四区块派驻未拦截');
+    const sleepBefore=essential(get('2,0')), ticksBefore=targets.slice(0,2).map(([x,y])=>get(`${x},${y}`).outpost?.ticks||0);
+    game.__steps(3600);
+    assert(essential(get('2,0'))===sleepBefore,'无人区块在60秒内发生离线结算');
+    const ticksAfter=targets.slice(0,2).map(([x,y])=>get(`${x},${y}`).outpost?.ticks||0);
+    assert(ticksAfter.every((n,i)=>n>ticksBefore[i]),'活跃前哨未持续结算');
+    tasks.setDirective(workerById(ids[0]),{outpost:{x:0,y:0},outpostMode:'gather'});
+    game.__steps(1080);
+    assert(workerById(ids[2]).chunkX===2,'撤人释放名额后派驻未恢复');
+    const frozenBefore=essential(get('1,0')), frozenTicks=get('1,0').outpost.ticks;
+    game.__steps(3600);
+    assert(essential(get('1,0'))===frozenBefore,'撤人后的前哨未完整冻结');
+    check('three-active');
+    const remoteRows=()=>saves.snapshot(game.__state).chunks.filter(c=>['1,0','0,1','2,0'].includes(`${c.x},${c.y}`));
+    const beforeRows=remoteRows(),saveRows=JSON.stringify(beforeRows); game.__saveSlot('s3'); assert(game.__loadSlot('s3')===true,'生产存档载入失败');
+    game.__settings.autosave=false; game.__pause(true); S=game.__state;
+    const afterRows=remoteRows();
+    if(JSON.stringify(afterRows)!==saveRows) emit('roundtrip-differences',beforeRows.flatMap((c,i)=>Object.keys(c).filter(k=>JSON.stringify(c[k])!==JSON.stringify(afterRows[i]?.[k])).map(k=>({chunk:[c.x,c.y],field:k,before:c[k],after:afterRows[i]?.[k]}))));
+    assert(JSON.stringify(afterRows)===saveRows,'前哨燃料/生态/驻守计时存读不一致');
+    check('roundtrip-after-load',{roundtrip:true});
+    const homeX=S.player.x,homeY=S.player.y; S.player.clearPath();
+    S.player.x=S.map.w-SURVIVAL.CHUNK.EXIT_TRIGGER/2; S.player.y=S.map.h/2; game.__steps(1);
+    assert(S.chunkX===1 && S.chunkY===0,'生产出口未进入原冻结区块');
+    assert(get('1,0').outpost.ticks===frozenTicks,'重新进入时追算了休眠结算');
+    const patch=get('1,0').ecoPatches[0]; patch.amount=0;patch.nextT=1;
+    game.__steps(120);
+    assert(patch.amount>0,'重新进入后生态没有按实时恢复');
+    emit('capacity-freeze-resume',{initialActive:active,blockedFourth:true,ticksBefore,ticksAfter,frozenTicks,noOfflineOutput:true,noCatchup:true,saveEqual:true,resumedPatchAmount:patch.amount,initialPlayer:[homeX,homeY]});
+
+    status.textContent='测量存档增长'; S=start();
+    const sizeRows=[];
+    for(let cx=0;cx<24;cx++) {
+      const c=chunks.ensureSurfaceChunk(S,cx,0);ecology.ensureEcologyChunk(S,c);
+      if([0,3,7,11,23].includes(cx)) {
+        const t0=performance.now(),snap=saves.snapshot(S),raw=JSON.stringify(snap);
+        sizeRows.push({chunks:Object.keys(S.chunkStore).length,bytes:new TextEncoder().encode(raw).length,snapshotMs:+(performance.now()-t0).toFixed(3),chunkPayloadBytes:new TextEncoder().encode(JSON.stringify(snap.chunks)).length});
+      }
+    }
+    assert(sizeRows.at(-1).bytes/24<sizeRows[0].bytes,'存档增长不是有界的区块线性结构');
+    emit('save-growth',sizeRows);
+
+    const heavyNight = (withOutposts) => {
+      S=start(); S.day=7;S.t=330;S.wasTide=true;S.bossSpawnedThisNight=true;S.playerHp=100000;S.playerMaxHp=100000;S.playerInvuln=999;
+      game.__give('ore',160);game.__give('vine',160);
+      let placed=0;
+      for(let r=3;r<16&&placed<40;r++) for(let dy=-r;dy<=r&&placed<40;dy++) for(let dx=-r;dx<=r&&placed<40;dx++) {
+        if(Math.max(Math.abs(dx),Math.abs(dy))!==r) continue;
+        const x=(S.player.x|0)+dx,y=(S.player.y|0)+dy;
+        if(game.__place('lamp',x,y)!==null) continue;game.__finish(x,y);placed++;
+      }
+      assert(placed===40,`夜间负载只有${placed}盏灯`);
+      for(let i=0;i<72;i++) { const a=i*Math.PI*2/72,r=8+(i%4);game.__spawn(i%7===0?'shell':'bud',S.player.x+Math.cos(a)*r,S.player.y+Math.sin(a)*r); }
+      if(withOutposts) {
+        for(let i=0;i<2;i++) {const c=createRemote(S,i+1,0);tasks.setDirective(S.workers[i],{outpost:{x:i+1,y:0},outpostMode:'gather'});c.outpost={nextT:0.01};}
+        // 迁移本身通过生产系统；只手动调用迁移，避免在性能预热前推进蚀兽。
+        chunks.updateOutpostTravel(S,ECOLOGY.OUTPOST_TRAVEL_SEC);
+      }
+      S.player.clearPath();S.nightSpawnDay=7;S.nightSpawnBudget=200;S.nightSpawnUsed=200;
+      // P3专项复跑增加打开的备战/恢复详情负载，原P1默认夹具保持不变。
+      if(new URLSearchParams(location.search).has('p3')) {
+        S.playerHp=S.playerMaxHp-1;
+        for(const b of S.buildings.filter(b=>b.type==='lamp').slice(0,5)) b.fuel=0;
+        const opened=game.__state.activePanel==='night';
+        if(!opened) game.eval("import('/js/ui/panels.js').then(ui=>ui.togglePanel(window.__state,'night'))");
+      }
+      game.__steps(1,0); game.__pause(false);
+      if(l4||['l1','l2','l3'].some(k=>new URLSearchParams(location.search).has(k))) game.eval("import('/js/ui/panels.js').then(ui=>{if(ui.activePanelId()!=='crew')ui.togglePanel(window.__state,'crew')})");
+      if(l4||new URLSearchParams(location.search).has('l3')) game.eval("Promise.all([import('/js/data/colonists.js'),import('/js/systems/taskBoard.js'),import('/js/ui/panels.js')]).then(([data,tasks,ui])=>{for(const w of tasks.allCrewWorkers(window.__state))for(let day=1;day<=data.COLONISTS.MAX_EVENTS;day++)data.recordCrewEvent(w,'role','压力夹具经历'+day,day);ui.renderPanelHost(window.__state);for(const el of document.querySelectorAll('[data-crew-history]'))el.open=true;})");
+      return {lamps:placed,enemies:S.enemies.filter(e=>e.alive).length,active:chunks.activeSurfaceChunks(S).map(c=>c.id)};
+    };
+    for(const withOutposts of [false,true]) {
+      status.textContent=`实时夜间帧耗时：${withOutposts?'三活跃区块':'单区块'}`;
+      const initial=heavyNight(withOutposts);await frames(45);
+      if(l4||new URLSearchParams(location.search).has('l3')) {
+        const histories=Array.from(game.document.querySelectorAll('[data-crew-history]'));
+        assert(S.activePanel==='crew'&&histories.length===2&&histories.every(el=>el.open&&el.textContent.includes('12/12')),'L3性能窗口未打开满额经历');
+        initial.experiencesOpen=histories.length;initial.eventsPerWorker=12;
+      }
+      if(l4||new URLSearchParams(location.search).has('l2')) {
+        assert(S.activePanel==='crew'&&game.document.querySelector('[data-crew-supply]')?.textContent.includes('人员与补给'),'L2性能窗口未打开非空补给摘要');
+        initial.supplyPanelOpen=true;
+      }
+      if(new URLSearchParams(location.search).has('l1')) {
+        assert(S.activePanel==='crew'&&game.document.querySelector('[data-crew-outpost="return"]'),'L1性能窗口未打开返营名册');
+        initial.returnPanelOpen=true;
+      }
+      if(new URLSearchParams(location.search).has('p3')) {
+        assert(S.activePanel==='night'&&game.document.querySelector('[data-preparation]')?.textContent.includes('本区待处理'),'P3性能窗口未打开恢复详情');
+        initial.recoveryIssues=game.__recovery().issues.length;initial.recoveryPanelOpen=true;
+        assert(initial.recoveryIssues>=6,'P3性能窗口没有真实待处理负载');
+      }
+      const remoteTickBefore=withOutposts?get('1,0').outpost.ticks:0;
+      if(withOutposts) for(const id of ['1,0','2,0']) get(id).outpost.nextT=0.01;
+      const startAt=performance.now();game.__perf(true);await frames(l4?241:240);const elapsedMs=performance.now()-startAt;
+      const perf=game.__perf(),total=perf.rows.find(r=>r.stage==='frame.total');
+      game.__pause(true);
+      assert(total?.calls>=220,'实时frame.total样本不足');assert(S.enemies.some(e=>e.alive),'性能窗口因死亡/清场失去敌人负载');
+      const remoteTickAfter=withOutposts?get('1,0').outpost.ticks:0;
+      const finalEnemies=S.enemies.filter(e=>e.alive).length, finalLamps=S.buildings.filter(b=>b.type==='lamp'&&!b.site&&!b.off&&b.fuel>0).length;
+      emit(withOutposts?'three-chunk-night':'single-chunk-night',{initial,finalEnemies,finalLamps,measuredRaf:l4?241:240,elapsedMs,fps:(l4?241:240)*1000/elapsedMs,remoteTickBefore,remoteTickAfter,perf});
+      if(l4) assert(initial.enemies===72&&finalEnemies===72&&finalLamps===40&&total.calls>=240,'L4压力负载或样本数不足');
+      if(withOutposts) assert(remoteTickAfter>remoteTickBefore,'三活跃区块测量未覆盖前哨结算脉冲');
+      const budgetOk=total.maxMs<=(withOutposts?12:8),budgetError=`夜间frame.total超预算：${total.maxMs}ms`;
+      if(!budgetOk&&diagnose){budgetFailures.push({scene:withOutposts?'three-chunk':'single-chunk',maxMs:total.maxMs,budget:withOutposts?12:8});emit('budget-failure',budgetError);}
+      else assert(budgetOk,budgetError);
+    }
+    status.textContent='测量真实出口切区首帧';
+    S=start(); await frames(10);const switchRows=[];
+    for(const dx of [1,-1,1,1,1,-1,-1,-1]) {
+      const from=[S.chunkX,S.chunkY],target=`${S.chunkX+dx},${S.chunkY}`,cold=!S.chunkStore[target];
+      game.__perf(true); S.player.clearPath();S.player.x=dx>0?S.map.w-SURVIVAL.CHUNK.EXIT_TRIGGER/2:SURVIVAL.CHUNK.EXIT_TRIGGER/2;S.player.y=S.map.h/2;
+      game.__pause(false);await framesUntil(()=>S.chunkX===from[0]+dx);game.__pause(true);
+      const perf=game.__perf(),total=perf.rows.find(r=>r.stage==='frame.total');
+      assert(S.chunkX===from[0]+dx && S.chunkY===from[1],`出口切区未发生 ${target}`);
+      const row={from,to:[S.chunkX,S.chunkY],cold,total,draw:perf.rows.find(r=>r.stage==='draw.total')};switchRows.push(row);
+      if(total?.maxMs>16.6&&diagnose){budgetFailures.push({scene:'chunk-switch',from,to:row.to,maxMs:total.maxMs,budget:16.6});emit('budget-failure',row);}
+      else assert(total?.maxMs<=16.6,`切区首帧超预算：${JSON.stringify(row)}`);await frames(8);
+    }
+    emit('chunk-switch-first-frames',switchRows);
+    status.textContent='完整回归';
+    start(); const replay=game.__replay({seed:4242,diff:'normal',days:3,policy:'home'});
+    game.__settings.autosave=false;check('replay-after-3days');check('replay-roundtrip',{roundtrip:true});
+    emit('replay',{ranDays:replay.ranDays,steps:replay.steps,deaths:replay.deaths,minHp:replay.minHp,kills:replay.kills});
+    const source=await game.__srcCheck();emit('source',source);assert(source.ok,'源码审计失败');
+    start();game.__watch(true,20);game.__steps(1200);const log=game.__testLog();game.__watch(false);emit('watch',log);assert(log.length===1&&/共\s*0\s*类/.test(log[0]),'watch出现违例');
+    if(diagnose)emit('budget-failures',budgetFailures);
+    ok=budgetFailures.length===0;
+  } catch(error) {emit('FAIL',String(error.stack||error));}
+  finally {
+    game.__settings.autosave=false;game.__pause(true);
+    const unchanged=restore();emit('official-storage-restored',unchanged);ok=ok&&unchanged&&Object.values(unchanged).every(Boolean);
+    done=true;window.__p1perfResult={ok};status.textContent=ok?'P1 性能 全部通过':'P1 性能 有失败项 · 正式存档已恢复';
+    report.ok=!!ok;document.querySelector('#json').textContent=JSON.stringify(report);
+    if(new URLSearchParams(location.search).has('l4'))frame.src='about:blank';
+  }
+});
+frame.src='/?p1perf='+Date.now();
+</script>

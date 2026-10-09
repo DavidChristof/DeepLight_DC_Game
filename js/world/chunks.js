@@ -13,6 +13,9 @@ import { STARVE } from '../data/traits.js';
 import { downWorker } from '../entities/worker.js';
 import { burnBuildingFuel } from '../systems/logistics.js';
 import { NODE_AMT } from '../data/nodes.js';
+import { EXPEDITION } from '../data/expedition.js';
+import { returnHomeError } from '../systems/taskBoard.js';
+import { recordOutpostEvent } from '../data/colonists.js';
 
 const W = SURVIVAL.CHUNK.WIDTH, H = SURVIVAL.CHUNK.HEIGHT;
 const keyOf = (x, y) => `${x},${y}`;
@@ -111,6 +114,9 @@ export function bindSurfaceChunk(state, chunk) {
 // 选择 NPC 或等待玩家按 E。每次切区块最多兑现一条，避免多条历史告警叠加倒地。
 function activatePendingOutpostRescue(state, chunk) {
   if (!state || !chunk || state.layerId !== 'surface' || !Array.isArray(chunk.workers)) return;
+  // Binding a fresh chunk is not a settlement event. Preserve absent/null state;
+  // existing objects still normalize old alerts before rescue activation.
+  if (!chunk.outpost) return;
   const o = ensureOutpostState(chunk);
   const alert = o.alerts.find((a) => a.status === 'open' && a.rescuePending);
   if (!alert) return;
@@ -180,7 +186,7 @@ function clearTravel(w, reason = null) {
   if (reason) w.task = makeTask('idle', null, 'idle', reason, w.crew && w.crew.id ? w.crew.id : w.name || '');
 }
 
-function arriveAtOutpost(state, w, target, source) {
+function arriveAtOutpost(state, w, target, source, returning = false) {
   const chunk = ensureSurfaceChunk(state, target.x, target.y);
   const sx = source ? source.cx : target.x;
   const sy = source ? source.cy : target.y;
@@ -194,9 +200,19 @@ function arriveAtOutpost(state, w, target, source) {
   const ok = (px, py) => {
     const tx = Math.max(1, Math.min(chunk.map.w - 2, Math.floor(px)));
     const ty = Math.max(1, Math.min(chunk.map.h - 2, Math.floor(py)));
-    return chunk.map.isWalk(tx, ty) && !(chunk.map.occBuild && chunk.map.occBuild[ty * chunk.map.w + tx]);
+    if (!returning) return chunk.map.isWalk(tx, ty) && !(chunk.map.occBuild && chunk.map.occBuild[ty * chunk.map.w + tx]);
+    const r = EXPEDITION.RETURN_STAND_RADIUS;
+    for (let ay = Math.floor(py - r); ay <= Math.floor(py + r); ay++)
+      for (let ax = Math.floor(px - r); ax <= Math.floor(px + r); ax++)
+        if (!chunk.map.isWalk(ax, ay) || (chunk.map.occBuild && chunk.map.occBuild[ay * chunk.map.w + ax])) return false;
+    return !(chunk.workers || []).some(other => other !== w && other.alive && Math.hypot(other.x - px, other.y - py) < r * 2);
   };
-  const spot = candidates.find(([px, py]) => ok(px, py)) || [x, y];
+  const legal = candidates.find(([px, py]) => ok(px, py));
+  if (returning && !legal) {
+    w.task = makeTask('outpost', null, 'blocked', '营地入口被占', w.crew && w.crew.id || '');
+    return false;
+  }
+  const spot = legal || [x, y];
   const fromList = source && source.workers;
   if (fromList) {
     const i = fromList.indexOf(w);
@@ -206,11 +222,17 @@ function arriveAtOutpost(state, w, target, source) {
   w.chunkX = target.x; w.chunkY = target.y;
   w.x = spot[0]; w.y = spot[1];
   w.layerId = 'surface';
-  clearTravel(w, '已抵达前哨，等待下一次工作决策');
+  recordOutpostEvent(w, returning ? 'outpostReturn' : 'outpostArrival', target, state.day);
+  clearTravel(w, returning ? '已回到营地' : '已抵达前哨，等待下一次工作决策');
+  if (returning) {
+    w.directive = directiveFromSave({ ...w.directive, mode: 'auto', outpost: null, outpostMode: null, returnHome: false });
+    state._panelSig = null; state._sidebarSig = null;
+  }
   // 当前区块的 state.workers 与 chunk.workers 是同一引用；这里只需确保旧区块移除后不留孤儿引用。
   if (state.chunkX === target.x && state.chunkY === target.y) state.workers = chunk.workers;
   if (state.chunkX === (source && source.cx) && state.chunkY === (source && source.cy)) state.workers = source.workers;
-  if (state.chunkX === target.x && state.chunkY === target.y) state.floaties.push({ x: spot[0], y: spot[1] - 0.7, txt: `${w.name} 抵达前哨`, color: '#7fe0ff', t: 0, life: 1.6 });
+  if (state.chunkX === target.x && state.chunkY === target.y) state.floaties.push({ x: spot[0], y: spot[1] - 0.7, txt: `${w.name} ${returning ? '已回到营地' : '抵达前哨'}`, color: '#7fe0ff', t: 0, life: 1.6 });
+  return true;
 }
 
 // N6b：跨区迁移只推进计时与区块归属，不跑离屏寻路；目标区块有人后才成为活跃前哨。
@@ -223,6 +245,15 @@ export function updateOutpostTravel(state, dt) {
     w.directive = d;
     const target = d.outpost;
     const here = { x: w.chunkX | 0, y: w.chunkY | 0 };
+    if (d.returnHome) {
+      const error = returnHomeError(state, w);
+      if (error) { w.task = makeTask('outpost', null, 'blocked', error, w.crew && w.crew.id || ''); continue; }
+      if (here.x === target.x && here.y === target.y) {
+        clearTravel(w, '已回到营地');
+        w.directive = directiveFromSave({ ...d, mode: 'auto', outpost: null, outpostMode: null, returnHome: false });
+        continue;
+      }
+    }
     if (!target || w.hollow || w.downed) { if (w.outpostTravel) clearTravel(w, '前哨迁移已暂停'); continue; }
     if (here.x === target.x && here.y === target.y) { if (w.outpostTravel) clearTravel(w, '已抵达前哨，等待下一次工作决策'); continue; }
     const source = ensureSurfaceChunk(state, here.x, here.y);
@@ -240,13 +271,14 @@ export function updateOutpostTravel(state, dt) {
       w.task = makeTask('outpost', null, 'blocked', '等待活跃区块名额', w.crew && w.crew.id ? w.crew.id : w.name || '');
       continue;
     }
-    w.outpostTravel.t = Math.max(0, (w.outpostTravel.t || ECOLOGY.OUTPOST_TRAVEL_SEC) - Math.max(0, dt || 0));
+    w.outpostTravel.t = Math.max(0, (d.returnHome ? w.outpostTravel.t ?? ECOLOGY.OUTPOST_TRAVEL_SEC : w.outpostTravel.t || ECOLOGY.OUTPOST_TRAVEL_SEC) - Math.max(0, dt || 0));
     w.job = 'outpost';
-    if (w.outpostTravel.t <= 0) arriveAtOutpost(state, w, target, source);
+    if (d.returnHome) w.task = makeTask('outpost', null, 'active', '返营中', w.crew && w.crew.id || '');
+    if (w.outpostTravel.t <= 0) arriveAtOutpost(state, w, target, source, d.returnHome);
   }
 }
 
-function stationedOutpostWorkers(chunk) {
+export function stationedOutpostWorkers(chunk) {
   return (chunk && chunk.workers || []).filter((w) => {
     if (!w || !w.alive || w.downed || w.hollow || w.outpostTravel) return false;
     const d = directiveFromSave(w.directive);
@@ -343,11 +375,19 @@ function recordRemoteAlert(state, chunk, outpost, workers, ecology) {
   if (outpost.alerts.length > ECOLOGY.OUTPOST_MAX_ALERTS) outpost.alerts.splice(0, outpost.alerts.length - ECOLOGY.OUTPOST_MAX_ALERTS);
 }
 
-function settleRemoteNeeds(state, chunk, w) {
+// 生产与只读报告共用下一轮进食条件；不推进人员状态。
+export function remoteFoodNeed(w) {
   const sec = ECOLOGY.OUTPOST_SETTLE_SEC;
   const glutton = w.traits && w.traits.bad === 'glutton' ? SURVIVAL.WORKER.GLUTTON_MUL : 1;
-  w.hunger = Math.max(0, (Number.isFinite(w.hunger) ? w.hunger : SURVIVAL.WORKER.START_HUNGER) - SURVIVAL.WORKER.HUNGER_PER_SEC * glutton * sec);
-  const needsFood = w.hunger <= SURVIVAL.WORKER.EAT_AT;
+  const hunger = Math.max(0, (Number.isFinite(w.hunger) ? w.hunger : SURVIVAL.WORKER.START_HUNGER) - SURVIVAL.WORKER.HUNGER_PER_SEC * glutton * sec);
+  return { hunger, needsFood: hunger <= SURVIVAL.WORKER.EAT_AT, rate: SURVIVAL.WORKER.HUNGER_PER_SEC * glutton };
+}
+
+function settleRemoteNeeds(state, chunk, w) {
+  const sec = ECOLOGY.OUTPOST_SETTLE_SEC;
+  const next = remoteFoodNeed(w);
+  w.hunger = next.hunger;
+  const needsFood = next.needsFood;
   let fed = false;
   if (needsFood && withdrawFromChunk(state, chunk, { food: 1 }, w.x, w.y) === null) {
     w.hunger = Math.min(SURVIVAL.WORKER.HUNGER_MAX, w.hunger + SURVIVAL.WORKER.EAT_GAIN);
@@ -387,12 +427,12 @@ export function updateOutpostSettlement(state, dt) {
       const d = directiveFromSave(w.directive);
       const need = settleRemoteNeeds(state, chunk, w);
       if (need.fed) needs.fed++;
-      if (need.foodShort) { if (need.starving) needs.hungry++; needs.foodShort++; reasons.push(`${w.name || '拓荒者'}：食物不足，需要补给`); continue; }
-      if (d.outpostMode !== 'gather') { reasons.push(`${w.name || '拓荒者'}：${d.outpostMode === 'silent' ? '静默撤离' : '守灯'}`); continue; }
+      if (need.foodShort) { if (need.starving) needs.hungry++; needs.foodShort++; reasons.push(`${w.name || '拓荒者'}：食物不足，需要补给`); recordOutpostEvent(w, 'outpostStop', { x: chunk.cx, y: chunk.cy }, state.day, 'food', d.outpostMode); continue; }
+      if (d.outpostMode !== 'gather') { reasons.push(`${w.name || '拓荒者'}：${d.outpostMode === 'silent' ? '静默驻守' : '守灯'}`); continue; }
       const node = nextRemoteNode(chunk);
       if (!node) { reasons.push('没有可采资源'); break; }
       const stored = depositToChunk(state, chunk, node.res, 1, node.x + 0.5, node.y + 0.5);
-      if (stored <= 0) { reasons.push('前哨没有可用容器'); break; }
+      if (stored <= 0) { reasons.push('前哨没有可用容器'); recordOutpostEvent(w, 'outpostStop', { x: chunk.cx, y: chunk.cy }, state.day, 'storage', d.outpostMode); break; }
       consumeRemoteNode(chunk, node);
       yieldByRes[node.res] = (yieldByRes[node.res] || 0) + stored;
       worked++;
@@ -406,6 +446,7 @@ export function updateOutpostSettlement(state, dt) {
       if (withdrawFromChunk(state, chunk, { fuel: ECOLOGY.OUTPOST_GUARD_FUEL_PER_TICK }, w.x, w.y) !== null) {
         needs.fuel++;
         reasons.push(`${w.name || '拓荒者'}：燃料不足，守灯暂停`);
+        recordOutpostEvent(w, 'outpostStop', { x: chunk.cx, y: chunk.cy }, state.day, 'fuel', d.outpostMode);
       }
     }
     o.lastNeeds = needs;
@@ -440,6 +481,8 @@ export function outpostReport(state) {
     return {
       id: w.crew && w.crew.id || null, name: w.name, current, target,
       mode: d.outpostMode || 'guard', modeLabel: DIRECTIVES.OUTPOST[d.outpostMode || 'guard'],
+      returnHome: d.returnHome,
+      reason: d.returnHome ? returnHomeError(state, w) || (w.task && w.task.reason) || '' : '',
       status: stationed ? 'stationed' : (travel && travel.blocked ? 'capacity' : (travel ? 'traveling' : 'pending')),
       travelSec: travel ? +Math.max(0, travel.t || 0).toFixed(2) : 0,
       settlement: stationed ? (() => {

@@ -14,7 +14,6 @@ import { setupScreens, openScreen, closeScreens, backScreen, screenOpen, screenT
 import { draw } from './systems/render.js';
 import { BUILD, LIGHT_LEVELS, workOf, CATEGORIES, TOWER_LV, towerHp } from './data/buildings.js';
 import { loadError, normalizeMods, MAX_SLOTS } from './data/payload.js';   // W14-A 第 2 步：塔的载荷
-import { burnSecOf } from './data/fire.js';
 import { placeError, reservedTileError, tryPlace, demolish, buildingAt, advanceBuild, undoPlace, lockedByResearch, UNDO_SECS, upgradeBuilding } from './systems/building.js';
 import { ensureStorage, syncRes, migrateResToBeacon, storageStats, deposit, withdrawOne, allContainers, usedOf, withdraw, canWithdraw, spendableOf } from './systems/storage.js';
 import { PACK_CAP, RES_NAME, RES_COLOR } from './data/storage.js';
@@ -37,25 +36,28 @@ import { expeditionHud, tickExpeditionGuide } from './systems/expedition.js';
 import { updateNightOps, ensureNightOps, inPatrolSector, patrolActive } from './systems/nightops.js';
 import { updateMind, ensureMind, graveStats, soothe, bondLevel } from './systems/mind.js';
 import { updateHazard } from './systems/hazard.js';
-import { updateLogistics, burnBuildingFuel, cacheStats } from './systems/logistics.js';
+import { updateLogistics, burnBuildingFuel, buildingBurnSec, cacheStats } from './systems/logistics.js';
 import { updateCraft, addFire, setRecipe, workOnce, craftError } from './systems/craft.js';
 import { updateSmelt } from './systems/smelt.js';
 import { equipTool, unequipTool, heldTool } from './systems/tools.js';
 import { canFire } from './data/tools.js';
 import { HAND_FIRE, tideOf, CARRY, RETREAT } from './data/combat.js';   // 手持开火数值 + 潮位唯一式子 + 装载体/封灯代价（HUD 用）
 import { SURVIVAL } from './data/survival.js';
-import { updatePlayerSurvival, eatBestMeal, eatHotMeal, injuryName } from './systems/survival.js';
+import { updatePlayerSurvival, eatBestMeal, eatHotMeal, injuryName, resolvePlayerDeath } from './systems/survival.js';
 import { rollTraits, sanityTier, SANITY_MAX, SOOTHE as SOOTHE_CFG } from './data/traits.js';
 import { ORDER_NAME } from './data/nightops.js';
 import { updateTowers } from './systems/towers.js';
 import { separateEntities, overlapStats } from './systems/collide.js';
-import { unlockTech, lampBurnMul, costOf, sectOpen, knowSeenId, slotsOf } from './systems/research.js';
+import { unlockTech, costOf, sectOpen, knowSeenId, slotsOf } from './systems/research.js';
 import { checkHints, maybeHint, seenStats, HINTS } from './systems/hints.js';
 import { grantRelic, relicTotal, seriesGot } from './systems/relics.js';
 import { useShaft, bindLayer, ensureLayer, layerName } from './systems/layer.js';
 import { combatTable, waveReport, dpsReport, labReport, abilityReport, survivalReport, expeditionReport, ecologyReport, visualReport, crewReport, resonanceReport, resonanceLightReport } from './dev/observe.js';   // W14-A/W15/W20-R：观测台
 import { runReplay } from './dev/replay.js';                                                     // W14-A 第 8 步：标准局回放台
-import { nightHud, spawnInterval, segAtRel } from './data/night.js';                                                     // W14-A 第 4/7 步：一夜三段 + 主题夜 + 刷怪节奏
+import { nightHud, spawnInterval, segAtRel, themeOf } from './data/night.js';                                             // W14-A 第 4/7 步：一夜三段 + 主题夜 + 刷怪节奏
+import { preparationOf } from './systems/preparation.js';
+import { recoveryOf } from './systems/recovery.js';
+import { renderRecoveryHud, setupRecoveryHud } from './ui/panels.js';
 import { updateCarry, mount, unmount, mountError, unmountError, carryable } from './systems/carry.js';       // W14-A 第 5 步 5b：结构装载体
 import { updateSeal, sealError, sealNow, sealHint, litLampStats } from './systems/seal.js';                    // W14-A 第 7 步：封灯撤退
 import { packContainer } from './systems/storage.js';
@@ -73,6 +75,7 @@ import { installSelfTest, selfTestTick } from './dev/selftest.js';   // 开发�
 import { ensureSurfaceChunk, bindSurfaceChunk, tryCrossSurfaceExit, outpostReport, updateOutpostTravel, updateOutpostSettlement, restoreSurfaceTerrain } from './world/chunks.js';
 import { initResonance, isResonanceSiteId, liveResonanceStatus } from './systems/resonance.js';
 import { createRunStats, normalizeRunStats, normalizeEndingRecord, restoreLegacyEnding } from './systems/ending.js';
+import { createNightOutcomes, normalizeNightOutcomes } from './systems/nightOutcome.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -127,6 +130,7 @@ const elDay = document.getElementById('day');
 const elPhase = document.getElementById('phase');
 const elTide = document.getElementById('tide');
 const elNightTheme = document.getElementById('nighttheme');
+setupRecoveryHud(() => state);
 const elWaveLeft = document.getElementById('waveleft');        // W14-A 第 7 步：还剩几波（威胁预告）
 const expeditionEl = document.getElementById('expedition-status'); // W18-G1：远征状态卡
 const bar = document.getElementById('bar');
@@ -168,6 +172,8 @@ export function toggleKeyHelp(force) {
 // 设置里改过键之后调用：重建覆盖层内容（没打开也无所谓）
 export function refreshKeyHelp() { if (keyHelpOpen()) buildKeyHelp(); }
 
+// 开发回放独立计数：在复归清标志前采样，不写进游戏状态或存档。
+let replayDeathCount = 0;
 function newGame(seed, diffKey = 'normal') {
   const diff = DIFFICULTY[diffKey] || DIFFICULTY.normal;
   state.diffKey = DIFFICULTY[diffKey] ? diffKey : 'normal';
@@ -295,6 +301,7 @@ function newGame(seed, diffKey = 'normal') {
   state.milestone = { bossDefeated: false, bossDay: 7, clearedDay: 0 };
   initResonance(state);
   state.runStats = createRunStats();
+  state.nightOutcomes = createNightOutcomes();
   state.ending = null;
   state._endingPending = false;
   // 新局先锁定第 1 天，避免从上一局重开时身份/经历记录继承旧日数。
@@ -406,6 +413,13 @@ function restoreSurfaceChunks(state, list, currentX, currentY) {
     if (d.biome) { c.biome = d.biome; c.map.biome = d.biome; }
     restoreSurfaceTerrain(c.map, d);
     if (Array.isArray(d.enemies)) c.enemies = restoreEnemies(d.enemies, c.map);
+    // 当前区块也必须恢复夜行节点；不能被下方current分支的continue跳过。
+    if (d.nightops && c.nightops) {
+      c.nightops.day = d.nightops.day || 0;
+      c.nightops.tideOn = !!d.nightops.tideOn;
+      if (Array.isArray(d.nightops.blooms)) c.nightops.blooms = d.nightops.blooms.map((b) => ({ ...b }));
+      if (Array.isArray(d.nightops.vents)) c.nightops.vents = d.nightops.vents.map((v) => ({ ...v }));
+    }
     if (c === current) {
       if (d.outpost && typeof d.outpost === 'object') c.outpost = {
         nextT: Math.max(0, Number(d.outpost.nextT) || 0), ticks: Math.max(0, d.outpost.ticks | 0),
@@ -437,7 +451,6 @@ function restoreSurfaceChunks(state, list, currentX, currentY) {
       lastNeeds: d.outpost.lastNeeds && typeof d.outpost.lastNeeds === 'object' ? { ...d.outpost.lastNeeds } : {},
       lastReason: String(d.outpost.lastReason || ''),
     };
-    if (d.nightops && c.nightops) { c.nightops.day = d.nightops.day || 0; c.nightops.tideOn = !!d.nightops.tideOn; if (d.nightops.blooms) c.nightops.blooms = d.nightops.blooms.map((b) => ({ ...b })); if (d.nightops.vents) c.nightops.vents = d.nightops.vents.map((v) => ({ ...v })); }
     state.layers.surface = prev;
   }
   const target = ensureSurfaceChunk(state, currentX, currentY);
@@ -478,7 +491,8 @@ function restoreBuildings(list) {
     badMods += nm.dropped;
     state.buildings.push({
       type: b.type, x: b.x, y: b.y, site,
-      work: site ? (b.work || 0) : 0,
+      // 已完工建筑也序列化work；恢复时不能清零造成完整快照往返丢字段。
+      work: site ? (b.work || 0) : (Number.isFinite(b.work) ? Math.max(0, b.work) : 0),
       hp: site ? 0 : hpAfterLoad(d, b),   // 旧存档没有 hp 字段 → 按满血；塔还要按**等级**算上限（第 6 步，Lv3 的 216 不能被子基础 120 砍掉）；没有结构概念的建筑（灯柱/工作台）保持原样
       fuel: b.fuel || 0, level: b.level == null ? 1 : b.level,
       burnT: Number.isFinite(b.burnT) ? Math.max(0, b.burnT) : 0, cd: 0, growth: b.growth || 0, purifyT: 0,
@@ -884,6 +898,7 @@ function loadFromData(s) {
   if (s.milestone) state.milestone = s.milestone;
   initResonance(state, s.resonance || null);                // 旧档无此字段：Boss 已倒时补发一次首站线索
   state.runStats = normalizeRunStats(s.runStats);           // 旧档未记录的历史指标保持未知
+  state.nightOutcomes = normalizeNightOutcomes(s.nightOutcomes);
   state.ending = normalizeEndingRecord(s.ending);
   state._endingPending = false;
   if (!state.ending) restoreLegacyEnding(state);            // 仅从三站持久完成事实补建旧档结局，不猜历史数据
@@ -947,6 +962,10 @@ function boot() {
     // 用 activeElement 而不是 ev.target：浏览器/输入法的 keydown 目标不一定是输入框
     const ae = document.activeElement;
     if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+    if (ae?.matches('[data-crew-history] > summary') && ['Enter', ' ', 'Tab'].includes(e.key)) return;
+    // 备战原生按钮保留 Enter/空格/Tab 行为，不触发旧面板“第一行确认”。
+    if (ae?.tagName === 'BUTTON' && ae.matches('#nighttheme, [data-prep-panel], [data-prep-build], [data-prep-locate], [data-recovery-open], [data-recovery-dismiss]')
+      && ['Enter', ' ', 'Tab'].includes(e.key)) return;
     if (keyHit('pause', e)) {                   // 直接暂停 / 继续（快速冻结，不开菜单）
       state.quickPause = !state.quickPause;
       syncPause();
@@ -1080,6 +1099,7 @@ function boot() {
   });
   const panelBarEl = document.getElementById('panelbar');
   if (panelBarEl) panelBarEl.addEventListener('click', (ev) => panelClick(state, ev));
+  if (elNightTheme) elNightTheme.addEventListener('click', () => { if (state.started) togglePanel(state, 'night'); });
   if (hotbarEl) hotbarEl.addEventListener('click', (ev) => {       // 鼠标点快捷栏也能选
     const t = ev.target && ev.target.closest ? ev.target.closest('[data-hs]') : null;
     if (t) { selectHot(state, Number(t.getAttribute('data-hs')) | 0); sfx('click'); }
@@ -1357,6 +1377,7 @@ const BLIGHT_HZ = 4;               // 蚀痕心跳：地貌腐蚀以秒/分钟�
 function simStep(dt) {
   const tStep = pnow();
   state._simT = (state._simT || 0) + dt;              // 模拟时间（光照脏标记/确定性测试用）
+  resolvePlayerDeath(state); // 已致死先记失败，不能让时钟先跨黎明授予成功。
   updateTime(state, dt, () => { if (settings.autosave) saveGame(state, 'auto'); });   // 跨天自动存档
   const p = state.player;
   const oldPX = p.x, oldPY = p.y;
@@ -1544,6 +1565,7 @@ function simStep(dt) {
   const tCol = pnow();
   separateEntities(state, dt);                        // 实体间碰撞体积（弹性分离，放最后：先把 AI 走完再收拾重叠）
   pmark('sim.collide', tCol);
+  if (state._replayMode && state.playerDead) replayDeathCount += 1;
   handleDeath(state);
   // 就地剔除阵亡者：绝不可整体替换 state.enemies（那会与 layers.surface.enemies 脱钩）
   const eArr = state.enemies;
@@ -1694,6 +1716,7 @@ function initDragRect(canvas) {
 }
 
 function drawHud() {
+  renderRecoveryHud(state);
   const p = phaseInfo(state);
   elDay.textContent = `第 ${state.day} 天`;
   // 壶潮里把"还剩多少秒天亮"直接写在相位旁边（第 7 步）：
@@ -1707,8 +1730,9 @@ function drawHud() {
   // 今晚是什么夜（W14-A 第 4 步）：白天预告、夜里报时段；颜色取自“主力兵种”的色，与场上敌人一眼对得上
   if (elNightTheme) {
     const nh = nightHud(state);
-    elNightTheme.textContent = isTide(state) ? `${nh.theme} · ${nh.seg}` : `今晚 ${nh.theme}`;
-    elNightTheme.title = `${nh.theme}：${nh.note}（主力：${nh.signatures.join(' / ')}）`;
+    elNightTheme.textContent = isTide(state) ? `${nh.theme} · ${nh.seg}`
+      : isDawn(state) ? `明夜 ${themeOf({ day: state.day + 1 }).name}` : `今晚 ${nh.theme}`;
+    elNightTheme.title = '查看备战 · 威胁、灯火与调度';
     elNightTheme.style.color = nh.color || '';
   }
   // 还剩几波（第 7 步）：与刷怪器**同一个式子**算出来的估数（cap 卡住时实际会更少 → 文案带"≈"）
@@ -1834,7 +1858,7 @@ function drawHud() {
       : (bossNight && state.t < TIDE_START)
         ? '今晚大潮 · 备足燃料，塔放进光里'
         : (state.t >= DUSK_START && state.t < TIDE_START)
-          ? `黄昏 · 今晚「${nightHud(state).theme}」：${nightHud(state).note} · N 安排今夜`
+          ? `黄昏 · ${nh.theme} · ${keyLabel(boundCode('panelNight'))} 查看备战`
           : (isDawn(state) && dawnLeft > 0)
             ? `黎明 · 残留蚀兽 ${dawnLeft} 只正在消解（Boss 除外）· 夜辉草还能抢收`
             : nh.soon
@@ -1947,7 +1971,8 @@ function lightSummary() {
     const lv = LIGHT_LEVELS[b.level == null ? 1 : b.level] || LIGHT_LEVELS[1];
     count += 1;
     power += lv.r;
-    if (def.burnSec) perSec += lv.burn / (burnSecOf(b, def) * lampBurnMul(state));   // 火种不同，耗料速度不同
+    const interval = buildingBurnSec(b, state);
+    if (interval) perSec += 1 / interval; // 与燃烧器、备战续航共用研究与火种倍率
   }
   return { count, power, perSec, perMin: perSec * 60, prism, prismLit, decoy, decoyFuel };
 }
@@ -2080,10 +2105,10 @@ function renderSidebar() {
   if (sum.decoy) campBody += srow('#9fc3e0', 'decoy', '诱饵', `${sum.decoy} 盏 · ${sum.decoyFuel} 燃料`, ' data-tipkey="decoy" data-tiplabel="诱饵灯" data-tiptext="不发光、不照亮、不压蚀痕 —— 只把蚀兽引过来"');
   html += foldHead('camp', '营地') + foldBody('camp', campBody);
 
-  html += `<div class="whead fold" data-fold="roster"><span>拓荒队 ${ws.length} 人</span><span class="worder">${ORDER_NAME[state.order || 'auto'] || '自动'}</span><span class="wchev">${fold.roster ? '▸' : '▾'}</span></div>`;
+  html += `<div class="whead fold" data-fold="roster"><span>本区拓荒者 ${ws.length} 人</span><span class="worder">${ORDER_NAME[state.order || 'auto'] || '自动'}</span><span class="wchev">${fold.roster ? '▸' : '▾'}</span></div>`;
   let rosterBody = '';
   if (!ws.length) {
-    rosterBody = '<div class="wtitle">无人生还…</div>';
+    rosterBody = '<div class="wtitle">本区暂无拓荒者 · 按 O 查看全队</div>';
   } else {
     rosterBody = ws.map((w, i) => {
       const san = w.sanity == null ? SANITY_MAX : w.sanity;
@@ -2256,6 +2281,8 @@ window.__keys = () => ({                              // 当前输入层状态�
 });
 window.__hot = () => ({ cat: state.buildCat, slot: state.hotSlot, building: state.building, list: buildListOf(state) });   // 调试：快捷栏状态
 window.__focus = () => panelFocusInfo();                              // 调试：面板焦点（回车会点哪一行）
+window.__prep = () => preparationOf(state);                           // 只读：当前驻地威胁、可用火力与逐灯续航
+window.__recovery = () => recoveryOf(state);                         // 只读：当前驻地恢复问题，不推进模拟
 window.__seen = () => seenStats(state);                               // 调试：已经说过的首次提示
 window.__hint = (key) => {                                            // 调试：强制再看一条首次提示
   if (state.seen) delete state.seen[key];
@@ -2365,7 +2392,9 @@ window.__replay = (opts) => {
   };
   try { return runReplay(opts, {
     state: () => state,
-    newGame: (seed, diff) => newGame(seed, diff),
+    newGame: (seed, diff) => { replayDeathCount = 0; newGame(seed, diff); },
+    deathCount: () => replayDeathCount,
+    spendable: () => spendableOf(state),
     step: (dt) => simStep(dt),
     place: (type, tx, ty) => tryPlace(state, type, tx, ty),
     finish: (tx, ty) => window.__finish(tx, ty),
@@ -2375,7 +2404,8 @@ window.__replay = (opts) => {
       const def = BUILD[b.type];
       const room = def && def.maxFuel ? def.maxFuel - (b.fuel || 0) : 1;
       if (room <= 0) return;
-      withdrawOne(state, 'fuel', 1, b.x + 0.5, b.y + 0.5);
+      const error = withdrawOne(state, 'fuel', 1, b.x + 0.5, b.y + 0.5);
+      if (error !== null) return error;
       b.fuel = (b.fuel || 0) + 1;
     },
     harvest: (b) => tick(state, { kind: 'harvest', b }),

@@ -1,0 +1,78 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>L4 新局前哨存读诊断</title>
+<body style="background:#101923;color:#e5edf5;font:14px monospace;margin:20px">
+<h2>L4 · 新局前哨惰性初始化诊断</h2>
+<p>独立受控场景：新局存读、无告警绑定、旧告警兑现；不冒充自然救援或压力测试。结束恢复正式三键。</p>
+<button id="run">运行存读诊断</button><button id="verify">修复验收与四态回归</button><p id="status">未执行</p><pre id="out" style="white-space:pre-wrap"></pre>
+<iframe id="game" title="存读诊断游戏" style="width:1280px;max-width:98vw;height:720px"></iframe>
+<script type="module">
+import { FORMAL_KEYS, canonical, digest } from './tools/l4_matrix_artifact.mjs';
+const frame=document.querySelector('#game'),out=document.querySelector('#out'),status=document.querySelector('#status');
+let active=false,backup,g,report,verify=false;
+const copy=v=>JSON.parse(JSON.stringify(v));
+const assert=(v,m)=>{if(!v)throw Error(m);};
+const display=()=>{out.textContent=JSON.stringify(report,null,2);};
+function differences(a,b,p='') {
+  if(JSON.stringify(a)===JSON.stringify(b))return [];
+  if(a==null||b==null||typeof a!=='object'||typeof b!=='object')return [{path:p,before:a,after:b}];
+  return [...new Set([...Object.keys(a),...Object.keys(b)])].flatMap(k=>differences(a[k],b[k],p+'.'+k));
+}
+function finish(error) {
+  if(!active)return;if(error)report.error=String(error.stack||error);
+  if(g?.__settings)g.__settings.autosave=false;g?.__quick?.(true);active=false;frame.src='about:blank';
+  for(const k of FORMAL_KEYS)backup[k]==null?localStorage.removeItem(k):localStorage.setItem(k,backup[k]);
+  report.storage=Object.fromEntries(FORMAL_KEYS.map(k=>[k,localStorage.getItem(k)===backup[k]]));
+  display();status.textContent=error?'诊断／验收中断，正式三键恢复':verify?'修复验收与四态回归完成，正式三键恢复':'诊断完成；差异如实保留，正式三键恢复';
+}
+function start(strict){if(active)return;verify=strict;
+  backup=Object.fromEntries(FORMAL_KEYS.map(k=>[k,localStorage.getItem(k)]));
+  localStorage.setItem(FORMAL_KEYS[1],JSON.stringify({...JSON.parse(backup[FORMAL_KEYS[1]]||'{}'),autosave:false}));
+  report={scope:strict?'isolated outpost fix acceptance and general browser regression, not L4 pressure acceptance':'controlled fresh-save/bind/legacy-alert diagnosis, not gameplay acceptance'};active=true;frame.src='/?l4-outpost-diagnosis='+Date.now();
+}
+document.querySelector('#run').onclick=()=>start(false);
+document.querySelector('#verify').onclick=()=>start(true);
+frame.onload=async()=>{if(!active||frame.getAttribute('src')==='about:blank')return;g=frame.contentWindow;
+  try {
+    g.__settings.autosave=false;g.__quick(true);report.menu=g.__check();
+    const [save,chunks]=await g.eval("Promise.all([import('/js/core/save.js'),import('/js/world/chunks.js')])");
+    const {SRC_FILES}=await import('./js/dev/filelist.js');
+    report.codeFingerprint=digest(JSON.stringify(await Promise.all(SRC_FILES.map(async f=>[f,await(await fetch('/'+f)).text()]))));
+    const fresh=()=>{g.__newGame(4242,'normal');g.__settings.autosave=false;g.__quick(true);return g.__state;};
+    const snap=()=>{const v=copy(save.snapshot(g.__state));delete v.at;return canonical(v);};
+    fresh();const before=snap();g.__saveSlot('s3');if(!g.__loadSlot('s3'))throw Error('load failed');g.__settings.autosave=false;g.__quick(true);
+    const after=snap();report.freshRoundtrip={beforeHash:digest(JSON.stringify(before)),afterHash:digest(JSON.stringify(after)),differences:differences(before,after)};
+    let s=fresh(),chunk=s.chunkStore['0,0'];const beforeDefined=chunk.outpost!==undefined,beforeBind=copy(chunk.outpost??null);chunks.bindSurfaceChunk(s,chunk);
+    report.noAlertBind={beforeDefined,before:beforeBind,after:copy(chunk.outpost??null)};
+    s=fresh();chunk=s.chunkStore['0,0'];const w=chunk.workers.find(w=>w.alive&&!w.downed);
+    if(!w)throw Error('no worker');chunk.outpost={alerts:[{id:'l4-legacy-diagnostic',kind:'blight',message:'受控旧告警',workerId:w.crew.id,status:'open'}]};
+    const workerBefore={id:w.crew.id,hp:w.hp,downed:!!w.downed};chunks.bindSurfaceChunk(s,chunk);
+    const first=copy(chunk.outpost),downed=!!w.downed,identity=w.crew.id;chunks.bindSurfaceChunk(s,chunk);
+    report.legacyAlert={controlledFields:['chunk.outpost.alerts (one old-format blight alert)'],workerBefore,
+      workerAfter:{id:identity,hp:w.hp,downed},first,second:copy(chunk.outpost),secondBindUnchanged:JSON.stringify(first)===JSON.stringify(chunk.outpost)};
+    g.__quick(false);report.after=g.__check();g.__quick(true);
+    if(verify){
+      assert(report.menu.ok&&report.after.ok,'menu/legacy scenario checks');
+      assert(report.freshRoundtrip.differences.length===0,'fresh full snapshot roundtrip differs');
+      assert(report.noAlertBind.after===null,'no-alert binding created outpost');
+      assert(report.legacyAlert.workerAfter.downed&&report.legacyAlert.workerAfter.hp===0
+        &&report.legacyAlert.first.alerts[0].status==='resolved'&&report.legacyAlert.first.alerts[0].rescuePending===false
+        &&report.legacyAlert.secondBindUnchanged,'legacy alert activation or idempotence');
+      report.regression={checks:[]};
+      const check=(label,opts={})=>{const r=g.__check(opts);report.regression.checks.push({label,...r});display();assert(r.ok,label+' checks failed');};
+      g.__newGame(4242,'normal');g.__settings.autosave=false;g.__steps(1);check('new');g.__quick(true);
+      const newBefore=snap();assert(g.__saveSlot('s3')!==false&&g.__loadSlot('s3'),'regression production save/load');
+      g.__settings.autosave=false;g.__quick(true);report.regression.roundtripDifferences=differences(newBefore,snap());
+      assert(report.regression.roundtripDifferences.length===0,'regression roundtrip snapshot differs');check('loaded',{roundtrip:true});
+      status.textContent='标准三日回放运行中';await new Promise(r=>setTimeout(r,0));
+      const replay=g.__replay({seed:4242,diff:'normal',days:3,policy:'home'});g.__settings.autosave=false;g.__quick(true);
+      report.regression.replay=replay;check('replay',{roundtrip:true});
+      assert(replay.steps===72001&&replay.deaths===0&&replay.minHp===54&&replay.kills===118,'D323 baseline changed');
+      report.regression.source=await g.__srcCheck();assert(report.regression.source.ok,'source audit failed');
+      g.__watch(true,20);for(let i=0;i<10;i++){g.__steps(120);await new Promise(r=>setTimeout(r,0));}g.__watch(false);
+      report.regression.watch={steps:1200,interval:20,log:g.__testLog()};
+      assert(report.regression.watch.log.length===1&&report.regression.watch.log[0]==='共 0 类','watch violations');
+    }
+    finish();
+  } catch(e) {finish(e);}
+};
+window.addEventListener('beforeunload',()=>finish(Error('interrupted')));
+</script></body></html>

@@ -26,6 +26,7 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
 
 # 音频/图片：显式声明 MIME（有些扩展名不在 Python 默认表里，浏览器会当二进制拒收）
 NoCacheHandler.extensions_map.update({
+    ".mjs": "text/javascript",
     ".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".oga": "audio/ogg",
     ".wav": "audio/wav", ".m4a": "audio/mp4", ".aac": "audio/aac", ".flac": "audio/flac",
     ".webp": "image/webp", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",

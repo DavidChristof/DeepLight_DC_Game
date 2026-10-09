@@ -1,0 +1,60 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>L0 调度边界审计</title>
+<body style="background:#101923;color:#e5edf5;font:14px monospace;margin:12px">
+<h1>L0 · 现有调度边界审计</h1><button id="run">开始隔离审计</button>
+<p id="status">等待运行</p><pre id="result" style="white-space:pre-wrap;max-height:480px;overflow:auto"></pre>
+<iframe id="game" title="隔离调度审计" style="width:960px;height:640px"></iframe>
+<script type="module">
+const keys=['deep-light-saves-v2','deep-light-settings-v1','deep-light-ui-v1'];
+const backupKey='__deep_light_l0_backup_v1',evidenceKey='__deep_light_l0_evidence_v1';
+const frame=document.querySelector('#game'),out=document.querySelector('#result');
+let active=false,g,s,chunkApi,taskApi,saveApi,defs,colonists,result;
+const assert=(ok,why)=>{if(!ok)throw Error(why);};
+const show=()=>{out.textContent=JSON.stringify(result,null,2);localStorage.setItem(evidenceKey,out.textContent);};
+function restore(){const saved=JSON.parse(localStorage.getItem(backupKey)||'null');if(!saved)return null;
+ for(const k of keys)saved[k]==null?localStorage.removeItem(k):localStorage.setItem(k,saved[k]);
+ const exact=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)===saved[k]]));
+ if(Object.values(exact).every(Boolean))localStorage.removeItem(backupKey);return exact;}
+window.addEventListener('beforeunload',()=>{if(active)restore();});
+const check=(label,opts={})=>{const r=g.__check(opts);result.checks.push({label,...r});assert(r.ok,label+JSON.stringify(r.fails));};
+const fresh=()=>{g.__newGame(4242,'normal');g.__settings.autosave=false;g.__steps(1);g.__quick(true);s=g.__state;return s.workers[0];};
+const chunk=(x,y)=>chunkApi.ensureSurfaceChunk(s,x,y);
+const assign=(w,x,y)=>taskApi.setDirective(w,{outpost:{x,y},outpostMode:'gather'});
+const advance=sec=>chunkApi.updateOutpostTravel(s,sec);
+const location=w=>[w.chunkX,w.chunkY];
+const unique=w=>Object.values(s.chunkStore).reduce((n,c)=>n+c.workers.filter(q=>q===w).length,0)===1;
+const record=(name,fn)=>{const data=fn();result.cases.push({name,...data});show();};
+document.querySelector('#run').onclick=()=>{if(active)return;if(localStorage.getItem(backupKey))restore();
+ const saved=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)]));localStorage.setItem(backupKey,JSON.stringify(saved));
+ localStorage.setItem(keys[1],JSON.stringify({...JSON.parse(saved[keys[1]]||'{}'),autosave:false}));
+ result={cases:[],checks:[],knownGaps:[]};active=true;document.querySelector('#run').disabled=true;frame.src='/?l0-audit='+Date.now();};
+frame.onload=async()=>{if(!active)return;g=frame.contentWindow;try{
+ g.__settings.autosave=false;
+ [chunkApi,taskApi,saveApi,defs,colonists]=await g.eval(`Promise.all([import('/js/world/chunks.js'),import('/js/systems/taskBoard.js'),import('/js/core/save.js'),import('/js/data/tasks.js'),import('/js/data/colonists.js')])`);
+ check('menu');g.__newGame(4242,'normal');g.__settings.autosave=false;check('new');
+ record('01 旧指令默认行为',()=>{const d=defs.directiveFromSave({outpost:{x:0,y:0}});assert(d.outpostMode==='guard'&&d.mode==='auto','旧指令默认错误');return {directive:d};});
+ record('02 异常坐标不变目标',()=>{assert(defs.directiveFromSave({outpost:{x:'1',y:0}}).outpost===null,'非法坐标有效');return {ok:true};});
+ record('03 发令不立即迁移',()=>{const w=fresh();chunk(1,0);assign(w,1,0);assert(w.chunkX===0&&!w.outpostTravel,'发令瞬移');return {location:location(w)};});
+ record('04 8秒计时与单一归属',()=>{const w=fresh();chunk(1,0);assign(w,1,0);advance(3);assert(w.chunkX===0&&w.outpostTravel.t===5,'前三秒错误');advance(5);assert(w.chunkX===1&&unique(w),'抵达归属错误');return {location:location(w),unique:true};});
+ record('05 到达后取消仍在前哨',()=>{const w=fresh();assign(w,1,0);advance(8);taskApi.setDirective(w,{outpost:null,outpostMode:null});advance(8);assert(w.chunkX===1&&!w.outpostTravel,'取消自动返营');return {location:location(w)};});
+ record('06 在途取消留在源区',()=>{const w=fresh();assign(w,1,0);advance(2);taskApi.setDirective(w,{outpost:null,outpostMode:null});advance(8);assert(w.chunkX===0&&!w.outpostTravel,'取消仍迁移');return {ok:true};});
+ record('07 在途改派重设时间',()=>{const w=fresh();assign(w,1,0);advance(2);assign(w,-1,0);advance(1);assert(w.outpostTravel.to.x===-1&&w.outpostTravel.t===7,'改派未重设');advance(7);assert(w.chunkX===-1&&unique(w),'改派归属错误');return {location:location(w)};});
+ record('08 同目标重复发令不重计时',()=>{const w=fresh();assign(w,1,0);advance(2);assign(w,1,0);advance(1);assert(w.outpostTravel.t===5,'重复发令重设');return {remaining:w.outpostTravel.t};});
+ record('09 已在目标不创建迁移',()=>{const w=fresh();assign(w,0,0);advance(8);assert(!w.outpostTravel&&w.chunkX===0,'原地迁移');return {ok:true};});
+ record('10 深潜期间计时冻结',()=>{const w=fresh();assign(w,1,0);advance(2);s.layerId='depth1';advance(60);assert(w.outpostTravel.t===6,'深潜推进');s.layerId='surface';advance(6);assert(w.chunkX===1,'回地表不续行');return {ok:true};});
+ record('11 倒地暂停现行迁移',()=>{const w=fresh();assign(w,1,0);advance(1);w.downed=true;advance(8);assert(w.chunkX===0&&!w.outpostTravel,'倒地迁移');return {ok:true};});
+ record('12 蚀化暂停现行迁移',()=>{const w=fresh();assign(w,1,0);advance(1);w.hollow=true;advance(8);assert(w.chunkX===0&&!w.outpostTravel,'蚀化迁移');return {ok:true};});
+ record('13 死亡成员不抵达',()=>{const w=fresh();assign(w,1,0);advance(1);w.alive=false;advance(8);assert(w.chunkX===0,'死亡迁移');return {retainedTravel:!!w.outpostTravel};});
+ record('14 两成员并发争最后名额',()=>{const a=fresh(),b=s.workers[1];assign(a,1,0);assign(b,-1,0);advance(8);assert(a.chunkX===1&&b.chunkX===-1&&chunkApi.activeSurfaceChunks(s).length===3,'并发归属/容量错误');return {active:3};});
+ record('15 三驻地下第四区受阻并恢复',()=>{const a=fresh(),b=s.workers[1];assign(a,1,0);assign(b,-1,0);advance(8);assign(a,0,1);advance(8);assert(a.chunkY===1,'单人换地应释放源容量');const source=chunk(-1,0),extra=new a.constructor('审计成员',10.5,10.5,{...a.traits});extra.crew={...a.crew,id:'l0-extra'};extra.chunkX=-1;extra.chunkY=0;source.workers.push(extra);assign(b,1,0);advance(8);assert(b.outpostTravel.blocked&&b.chunkX===-1,'第四区未等待');extra.alive=false;advance(8);assert(b.chunkX===1&&unique(b),'释放名额未抵达');return {ok:true};});
+ record('16 切区绑定与成员引用一致',()=>{const w=fresh();assign(w,1,0);advance(8);const c=chunk(1,0);chunkApi.bindSurfaceChunk(s,c);assert(s.workers===c.workers&&s.workers.includes(w)&&unique(w),'切区引用错');return {ok:true};});
+ record('17 在途不参与远端采掘',()=>{const w=fresh();assign(w,1,0);advance(8);const c=chunk(1,0);assign(w,0,0);advance(1);chunkApi.updateOutpostSettlement(s,12);assert(c.outpost.ticks===0,'在途生产');return {ticks:c.outpost.ticks};});
+ record('18 入口全堵现行降级行为',()=>{const w=fresh(),c=chunk(1,0);c.map.isWalk=()=>false;assign(w,1,0);advance(8);assert(w.chunkX===1&&!c.map.isWalk(Math.floor(w.x),Math.floor(w.y)),'预期缺口未复现');result.knownGaps.push('普通前哨迁移全部候选不可站时仍使用默认入口；L1仅新返营路径必须等待合法站位，旧路径缺口另立修复');return {gap:true,location:location(w)};});
+ record('19 远端告警尚非倒地，入区只兑现一次',()=>{const w=fresh(),c=chunk(1,0);assign(w,1,0);advance(8);chunkApi.updateOutpostSettlement(s,12);c.outpost.alerts=[{id:'l0-alert',kind:'blight',day:1,t:320,workerId:w.crew.id,workerName:w.name,message:'审计险情',status:'open',rescuePending:true}];assert(!w.downed,'远端已经倒地');chunkApi.bindSurfaceChunk(s,c);assert(w.downed&&c.outpost.alerts[0].status==='resolved'&&!c.outpost.alerts[0].rescuePending,'未兑现');const hp=w.hp;chunkApi.bindSurfaceChunk(s,c);assert(w.hp===hp,'重复兑现');return {downed:true,resolvedMeansRescueFinished:false};});
+ record('20 在途序列化保留剩余秒数',()=>{const w=fresh();assign(w,1,0);advance(3);const raw=saveApi.saveGame(s,'s3');const serialized=JSON.stringify(raw);assert(serialized.includes('outpostTravel'),'未存迁移');g.__loadSlot('s3');g.__settings.autosave=false;s=g.__state;const loaded=taskApi.findCrewWorker(s,w.crew.id);assert(loaded.outpostTravel.t===5&&loaded.chunkX===0,'在途读档丢时间');advance(5);assert(loaded.chunkX===1&&unique(loaded),'存读后不能抵达');return {remaining:5};});
+ fresh();check('roundtrip',{roundtrip:true});check('after-load');result.source=await g.__srcCheck();assert(result.source.ok,'源码审计失败');
+ result.replay=g.__replay({seed:4242,diff:'normal',days:3,policy:'home'});g.__quick(true);check('replay');g.__watch(true,20);g.__steps(1200);g.__watch(false);result.watch=g.__testLog();assert(result.watch.length===1&&result.watch[0]==='共 0 类','长跑违例');
+ result.ok=true;document.querySelector('#status').textContent='L0完成 · 20项边界审计';
+ }catch(e){result.error=String(e.stack||e);document.querySelector('#status').textContent='失败 · 查看证据';}
+ finally{if(g){g.__settings.autosave=false;g.__quick(true);}frame.src='about:blank';result.storage=restore();active=false;show();}
+};
+</script>

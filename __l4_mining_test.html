@@ -1,0 +1,42 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>L4 缓存采集目标诊断</title>
+<body style="background:#101923;color:#e5edf5;font:13px monospace">
+<h2>L4 · 缓存采集目标的独立受控诊断</h2>
+<p>夹具只移除NPC干扰并将玩家放到一个真实矿点；不增加资源。准备后在游戏HUD按钮上按E，推进120个生产步。</p>
+<button id="prepare">准备单矿点诊断</button><button id="end">结束并恢复正式三键</button>
+<p id="status">未开始</p><pre id="out" style="white-space:pre-wrap"></pre>
+<iframe id="game" title="诊断游戏" style="width:1280px;max-width:98vw;height:720px"></iframe>
+<script type="module">
+import { FORMAL_KEYS, digest } from './tools/l4_matrix_artifact.mjs';
+const frame=document.querySelector('#game'),out=document.querySelector('#out'),status=document.querySelector('#status');
+let backup,g,s,report,active=false;
+function display(){out.textContent=JSON.stringify(report,null,2);}
+function end(){if(!active)return;g?.__quick?.(true);if(g?.__settings)g.__settings.autosave=false;
+  for(const k of FORMAL_KEYS)backup[k]==null?localStorage.removeItem(k):localStorage.setItem(k,backup[k]);
+  report.storage=Object.fromEntries(FORMAL_KEYS.map(k=>[k,localStorage.getItem(k)===backup[k]]));
+  active=false;frame.src='about:blank';display();}
+document.querySelector('#prepare').onclick=()=>{if(active)return;backup=Object.fromEntries(FORMAL_KEYS.map(k=>[k,localStorage.getItem(k)]));
+  localStorage.setItem(FORMAL_KEYS[1],JSON.stringify({...JSON.parse(backup[FORMAL_KEYS[1]]||'{}'),autosave:false}));
+  report={scope:'isolated stale-action reproduction, not original input chain',steps:120};active=true;frame.src='/?l4-mine-diagnostic='+Date.now();};
+document.querySelector('#end').onclick=end;window.addEventListener('beforeunload',end);
+frame.onload=async()=>{if(!active)return;g=frame.contentWindow;
+  try{g.__settings.autosave=false;const c=g.__check();report.menu=c;if(!c.ok)throw Error('menu checks');
+    g.__newGame(4242,'normal');g.__settings.autosave=false;g.__quick(true);s=g.__state;
+    const {T}=await g.eval("import('/js/world/map.js')"),interact=await g.eval("import('/js/systems/interact.js')");
+    const {SRC_FILES}=await import('./js/dev/filelist.js');report.codeFingerprint=digest(JSON.stringify(await Promise.all(SRC_FILES.map(async f=>[f,await(await fetch('/'+f)).text()]))));
+    let index=s.map.tiles.findIndex(t=>t===T.ORE);if(index<0)throw Error('no ore');
+    const x=index%s.map.w,y=Math.floor(index/s.map.w);
+    report.controlled={removedWorkers:s.workers.map(w=>w.crew.id),oldPosition:[s.player.x,s.player.y],newPosition:[x+.5,y+.5],notNaturalEncounter:true};
+    s.workers=[];s.chunkStore['0,0'].workers=s.workers;s.player.x=x+.5;s.player.y=y+.5;
+    s.cursor={tx:x,ty:y};s.nearAct=interact.resolveInteractAt(s,x,y);s.interactCd=0;
+    report.before={ore:s.res.ore,node:s.map.nodeAmt[index],tile:s.map.tiles[index],target:s.nearAct?.kind};display();
+    status.textContent='已准备；在下方HUD按钮聚焦后按E。';
+    g.addEventListener('keydown',e=>{if(e.code!=='KeyE'||!e.isTrusted||!active)return;
+      queueMicrotask(()=>{try{g.__steps(120);report.trustedE=e.isTrusted;
+        report.after={ore:s.res.ore,node:s.map.nodeAmt[index],tile:s.map.tiles[index]};
+        report.gain=report.after.ore-report.before.ore;report.exceedsNode=report.gain>report.before.node;
+        report.targetStillCached=s.nearAct?.kind==='mine';end();status.textContent=report.exceedsNode?'已复现：同一矿点产出超过初始余量。':'未出现超采；见完整结果。';
+      }catch(err){report.error=String(err);end();status.textContent='诊断错误';}});
+    });
+  }catch(e){report.error=String(e);end();status.textContent='准备失败';}
+};
+</script></body></html>

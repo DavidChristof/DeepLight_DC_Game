@@ -13,7 +13,7 @@
 //   · 打法：策略是**纯函数**（只看 state，不看时间/性能），所以同状态必然同决定
 //
 // 【纪律】
-//   · 本文件不 import 游戏内部模块（除了纯数据表）—— 所有"动手"的操作都由 main.js 注入（`api`），
+//   · 只读规则可导入；所有"动手"的操作都由 main.js 注入（`api`），
 //     和 observe.js 一样：观测台/回放台不许把游戏改坏。
 //   · 打法在**宏观**层面模拟"玩家会做的决定"（补油 / 建灯 / 建塔 / 光爆 / 撤退），
 //     **不模拟走位**：采集与施工照旧交给拓荒者 AI。这是刻意的取舍 —— 回放台是用来调难度的，
@@ -166,6 +166,8 @@ export const POLICIES = {
   home(state, api, ctx) {
     const bs = state.buildings || [];
     const p = state.player;
+    // 全世界库存不可远程支付，策略阈值与玩家界面使用相同的当地账本。
+    const res = api.spendable ? api.spendable() : state.res;
     const near = (b, r) => Math.hypot(b.x + 0.5 - p.x, b.y + 0.5 - p.y) <= r;
     const lamps = bs.filter((b) => !b.site && BUILD[b.type] && BUILD[b.type].maxFuel && !BUILD[b.type].fireMat);
     const lit = lamps.filter((b) => (b.fuel || 0) > 0);
@@ -174,7 +176,7 @@ export const POLICIES = {
     const furnaces = bs.filter((b) => !b.site && b.type === 'furnace');
     // ① 补油：营地 14 格内的灯，低于 70% 就补（每拍补 1 点 —— 与玩家按 E 同一条账本）
     //    ⚠️ 封灯会**清空所有灯油**，所以“动不动就撤退”的打法会把自己困死在“没光→没塔→更怕”的循环里
-    if ((state.res.fuel || 0) > 1) {
+    if ((res.fuel || 0) > 1) {
       let fed = 0;
       for (const b of lamps) {
         if (fed >= 3) break;
@@ -194,7 +196,7 @@ export const POLICIES = {
       // ③ 熔炉优先：没有燃料就没灯、没塔、没光 —— 它是一切的上游
       //    【回放台第一版真踩过】建了炉子却不点火、不手做 → 燃料 3 天恒为 0，夜里全是黑的。
       //    所以“标准打法”必须包含：建炉 → 加火种 → 选炼油 → 手做。
-      if (furnaces.length < 1 && canAfford(state.res, 'furnace') && ctx.ready('furnace', 8)) {
+      if (furnaces.length < 1 && canAfford(res, 'furnace') && ctx.ready('furnace', 8)) {
         ctx.bump('tryFurnace');
         const spot = api.ringSpot(p, 3, 6);
         if (spot) { if (!api.place('furnace', spot.tx, spot.ty)) { api.finish(spot.tx, spot.ty); ctx.bump('okFurnace'); } }
@@ -206,13 +208,13 @@ export const POLICIES = {
         break;
       }
       // ④ 点灯：目标 2 盏（建在玩家 3~6 格内）—— 成本从数据读，不写死
-      if (lamps.length < 2 && canAfford(state.res, 'lamp') && ctx.ready('lamp', 6)) {
+      if (lamps.length < 2 && canAfford(res, 'lamp') && ctx.ready('lamp', 6)) {
         ctx.bump('tryLamp');
         const spot = api.ringSpot(p, 3, 6);
         if (spot) { if (!api.place('lamp', spot.tx, spot.ty)) { api.finish(spot.tx, spot.ty); ctx.bump('okLamp'); } }
       }
       // ⑤ 建塔：辉光塔，建在**灯**（含暂时没油的）2~7 格内（脚下有光才打得动），最多 4 座
-      if (towers.length < 4 && canAfford(state.res, 'towerGlow') && ctx.ready('tower', 8)) {
+      if (towers.length < 4 && canAfford(res, 'towerGlow') && ctx.ready('tower', 8)) {
         ctx.bump('tryTower');
         const spot = api.towerSpot(state, lamps, 2, 7);
         if (spot) {
@@ -220,7 +222,7 @@ export const POLICIES = {
         } else ctx.bump('noTowerSpot');
       }
       // ⑥ 断粮就种一块幽菌田（要光照，所以贴着灯放）
-      if ((state.res.food || 0) < 6 && farms.length < 2 && canAfford(state.res, 'farm') && ctx.ready('farm', 10)) {
+      if ((res.food || 0) < 6 && farms.length < 2 && canAfford(res, 'farm') && ctx.ready('farm', 10)) {
         ctx.bump('tryFarm');
         const spot = api.towerSpot(state, lamps, 1, 4);
         if (spot) { if (!api.place('farm', spot.tx, spot.ty)) { api.finish(spot.tx, spot.ty); ctx.bump('okFarm'); } }
@@ -250,6 +252,7 @@ export const POLICIES = {
   // 短暂落点检查 → 日落/补给阈值返程 → 回营后继续守家。
   expedition(state, api, ctx) {
     const cfg = EXPEDITION.REPLAY;
+    const res = api.spendable ? api.spendable() : state.res;
     const route = ctx.memo.expedition || (ctx.memo.expedition = {
       phase: 'prepare', origin: { x: 0, y: 0 }, remote: null,
       visited: [], departDay: 0, returnDay: 0, reason: '', outOfRange: false,
@@ -288,7 +291,7 @@ export const POLICIES = {
     if (route.phase === 'explore') {
       route.remote ||= { x: state.chunkX | 0, y: state.chunkY | 0 };
       const dist = Math.abs((state.chunkX | 0)) + Math.abs((state.chunkY | 0));
-      if (dist > cfg.MAX_REMOTE_CHUNKS || state.t >= cfg.RETURN_T || (state.res.food || 0) <= cfg.FOOD_FLOOR || (state.res.fuel || 0) <= cfg.FUEL_FLOOR || state.playerHp < state.playerMaxHp * 0.55) {
+      if (dist > cfg.MAX_REMOTE_CHUNKS || state.t >= cfg.RETURN_T || (res.food || 0) <= cfg.FOOD_FLOOR || (res.fuel || 0) <= cfg.FUEL_FLOOR || state.playerHp < state.playerMaxHp * 0.55) {
         route.phase = 'return';
         route.reason = state.t >= cfg.RETURN_T ? '日落临近' : '补给或生命达到返程阈值';
         ctx.bump('expeditionReturn');
@@ -315,7 +318,9 @@ export const POLICIES = {
 //        refuel(b), harvest(b), pulse(), seal(), ringSpot(p,rMin,rMax), towerSpot(state,lit,rMin,rMax) }
 export function runReplay(opts, api) {
   const o = Object.assign({ seed: 1234, diff: 'normal', days: 3, policy: 'home', dt: 1 / 60, everySteps: 15, maxSteps: 400 * 60 * 30 }, opts || {});
-  const policy = typeof o.policy === 'function' ? o.policy : (POLICIES[o.policy] || POLICIES.home);
+  const policy = typeof o.policy === 'function' ? o.policy : POLICIES[o.policy];
+  if (typeof policy !== 'function') throw new Error(`未知回放策略：${o.policy}`);
+  if (typeof api.deathCount !== 'function') throw new Error('回放缺少复归前死亡计数入口');
   const realRandom = Math.random;
   const rng = makeRng((o.seed ^ 0x9e3779b9) >>> 0);
   const rows = [];
@@ -331,14 +336,13 @@ export function runReplay(opts, api) {
     ready(key, secs) { const at = cd.get(key) || -1e9; if (steps - at < secs * 60) return false; cd.set(key, steps); return true; },
     bump(key) { stats[key] = (stats[key] || 0) + 1; },
   };
-  let deaths = 0, steps = 0, wasDead = false, lastDay = 1, minHpEver = Infinity, minHpDay = 1, prevHp = 100;
+  let deaths = 0, steps = 0, lastDay = 1, minHpEver = Infinity, minHpDay = 1;
   const t0 = performance.now();
   Math.random = rng;                              // 注入确定性随机源
   try {
     api.newGame(o.seed, o.diff);
     const S = api.state();
     lastDay = S.day;
-    prevHp = S.playerHp;
     markKnownEnemies(S, seenEnemies);
     visitedChunks.add(`${S.chunkX | 0},${S.chunkY | 0}`);
     rows.push(curveRow(S));
@@ -349,12 +353,7 @@ export function runReplay(opts, api) {
       api.step(o.dt);
       steps += 1;
       visitedChunks.add(`${S.chunkX | 0},${S.chunkY | 0}`);
-      if (S.playerDead && !wasDead) deaths += 1;   // 阵亡计数（游戏会复活，所以要看边沿）
-      wasDead = !!S.playerDead;
-      // ⚠️`playerDead` 在同一帧内就会被 handleDeath 清掉（死亡结算与复活同帧），所以再加一道兜底：
-      //    血量骤增 = 刚被抬回上限 = 刚阵亡过（本作玩家不能自己回血，只有阵亡复活 / 击破 Boss 奖励）
-      if (S.playerHp > prevHp + 40) deaths += 1;
-      prevHp = S.playerHp;
+      deaths = api.deathCount(); // 在handleDeath清标志前记账，进食/Boss回血不冒充阵亡。
       // 每帧采样最低血（“跨天那一刻的血”是幸存者偏差：夜里被打到 20% 又回血就看不见了）
       if (S.playerHp < minHpEver) { minHpEver = S.playerHp; minHpDay = S.day; }
       if (isTide(S)) {

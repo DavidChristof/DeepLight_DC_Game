@@ -6,6 +6,10 @@ import { SURVIVAL } from '../data/survival.js';
 import { BUILD } from '../data/buildings.js';
 import { withdraw, spendableOf } from './storage.js';
 import { isTide } from '../core/time.js';
+import { DUSK_START, TIDE_END } from '../core/time.js';
+import { interruptStandardTrial } from './resonance.js';
+import { recordNightOutcome } from './nightOutcome.js';
+import { ENDGAME } from '../data/endgame.js';
 import { sfx } from '../core/audio.js';
 
 const P = SURVIVAL.PLAYER;
@@ -42,10 +46,23 @@ export function markPlayerInjury(state) {
 export function hurtPlayer(state, amount) {
   state.playerHp = Math.max(0, state.playerHp - Math.max(0, amount));
   if (amount > 0) markPlayerInjury(state);
+  resolvePlayerDeath(state);
   return state.playerHp;
 }
 
-function mealError(state, hot) {
+// 伤害发生时即置位；也用于时钟推进前处理读档/调试留下的零血量。
+export function resolvePlayerDeath(state) {
+  if (!state.playerDead && !(state.playerHp <= 0)) return false;
+  if (!state.playerDead && state.player) state.floaties?.push({ x: state.player.x,
+    y: state.player.y - ENDGAME.NIGHT_OUTCOME.DEATH_FX_OFFSET, txt: '倒下了…', color: '#ff6b6b', t: 0,
+    life: ENDGAME.NIGHT_OUTCOME.DEATH_FX_LIFE });
+  state.playerDead = true;
+  interruptStandardTrial(state, '玩家阵亡');
+  if (state.t >= DUSK_START && state.t < TIDE_END) recordNightOutcome(state, 'death');
+  return true;
+}
+
+export function mealError(state, hot) {
   const have = spendableOf(state);
   if (state.playerDead) return '倒下时不能进食';
   if (!playerSafe(state)) return '蚀兽太近 · 先退回光里';

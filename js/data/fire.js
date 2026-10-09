@@ -27,7 +27,9 @@ export const fireMatOf = (b, def) => {
   return isFuel(k) ? k : 'vine';
 };
 // 燃烧节奏（秒 / 个）与火力倍率
-export const burnSecOf = (b, def) => fuelDef(fireMatOf(b, def)).burnSec;
+export const burnSecOf = (b, def) => def && def.fireMat
+  ? fuelDef(fireMatOf(b, def)).burnSec
+  : (def && def.burnSec) || null;
 export const heatOf = (b, def) => fuelDef(fireMatOf(b, def)).heat;
 
 // 「火还在烧」：工地不烧；`off` 只对带开关的自动熔炉有意义

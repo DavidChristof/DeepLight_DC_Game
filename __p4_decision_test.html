@@ -1,0 +1,115 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>P4 三策略对照</title>
+<body style="background:#101923;color:#e5edf5;font:14px monospace;margin:12px">
+<h1>P4 · 三种决策对照</h1>
+<p>受控起点：所有路线均有同一处休眠前哨、箱内食物24、灯内燃料30。不是从零施工试玩。</p>
+<button id="run">运行九组基线</button><button id="baseline" disabled>核验普通三日基线</button><button id="finish" disabled>结束并恢复存档</button>
+<p id="status">等待运行</p><pre id="result" style="white-space:pre-wrap;max-height:350px;overflow:auto"></pre>
+<iframe id="game" title="P4 隔离游戏" style="width:1280px;max-width:98vw;height:720px"></iframe>
+<script type="module">
+const keys=['deep-light-saves-v2','deep-light-settings-v1','deep-light-ui-v1'];
+const backupKey='__deep_light_p4_backup_v1', evidenceKey='__deep_light_p4_evidence_v1';
+const previousEvidence=JSON.parse(localStorage.getItem(evidenceKey)||'null');
+const frame=document.querySelector('#game'),out=document.querySelector('#result'),status=document.querySelector('#status');
+let active=false,g,result={runs:[],checks:[]};
+const assert=(ok,msg)=>{if(!ok)throw Error(msg);};
+const show=()=>{out.textContent=JSON.stringify(result,null,2);localStorage.setItem(evidenceKey,JSON.stringify(result));};
+const yieldUI=()=>new Promise(r=>setTimeout(r,0));
+function restore(){const saved=JSON.parse(localStorage.getItem(backupKey)||'null');if(!saved)return null;
+  for(const k of keys)saved[k]==null?localStorage.removeItem(k):localStorage.setItem(k,saved[k]);
+  const exact=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)===saved[k]]));
+  if(Object.values(exact).every(Boolean))localStorage.removeItem(backupKey);return exact;}
+window.addEventListener('beforeunload',()=>{if(active)restore();});
+document.querySelector('#run').onclick=()=>{
+  if(active)return;if(localStorage.getItem(backupKey))restore();
+  const saved=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)]));localStorage.setItem(backupKey,JSON.stringify(saved));
+  localStorage.setItem(keys[1],JSON.stringify({...JSON.parse(saved[keys[1]]||'{}'),autosave:false}));
+  active=true;result={runs:[],checks:[]};frame.src='/?p4-test='+Date.now();status.textContent='正在载入';
+};
+frame.onload=async()=>{
+  if(!active)return;g=frame.contentWindow;
+  try{
+    g.__settings.autosave=false;
+    const [replay,chunks,storage,taskBoard,{BUILD}]=await g.eval(`Promise.all([import('/js/dev/replay.js'),import('/js/world/chunks.js'),import('/js/systems/storage.js'),import('/js/systems/taskBoard.js'),import('/js/data/buildings.js')])`);
+    const check=(label,opts={})=>{const r=g.__check(opts);result.checks.push({label,...r});assert(r.ok,label+JSON.stringify(r.fails));};
+    check('menu');g.__newGame(4242,'normal');g.__settings.autosave=false;check('new');g.__quick(true);
+    let failedRefuel;
+    g.__replay({seed:4242,days:1,maxSteps:1,everySteps:1,policy(S,api){
+      const local=storage.spendableOf(S);assert(storage.withdraw(S,{fuel:local.fuel||0})===null,'清理测试燃料失败');
+      const remote=chunks.ensureSurfaceChunk(S,1,0);remote.beacons.push({x:48,y:36,stock:{fuel:10}});storage.syncRes(S);
+      const b={type:'lamp',x:48,y:37,fuel:0};const before=JSON.stringify(S.res),e=api.refuel(b);
+      failedRefuel={error:e,fuel:b.fuel,globalUnchanged:before===JSON.stringify(S.res)};
+      assert(e!==null&&b.fuel===0&&failedRefuel.globalUnchanged,'回放从远端免费加油');
+    }});result.failedRefuel=failedRefuel;
+    const makeRoute=name=>{
+      let remote,previousTick=0,output={},opening,assignment;
+      const observe=()=>{if(!remote)return;const o=remote.outpost;if(o&&o.ticks!==previousTick){
+        assert(o.ticks===previousTick+1,'前哨采样漏结算');previousTick=o.ticks;
+        for(const [k,n]of Object.entries(o.lastYield||{}))output[k]=(output[k]||0)+n;
+      }};
+      return {
+        policy(S,api,ctx){
+          if(!ctx.memo.p4Setup){
+            remote=chunks.ensureSurfaceChunk(S,1,0);const m=remote.map,chosen=[];
+            for(let ring=0;ring<12&&chosen.length<2;ring++)for(let dy=-ring;dy<=ring&&chosen.length<2;dy++)for(let dx=-ring;dx<=ring&&chosen.length<2;dx++){
+              if(Math.max(Math.abs(dx),Math.abs(dy))!==ring)continue;
+              const x=(m.w>>1)+dx,y=(m.h>>1)+dy,i=y*m.w+x;
+              if(x<2||y<2||x>=m.w-2||y>=m.h-2||!m.isWalk(x,y)||m.occBuild?.[i]||m.occWalk?.[i])continue;
+              chosen.push({x,y,i});
+            }
+            assert(chosen.length===2,'找不到前哨位置');const [box,lamp]=chosen;
+            remote.buildings.push({type:'store',x:box.x,y:box.y,site:false,fuel:0,level:1,stock:{}},
+              {type:'lamp',x:lamp.x,y:lamp.y,site:false,fuel:BUILD.lamp.maxFuel,level:1,burnT:0,off:false});
+            for(const t of chosen){m.occBuild[t.i]=1;m.occWalk[t.i]=1;}
+            assert(storage.depositToChunk(S,remote,'food',24,box.x+.5,box.y+.5)===24,'装箱失败');
+            opening={global:{...S.res},spendable:storage.spendableOf(S),remoteFood:24,remoteLampFuel:BUILD.lamp.maxFuel,positions:chosen};
+            if(name==='outpost'){
+              const w=S.workers.find(w=>w.alive&&!w.hollow&&!w.downed);assert(w,'无人可派');assignment=w.crew?.id||w.name;
+              taskBoard.setDirective(w,{outpost:{x:1,y:0},outpostMode:'gather'});
+            }
+            ctx.memo.p4Setup=true;
+          }
+          observe();replay.POLICIES[name==='expedition'?'expedition':'home'](S,api,ctx);
+        },
+        finish(S){observe();const people=new Set(S.workers||[]);
+          for(const c of Object.values(S.chunkStore||{}))for(const w of c.workers||[])people.add(w);
+          const crew=Array.from(people).map(w=>({id:w.crew?.id||w.name,alive:w.alive,downed:!!w.downed,hollow:!!w.hollow,hp:+w.hp.toFixed(2),chunk:[w.chunkX|0,w.chunkY|0]}));
+          return {opening,global:{...S.res},spendable:storage.spendableOf(S),crew,workerDeaths:S.runStats?.workerDeaths,
+            nightOutcomes:JSON.parse(JSON.stringify(S.nightOutcomes)),outpost:{assignment,ticks:previousTick,output,
+              stock:{...remote.buildings.find(b=>b.type==='store').stock},lampFuel:remote.buildings.find(b=>b.type==='lamp').fuel,
+              fronts:remote.map.blightFronts?.length||0,report:chunks.outpostReport(S)}};
+        }
+      };
+    };
+    for(const seed of [4242,1,2026])for(const policy of ['home','expedition','outpost']){
+      status.textContent=`五天回放 ${seed} / ${policy}`;await yieldUI();
+      const route=makeRoute(policy),r=g.__replay({seed,diff:'normal',days:5,policy:route.policy});g.__quick(true);
+      const audit=route.finish(g.__state);
+      assert(r.ranDays===6,'回放未跑完');
+      assert(r.nights.every(n=>n.peakAlive<=n.spawnCap&&n.waveSpawned+n.ventSpawned<=n.spawnBudget),'生成越界');
+      const row={seed,policy,replay:r,audit};result.runs.push(row);
+      // 基线即使出现断言失败也完成九组取证；不把收集完等同于验收通过。
+      result.checks.push({label:`${seed}/${policy}`,...g.__check()});show();await yieldUI();
+    }
+    result.determinism=[];
+    const signature=row=>JSON.stringify({...row,replay:{...row.replay,ms:0}});
+    if(previousEvidence?.runs?.length===9&&previousEvidence?.determinism?.every(r=>r.same)){
+      result.previousMatch=result.runs.map(row=>({seed:row.seed,policy:row.policy,
+        same:signature(row)===signature(previousEvidence.runs.find(r=>r.seed===row.seed&&r.policy===row.policy))}));
+      if(!new URLSearchParams(location.search).has('fuelFix')) assert(result.previousMatch.every(r=>r.same),'与上次矩阵签名不同，不能声称信息修正不影响模拟');
+    }
+    for(const baseline of result.runs){
+      const {seed,policy}=baseline;status.textContent=`确定性复放 ${seed} / ${policy}`;await yieldUI();
+      const route=makeRoute(policy),r=g.__replay({seed,diff:'normal',days:5,policy:route.policy});g.__quick(true);
+      const repeat={seed,policy,replay:r,audit:route.finish(g.__state)},same=signature(baseline)===signature(repeat);
+      result.determinism.push({seed,policy,same});show();assert(same,'固定种子复放不一致 '+seed+'/'+policy);
+    }
+    check('replay-repeat');check('roundtrip',{roundtrip:true});result.source=await g.__srcCheck();assert(result.source.ok,'源码审计失败');
+    g.__watch(true,20);g.__steps(1200);g.__watch(false);result.watch=g.__testLog();
+    assert(result.watch.length===1&&result.watch[0]==='共 0 类','监控存在违例');
+    assert(result.checks.every(c=>c.ok),'矩阵断言存在失败');
+    status.textContent='九组对照与九组复放通过 · 尚需真实输入';document.querySelector('#finish').disabled=false;document.querySelector('#baseline').disabled=false;show();
+  }catch(e){result.error=String(e.stack||e);result.storage=restore();active=false;status.textContent='失败 · 正式存档已恢复';show();}
+};
+document.querySelector('#finish').onclick=()=>{g.__settings.autosave=false;g.__quick(true);frame.src='about:blank';result.storage=restore();active=false;show();status.textContent='已结束 · 正式存档恢复完成';};
+document.querySelector('#baseline').onclick=()=>{try{result.normal3=g.__replay({seed:4242,diff:'normal',days:3,policy:'home'});g.__quick(true);result.normal3Check=g.__check({roundtrip:true});show();status.textContent='三日基线已记录';}catch(e){result.error=String(e.stack||e);show();}};
+</script>

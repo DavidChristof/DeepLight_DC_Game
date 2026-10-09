@@ -1,0 +1,44 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>L4 岗位与初始灯槽账本</title>
+<body style="background:#101923;color:#e5edf5;font:14px monospace;margin:16px">
+<h2>L4 · 守灯岗位与施工初始槽量</h2>
+<p>独立受控场景：健康文件来源，生产入口将A切为守灯，玩家当前位置附近支付并建一盏灯；不注入资源、不瞬移。观测开／关各一次。</p>
+<button id="run">运行缺失类别补证</button><button id="export">导出类别报告</button>
+<p id="status">未开始</p><pre id="out" style="white-space:pre-wrap;max-height:460px;overflow:auto"></pre>
+<iframe id="game" title="类别补证游戏" style="width:1280px;max-width:98vw;height:720px"></iframe>
+<script type="module">
+import { observeLedger } from './tools/l4_event_ledger.mjs';
+import { digest, canonical, FORMAL_KEYS } from './tools/l4_matrix_artifact.mjs';
+const frame=document.querySelector('#game'),out=document.querySelector('#out'),status=document.querySelector('#status');
+let active=false,backup,source,report,g,oldRandom,index=0,trace;
+const copy=v=>JSON.parse(JSON.stringify(v)),assert=(v,m)=>{if(!v)throw Error(m);};
+function finish(error){if(trace){report.partialLedger=trace.stop();trace=null;}if(error)report.error=String(error.stack||error);
+  if(g){g.__settings.autosave=false;g.__quick(true);g.Math.random=oldRandom;}active=false;frame.src='about:blank';
+  for(const k of FORMAL_KEYS)backup[k]==null?localStorage.removeItem(k):localStorage.setItem(k,backup[k]);
+  report.storage=Object.fromEntries(FORMAL_KEYS.map(k=>[k,localStorage.getItem(k)===backup[k]]));
+  out.textContent=JSON.stringify(report,null,2);status.textContent=error?'补证失败，正式三键恢复':'类别补证完成，正式三键恢复';}
+document.querySelector('#run').onclick=async()=>{if(active)return;backup=Object.fromEntries(FORMAL_KEYS.map(k=>[k,localStorage.getItem(k)]));report={scope:'isolated guard/build categories, not fair strategy matrix',runs:[]};index=0;
+  try{const packed=await(await fetch('/docs/fixtures/l4-healthy-checkpoint.deflate.b64')).text(),bytes=Uint8Array.from(atob(packed.trim()),c=>c.charCodeAt(0));source=JSON.parse(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'))).text()).entry;
+    assert(digest(JSON.stringify(source.snapshot))==='790a3093','source hash');localStorage.setItem(FORMAL_KEYS[1],JSON.stringify({...JSON.parse(backup[FORMAL_KEYS[1]]||'{}'),autosave:false}));active=true;frame.src='/?l4-categories='+Date.now();
+  }catch(e){finish(e);}};
+frame.onload=async()=>{if(!active||frame.getAttribute('src')==='about:blank')return;g=frame.contentWindow;
+  try{g.__settings.autosave=false;g.__quick(true);const [save,replay,tasks,storage,building,interact,bd,eco]=await g.eval("Promise.all([import('/js/core/save.js'),import('/js/dev/replay.js'),import('/js/systems/taskBoard.js'),import('/js/systems/storage.js'),import('/js/systems/building.js'),import('/js/systems/interact.js'),import('/js/data/buildings.js'),import('/js/data/ecology.js')])");
+    const {SRC_FILES}=await import('./js/dev/filelist.js');report.codeFingerprint=digest(JSON.stringify(await Promise.all(SRC_FILES.map(async f=>[f,await(await fetch('/'+f)).text()]))));assert(report.codeFingerprint==='45e27812','source changed');
+    oldRandom=g.Math.random;let calls=0;const rng=replay.makeRng(4242);g.Math.random=()=>{calls++;return rng();};assert(g.__restoreCheckpoint(copy(source.snapshot)),'restore');g.__settings.autosave=false;g.__quick(true);const s=g.__state;
+    const snap=()=>{const v=copy(save.snapshot(s));delete v.at;return canonical(v);},row={observed:index===0,menu:g.__check()};
+    const a=tasks.allCrewWorkers(s).find(w=>w.crew.id==='crew-c630s4');row.directiveBefore=copy(a.directive);tasks.setDirective(a,{outpostMode:'guard'},s);row.directiveAfter=copy(a.directive);row.initial=snap();
+    if(row.observed)trace=observeLedger(s,storage.allContainers);
+    let target;for(let y=Math.floor(s.player.y)-1;y<=Math.floor(s.player.y)+1&&!target;y++)for(let x=Math.floor(s.player.x)-1;x<=Math.floor(s.player.x)+1;x++)if(Math.hypot(x+.5-s.player.x,y+.5-s.player.y)<=interact.E_REACH&&building.placeError(s,'lamp',x,y)===null){target={x,y};break;}
+    assert(target,'no nearby legal lamp');row.target=target;assert(building.tryPlace(s,'lamp',target.x,target.y)===null,'place lamp');trace?.sync(0,'placed');const lamp=s.buildings.find(b=>b.type==='lamp'&&b.x===target.x&&b.y===target.y);row.initialSlot=lamp.fuel;
+    let steps=0;for(let i=0;lamp.site&&i<8;i++){const action={kind:'build',b:lamp};interact.tick(s,action);trace?.sync(steps,'construction');const wait=Math.ceil(interact.actionCooldown(s,action)*60);g.__steps(wait);steps+=wait;trace?.sync(steps,'workCooldown');}
+    assert(!lamp.site,'unfinished');row.completedSlot=lamp.fuel;assert(row.initialSlot===0&&row.completedSlot===bd.BUILD.lamp.maxFuel,'initial fuel rule');
+    const ticksBefore=s.chunkStore['1,0'].outpost.ticks;g.__steps(Math.ceil(eco.ECOLOGY.OUTPOST_SETTLE_SEC*60));steps+=Math.ceil(eco.ECOLOGY.OUTPOST_SETTLE_SEC*60);trace?.sync(steps,'guard');row.remoteTicks=[ticksBefore,s.chunkStore['1,0'].outpost.ticks];assert(row.remoteTicks[1]>ticksBefore,'no remote settlement');
+    row.end=snap();row.hash=digest(JSON.stringify(row.end));row.rngCalls=calls;if(trace){row.ledger=trace.stop();trace=null;assert(!row.ledger.gaps.length,'unobserved changes');assert(JSON.stringify(snap())===JSON.stringify(row.end),'observer removal changed snapshot');
+      row.guardEvents=row.ledger.events.filter(e=>e.kind==='resource'&&e.stack.includes('withdrawFromChunk')&&e.stack.includes('updateOutpostSettlement')&&!e.stack.includes('settleRemoteNeeds'));
+      row.initialFuelEvents=row.ledger.events.filter(e=>e.kind==='resource'&&e.stack.includes('completeBuilding')&&e.path.includes('/slot/lamp/'));
+      assert(row.guardEvents.length===row.remoteTicks[1]-ticksBefore&&row.guardEvents.every(e=>e.delta===-eco.ECOLOGY.OUTPOST_GUARD_FUEL_PER_TICK),'guard fuel payment');assert(row.initialFuelEvents.length===1&&row.initialFuelEvents[0].delta===bd.BUILD.lamp.maxFuel,'completion source');}
+    assert(g.__saveSlot('s3')!==false&&g.__loadSlot('s3'),'roundtrip load');g.__settings.autosave=false;g.__quick(true);const restored=copy(save.snapshot(g.__state));delete restored.at;row.roundtripExact=JSON.stringify(canonical(restored))===JSON.stringify(row.end);assert(row.roundtripExact,'roundtrip diff');row.after=g.__check({roundtrip:true});assert(row.after.ok,'after checks');report.runs.push(row);
+    g.Math.random=oldRandom;g.__quick(true);index++;if(index<2)frame.src='/?l4-categories='+Date.now();else{report.same=JSON.stringify(report.runs[0].initial)===JSON.stringify(row.initial)&&JSON.stringify(report.runs[0].end)===JSON.stringify(row.end)&&report.runs[0].rngCalls===row.rngCalls;assert(report.same,'observer difference');finish();}
+  }catch(e){finish(e);}};
+document.querySelector('#export').onclick=async()=>{if(active||!report)return;const raw=JSON.stringify({format:'l4-ledger-categories-v1',report}),bytes=new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream('deflate'))).arrayBuffer());let binary='';for(const b of bytes)binary+=String.fromCharCode(b);out.textContent=btoa(binary);status.textContent=JSON.stringify({hash:digest(raw),rawBytes:new TextEncoder().encode(raw).length,compressedBytes:bytes.length,same:report.same,storage:report.storage,error:report.error||null});};
+window.addEventListener('beforeunload',()=>{if(active)finish(Error('interrupted'));});
+</script></body></html>

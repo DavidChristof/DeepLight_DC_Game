@@ -1,0 +1,75 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>L1 返营验收</title>
+<body style="background:#101923;color:#e5edf5;font:14px monospace;margin:12px">
+<h1>L1 · 返回营地</h1><p>隔离预置场景；发令使用游戏内真实按钮，不冒称从零远征。</p>
+<button id="run">开始隔离验收</button><button id="next" disabled>验证并继续</button><button id="finish" disabled>恢复存档并结束</button>
+<button data-size="1280,720">检查1280×720</button><button data-size="1920,1080">检查1920×1080</button><button id="layout">记录布局检查</button>
+<p id="status">等待开始</p><pre id="result" style="max-height:210px;overflow:auto;white-space:pre-wrap"></pre>
+<iframe id="game" title="返营测试游戏" style="width:1280px;max-width:98vw;height:720px"></iframe>
+<script type="module">
+const keys=['deep-light-saves-v2','deep-light-settings-v1','deep-light-ui-v1'],backupKey='__deep_light_l1_backup_v1';
+const frame=document.querySelector('#game'),out=document.querySelector('#result'),status=document.querySelector('#status');
+let active=false,g,s,c,t,saves,ui,types,result,chosenId,stage=0;
+document.querySelectorAll('[data-size]').forEach(b=>b.onclick=()=>{const [w,h]=b.dataset.size.split(',');frame.style.width=w+'px';frame.style.height=h+'px';frame.style.maxWidth='none';});
+document.querySelector('#layout').onclick=()=>{if(!active||!g)return;const d=g.document,buttons=[...d.querySelectorAll('[data-crew-outpost="return"]')];const rect=d.querySelector('#panel').getBoundingClientRect();const width=d.documentElement.clientWidth,height=d.documentElement.clientHeight;assert(rect.left>=0&&rect.right<=width&&rect.top>=0&&rect.bottom<=height,'面板出界');assert(buttons.length===2,'返营按钮缺失');for(const b of buttons){const r=b.getBoundingClientRect();assert(r.left>=rect.left&&r.right<=rect.right,'返营按钮横向裁切');}result.layout??=[];result.layout.push({width,height,panel:{left:rect.left,right:rect.right,top:rect.top,bottom:rect.bottom},buttons:buttons.length});show();};
+const assert=(v,msg)=>{if(!v)throw Error(msg);},show=()=>{out.textContent=JSON.stringify(result,null,2);localStorage.setItem('__deep_light_l1_evidence_v1',out.textContent);};
+function restore(){const saved=JSON.parse(localStorage.getItem(backupKey)||'null');if(!saved)return null;for(const k of keys)saved[k]==null?localStorage.removeItem(k):localStorage.setItem(k,saved[k]);const exact=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)===saved[k]]));if(Object.values(exact).every(Boolean))localStorage.removeItem(backupKey);return exact;}
+const end=()=>{if(g){g.__settings.autosave=false;g.__quick(true);}frame.src='about:blank';result.storage=restore();active=false;show();};
+const fail=e=>{result.error=String(e.stack||e);status.textContent='失败 · 三键恢复';document.querySelector('#next').disabled=true;end();};
+window.addEventListener('beforeunload',()=>{if(active)restore();});
+const check=(name,opts={})=>{const r=g.__check(opts);result.checks.push({name,...r});assert(r.ok,name+JSON.stringify(r.fails));};
+const fresh=()=>{g.__newGame(4242,'normal');g.__settings.autosave=false;g.__steps(1);g.__quick(true);s=g.__state;return s.workers[0];};
+const get=(x,y)=>c.ensureSurfaceChunk(s,x,y),advance=n=>c.updateOutpostTravel(s,n);
+const assign=(w,x,y)=>t.setDirective(w,{outpost:{x,y},outpostMode:'gather'});
+const send=(w,x=1,y=0)=>{assign(w,x,y);advance(8);return get(x,y);};
+const legalHome=()=>{const m=get(0,0).map;for(let y=30;y<=42;y++)for(let x=88;x<=94;x++){m.set(x,y,0);m.occBuild[y*m.w+x]=0;m.occWalk[y*m.w+x]=0;m.nodeAmt[y*m.w+x]=0;}};
+const worker=()=>t.findCrewWorker(s,chosenId);
+const unique=w=>Object.values(s.chunkStore).reduce((n,q)=>n+q.workers.filter(v=>v===w).length,0)===1;
+const resources=()=>JSON.stringify(saves.snapshot(s).res);
+const record=(name,fn)=>{result.cases.push({name,...fn()});show();};
+const render=()=>{ui.renderPanelHost(s);};
+function listen(){g.document.addEventListener('click',e=>{if(!e.isTrusted)return;const el=e.target.closest('[data-crew-outpost]');if(el){result.trusted.push({action:el.dataset.crewOutpost,worker:el.dataset.worker,text:el.textContent.trim()});show();}});}
+document.querySelector('#run').onclick=()=>{if(active)return;if(localStorage.getItem(backupKey))restore();const saved=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)]));localStorage.setItem(backupKey,JSON.stringify(saved));localStorage.setItem(keys[1],JSON.stringify({...JSON.parse(saved[keys[1]]||'{}'),autosave:false}));active=true;result={cases:[],checks:[],trusted:[]};document.querySelector('#run').disabled=true;frame.src='/?l1-test='+Date.now();};
+frame.onload=async()=>{if(!active)return;g=frame.contentWindow;try{
+ g.__settings.autosave=false;[c,t,saves,ui,types]=await g.eval(`Promise.all([import('/js/world/chunks.js'),import('/js/systems/taskBoard.js'),import('/js/core/save.js'),import('/js/ui/panels.js'),import('/js/data/tasks.js')])`);
+ check('menu');g.__newGame(4242,'normal');g.__settings.autosave=false;check('new');
+ record('01 旧原点驻守不是返营',()=>{assert(!types.directiveFromSave({outpost:{x:0,y:0}}).returnHome,'旧指令误返营');return {ok:true};});
+ record('02 非原点返营字段无效',()=>{assert(!types.directiveFromSave({outpost:{x:1,y:0},returnHome:true}).returnHome,'错误目标保留');return {ok:true};});
+ record('03 原点已到达拒绝新命令',()=>{const w=fresh();assert(t.requestReturnHome(s,w)==='已在营地','原点可返营');return {ok:true};});
+ record('04 相邻发令无瞬移',()=>{const w=fresh();send(w);assert(t.requestReturnHome(s,w)===null&&w.chunkX===1&&!w.outpostTravel,'即时传送');return {ok:true};});
+ record('05 重复命令保留剩余5秒',()=>{const w=fresh();send(w);t.requestReturnHome(s,w);advance(3);const tr=w.outpostTravel;assert(t.requestReturnHome(s,w)===null&&w.outpostTravel===tr&&tr.t===5,'重复重计时');return {remaining:tr.t};});
+ record('06 抵达清指令且保留身份偏好',()=>{const w=fresh();send(w);legalHome();t.setDirective(w,{mode:'rest',care:'medical',noNight:true});const id=w.crew.id;t.requestReturnHome(s,w);advance(8);assert(w.chunkX===0&&!w.outpostTravel&&!w.directive.outpost&&!w.directive.returnHome&&w.directive.mode==='auto'&&w.directive.noNight&&w.directive.care==='medical'&&w.crew.id===id&&unique(w),'抵达未清理');return {ok:true};});
+ record('07 取消返营立即清在途仍在源区',()=>{const w=fresh();send(w);t.requestReturnHome(s,w);advance(2);t.setDirective(w,{outpost:null,outpostMode:null});assert(!w.outpostTravel&&!w.directive.returnHome&&w.chunkX===1,'取消残留');advance(8);assert(w.chunkX===1,'取消后抵达');return {ok:true};});
+ record('08 返营改派替换意图',()=>{const w=fresh();send(w);t.requestReturnHome(s,w);advance(2);assign(w,0,1);assert(!w.directive.returnHome&&!w.outpostTravel,'改派残留');advance(8);assert(w.chunkY===1&&unique(w),'改派未抵达');return {ok:true};});
+ record('09 深潜拒绝新返营',()=>{const w=fresh();send(w);s.layerId='depth1';assert(t.requestReturnHome(s,w)==='回到地表再调度','深潜可发令');return {ok:true};});
+ record('10 在途深潜冻结并续行',()=>{const w=fresh();send(w);legalHome();t.requestReturnHome(s,w);advance(3);s.layerId='depth1';advance(50);assert(w.outpostTravel.t===5,'深潜前进');s.layerId='surface';advance(5);assert(w.chunkX===0,'不续行');return {ok:true};});
+ for(const [name,patch] of [['11 倒地拒绝',{downed:true}],['12 蚀化拒绝',{hollow:true}],['13 死亡拒绝',{alive:false}]])record(name,()=>{const w=fresh();send(w);Object.assign(w,patch);assert(t.requestReturnHome(s,w)!==null&&!w.directive.returnHome,'不能返营的人员获命令');return {ok:true};});
+ record('14 远处前哨限制',()=>{const w=fresh();send(w,2,0);assert(t.requestReturnHome(s,w)==='仅支持相邻前哨返营','远处可返营');return {ok:true};});
+ record('15 待兑现成员拒绝且不清告警',()=>{const w=fresh(),q=send(w);q.outpost={alerts:[{status:'open',rescuePending:true,workerId:w.crew.id}]};assert(t.requestReturnHome(s,w)==='前往前哨确认险情'&&q.outpost.alerts[0].rescuePending,'险情被绕过');return {ok:true};});
+ record('16 其他成员告警不牵连',()=>{const w=fresh(),q=send(w);q.outpost={alerts:[{status:'open',rescuePending:true,workerId:'other-id'}]};assert(t.requestReturnHome(s,w)===null,'其他告警阻塞');return {ok:true};});
+ record('17 途中新险情停止推进保留时间',()=>{const w=fresh(),q=send(w);t.requestReturnHome(s,w);advance(3);q.outpost={alerts:[{status:'open',rescuePending:true,workerId:w.crew.id}]};advance(20);assert(w.chunkX===1&&w.outpostTravel.t===5,'途中险情仍返营');return {ok:true};});
+ record('18 全堵入口等待，腾位立即抵达',()=>{const w=fresh();send(w);const home=get(0,0),realWalk=home.map.isWalk;home.map.isWalk=()=>false;t.requestReturnHome(s,w);advance(8);assert(w.chunkX===1&&w.outpostTravel.t===0&&w.task.reason==='营地入口被占','全堵穿墙');advance(8);assert(w.outpostTravel.t===0,'等待重计时');home.map.isWalk=realWalk;legalHome();advance(0);assert(w.chunkX===0&&unique(w),'腾位不抵达');return {ok:true};});
+ record('19 在途保存读取与最终归属',()=>{const w=fresh();send(w);legalHome();t.requestReturnHome(s,w);advance(3);const id=w.crew.id;saves.saveGame(s,'s3');g.__loadSlot('s3');g.__settings.autosave=false;s=g.__state;const q=t.findCrewWorker(s,id);assert(q.directive.returnHome&&q.outpostTravel.t===5,'返营存读丢失');advance(5);assert(q.chunkX===0&&!q.directive.returnHome&&unique(q),'读后未抵达');return {ok:true};});
+ record('20 新命令不改资源',()=>{const w=fresh();send(w);legalHome();const before=resources();t.requestReturnHome(s,w);advance(8);assert(resources()===before,'返营增减资源');return {ok:true};});
+ record('21 在途停产、离开后源区冻结',()=>{const w=fresh(),q=send(w);legalHome();t.requestReturnHome(s,w);advance(1);c.updateOutpostSettlement(s,12);assert(q.outpost.ticks===0,'迁移仍生产');advance(7);assert(!c.activeSurfaceChunks(s).includes(q),'空源区活跃');return {ok:true};});
+ record('22 返营原点容量等待及释放',()=>{const w=fresh(),home=get(0,0);send(w);const other=s.workers[0];assign(other,0,1);advance(8);c.bindSurfaceChunk(s,get(0,-1));const resident=new w.constructor('容量成员',10.5,10.5,{...w.traits});resident.crew={...w.crew,id:'l1-cap'};resident.chunkX=1;resident.chunkY=0;get(1,0).workers.push(resident);t.requestReturnHome(s,w);advance(8);assert(w.outpostTravel.blocked&&w.chunkX===1,'未等待名额');resident.alive=false;legalHome();advance(8);assert(w.chunkX===0&&unique(w),'释放不返营');return {home:home.id};});
+ record('23 四个相邻方向的正常到达',()=>{let count=0;for(const [x,y] of [[1,0],[-1,0],[0,1],[0,-1]]){const w=fresh();send(w,x,y);const m=get(0,0).map;for(let yy=1;yy<m.h-1;yy++)for(let xx=1;xx<m.w-1;xx++){m.set(xx,yy,0);m.occBuild[yy*m.w+xx]=0;m.occWalk[yy*m.w+xx]=0;}t.requestReturnHome(s,w);advance(8);assert(w.chunkX===0&&w.chunkY===0&&unique(w),'方向到达错');count++;}return {count};});
+ record('24 同时返营成员不重叠',()=>{const a=fresh(),b=s.workers[1];send(a);send(b);legalHome();t.requestReturnHome(s,a);t.requestReturnHome(s,b);advance(8);assert(a.chunkX===0&&b.chunkX===0&&Math.hypot(a.x-b.x,a.y-b.y)>=.68&&unique(a)&&unique(b),'同时抵达重叠');return {ok:true};});
+ record('25 非布尔返营字段退回旧行为',()=>{assert(!types.directiveFromSave({outpost:{x:0,y:0},returnHome:'true'}).returnHome,'异常字段有效');return {ok:true};});
+ record('26 入口等待零秒保存后不重计时',()=>{const w=fresh();send(w);const home=get(0,0);home.map.isWalk=()=>false;t.requestReturnHome(s,w);advance(8);const id=w.crew.id;saves.saveGame(s,'s3');g.__loadSlot('s3');g.__settings.autosave=false;s=g.__state;const q=t.findCrewWorker(s,id);assert(q.outpostTravel.t===0&&q.directive.returnHome,'零计时丢失');legalHome();advance(0);assert(q.chunkX===0,'读后重计时');return {ok:true};});
+ record('27 真实生产步推进返营',()=>{const w=fresh();send(w);legalHome();t.requestReturnHome(s,w);g.__steps(481);assert(w.chunkX===0&&!w.directive.returnHome&&unique(w),'主循环不推进返营');return {ok:true};});
+ fresh();check('roundtrip',{roundtrip:true});check('after-load');
+ // 仅预置位置；以下派出、取消与返营必须真实点击生产按钮。
+ const chosen=fresh();chosenId=chosen.crew.id;result.workerId=chosenId;legalHome();const remote=get(1,0);c.bindSurfaceChunk(s,remote);s.player.x=6.5;s.player.y=36.5;ui.togglePanel(s,'crew');listen();stage=0;
+ status.textContent='点击第一名队员：派往此区块';document.querySelector('#next').disabled=false;document.querySelector('#finish').disabled=false;show();
+ }catch(e){fail(e);}};
+document.querySelector('#next').onclick=async()=>{try{
+ const w=worker();const trusted=action=>result.trusted.some(v=>v.action===action&&v.worker===chosenId);
+ if(stage===0){assert(trusted('assign')&&w.directive.outpost.x===1,'真实派遣未发');advance(8);assert(w.chunkX===1,'未抵达');render();stage=1;status.textContent='点击第一名队员：取消驻守';}
+ else if(stage===1){assert(trusted('withdraw')&&!w.directive.outpost,'真实取消未发');advance(20);assert(w.chunkX===1,'取消自动回营');render();stage=2;status.textContent='点击第一名队员：返回营地';}
+ else if(stage===2){assert(trusted('return')&&w.directive.returnHome&&w.chunkX===1,'真实返营未发');advance(3);assert(w.outpostTravel.t===5,'三秒计时错误');saves.saveGame(s,'s3');g.__loadSlot('s3');g.__settings.autosave=false;g.__quick(true);s=g.__state;assert(worker().outpostTravel.t===5&&worker().directive.returnHome,'输入链存读丢失');ui.togglePanel(s,'crew');render();stage=3;status.textContent='再次点击第一名队员：返回营地';}
+ else if(stage===3){assert(result.trusted.filter(v=>v.action==='return'&&v.worker===chosenId).length>=2&&w.outpostTravel.t===5,'重复返营重置');advance(5);assert(w.chunkX===0&&!w.directive.returnHome&&!w.directive.outpost&&unique(w),'没有回到原点');render();check('trusted-return');result.inputOk=true;stage=4;status.textContent='真实派出／取消／返营／存读通过 · 继续通用回归';}
+ else if(stage===4){check('input-roundtrip',{roundtrip:true});result.source=await g.__srcCheck();assert(result.source.ok,'源码审计失败');result.replay=g.__replay({seed:4242,diff:'normal',days:3,policy:'home'});g.__quick(true);check('replay');g.__watch(true,20);g.__steps(1200);g.__watch(false);result.watch=g.__testLog();assert(result.watch.length===1&&result.watch[0]==='共 0 类','长跑违例');result.ok=true;document.querySelector('#next').disabled=true;status.textContent='专项与真实交互通过 · 点击恢复存档';}
+ show();
+ }catch(e){fail(e);}};
+document.querySelector('#finish').onclick=()=>{status.textContent='测试结束 · 正式三键恢复';end();};
+</script>

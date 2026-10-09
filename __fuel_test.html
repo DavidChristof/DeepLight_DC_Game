@@ -1,0 +1,58 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>燃耗规则验收</title>
+<body style="background:#101923;color:#e5edf5;font:14px monospace;margin:12px">
+<h1>燃耗修复 · 建筑与火种分离</h1><button id="run">开始隔离验收</button><button id="next" disabled>验证真实操作</button><button id="finish" disabled>结束并恢复存档</button>
+<p id="status">等待运行</p><pre id="result" style="white-space:pre-wrap;max-height:200px;overflow:auto"></pre><iframe id="game" title="燃耗隔离游戏" style="width:1280px;max-width:98vw;height:720px"></iframe>
+<script type="module">
+const keys=['deep-light-saves-v2','deep-light-settings-v1','deep-light-ui-v1'],backupKey='__deep_light_fuel_backup_v1';
+const frame=document.querySelector('#game'),out=document.querySelector('#result'),status=document.querySelector('#status');
+let active=false,g,s,lamp,ui,logistics,prep,stage=0,result={checks:[],cases:[],trustedKeys:[]};
+const assert=(ok,why)=>{if(!ok)throw Error(why);},show=()=>{out.textContent=JSON.stringify(result,null,2);localStorage.setItem('__deep_light_fuel_evidence_v1',out.textContent);};
+function restore(){const saved=JSON.parse(localStorage.getItem(backupKey)||'null');if(!saved)return null;for(const k of keys)saved[k]==null?localStorage.removeItem(k):localStorage.setItem(k,saved[k]);const exact=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)===saved[k]]));if(Object.values(exact).every(Boolean))localStorage.removeItem(backupKey);return exact;}
+const fail=e=>{result.error=String(e.stack||e);if(g){g.__quick(true);g.__settings.autosave=false;}result.storage=restore();active=false;document.querySelector('#next').disabled=true;status.textContent='失败 · 正式存档已恢复';show();};
+window.addEventListener('beforeunload',()=>{if(active)restore();});
+const check=(label,opts={})=>{const r=g.__check(opts);result.checks.push({label,...r});assert(r.ok,label+JSON.stringify(r.fails));};
+document.querySelector('#run').onclick=()=>{if(active)return;if(localStorage.getItem(backupKey))restore();const saved=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)]));localStorage.setItem(backupKey,JSON.stringify(saved));localStorage.setItem(keys[1],JSON.stringify({...JSON.parse(saved[keys[1]]||'{}'),autosave:false}));active=true;frame.src='/?fuel-test='+Date.now();};
+frame.onload=async()=>{if(!active)return;g=frame.contentWindow;try{
+ g.__settings.autosave=false;
+ const [{BUILD,LIGHT_LEVELS},{FUELS},{lampBurnMul,smeltBurnMul},lg,pp,uu,{syncRes}]=await g.eval(`Promise.all([import('/js/data/buildings.js'),import('/js/data/fire.js'),import('/js/systems/research.js'),import('/js/systems/logistics.js'),import('/js/systems/preparation.js'),import('/js/ui/panels.js'),import('/js/systems/storage.js')])`);
+ logistics=lg;prep=pp;ui=uu;check('menu');g.__newGame(4242,'normal');g.__settings.autosave=false;check('new');g.__steps(1);g.__quick(true);s=g.__state;
+ let comparisons=0;
+ for(const type of Object.keys(BUILD).filter(k=>BUILD[k].burnSec))for(const fireMat of ['vine','coal','fuel'])for(const level of [0,1,2])for(const unlocked of [{},{lamp:true},{lamp:true,lampSave2:true},{lamp:true,lampSave2:true,smeltThrift:true}]){
+  const st={research:{unlocked}},def=BUILD[type],b={type,fireMat,level,fuel:3,burnT:1};
+  const expected=(def.fireMat?FUELS[fireMat].burnSec:def.burnSec)*lampBurnMul(st)*(def.fireMat?smeltBurnMul(st):1)/LIGHT_LEVELS[level].burn;
+  assert(lg.buildingBurnSec(b,st)===expected,'数据表与耗率不同 '+type);
+  lg.burnBuildingFuel([b],st,expected-1);assert(b.fuel===2&&Math.abs(b.burnT)<1e-8,'边界扣料错误');
+  const local={type,fireMat,level,fuel:10,burnT:1},remote={...local};
+  for(let i=0;i<720;i++)lg.burnBuildingFuel([local],st,1/60);lg.burnBuildingFuel([remote],st,12);
+  assert(local.fuel===remote.fuel&&Math.abs(local.burnT-remote.burnT)<1e-8,'实时与12秒前哨脉冲不同');comparisons++;
+ }
+ result.cases.push({name:'独立数据表计算与实时/前哨同源',comparisons});
+ const state={research:{unlocked:{}}};
+ for(const attrs of [{site:true},{off:true},{fuel:0}]){const b={type:'lamp',fuel:2,burnT:1,...attrs},before=JSON.stringify(b);lg.burnBuildingFuel([b],state,100);assert(JSON.stringify(b)===before,'工地/关闭/空灯推进计时');}
+ const exhausted={type:'lamp',level:1,fuel:1,burnT:6};lg.burnBuildingFuel([exhausted],state,120);assert(exhausted.fuel===0&&exhausted.burnT===0,'燃尽欠账');exhausted.fuel=1;lg.burnBuildingFuel([exhausted],state,17);assert(exhausted.fuel===1&&exhausted.burnT===17,'补油后提前燃尽');
+ result.cases.push({name:'工地/关机/空槽冻结及燃尽无欠账',ok:true});
+ // 旧存档保留实际已燃秒数，不重置进度、不伪造补偿资源。
+ s.buildings.push({type:'lamp',x:48,y:38,level:1,fuel:2,burnT:6,hp:BUILD.lamp.hp});syncRes(s);
+ assert(pp.preparationOf(s).devices.find(d=>d.type==='lamp').seconds===30,'旧计时预报错误');
+ check('old-timer-roundtrip',{roundtrip:true});check('after-load');
+ result.cases.push({name:'旧burnT=6原样存读，燃料2剩30秒',ok:true});
+ // 真实操作现场仅预置位置/设施；E、R由浏览器键盘输入。
+ g.__newGame(4242,'normal');g.__settings.autosave=false;g.__steps(1);g.__quick(true);s=g.__state;
+ lamp={type:'lamp',x:6,y:5,level:1,fuel:0,burnT:0,hp:BUILD.lamp.hp,site:false};s.buildings.push(lamp);
+ for(const [x,y] of [[6,5],[6,6]]){s.map.set(x,y,0);s.map.nodeAmt[y*s.map.w+x]=0;}s.map.occBuild[5*s.map.w+6]=1;s.map.occWalk[5*s.map.w+6]=1;
+ s.player.x=6.5;s.player.y=6.5;s.player.clearPath();s.camera.x=6.5;s.camera.y=6.5;s.dest=null;
+ const focus=g.document.createElement('button');focus.id='fuel-focus';focus.textContent='聚焦燃耗测试';focus.style='position:fixed;left:8px;bottom:8px;z-index:9999';g.document.body.append(focus);
+ // 捕获阶段只解冻，不排微任务；否则微任务可能先于生产冒泡监听器执行。
+ g.addEventListener('keydown',e=>{if(e.isTrusted&&e.code==='KeyR')g.__quick(false);},true);
+ g.addEventListener('keydown',e=>{if(!e.isTrusted)return;result.trustedKeys.push(e.code);show();
+  if(['KeyE','KeyR'].includes(e.code))queueMicrotask(()=>{g.__quick(true);g.__steps(1,0);});
+ });
+ stage=0;status.textContent='聚焦后按 E 补1燃料，再验证';document.querySelector('#next').disabled=false;document.querySelector('#finish').disabled=false;show();
+ }catch(e){fail(e);}};
+document.querySelector('#next').onclick=async()=>{try{
+ if(stage===0){assert(result.trustedKeys.includes('KeyE')&&lamp.fuel===1,'真实E未补油');g.__steps(60*5);assert(lamp.fuel===1,'灯柱仍按7s燃烧');stage=1;status.textContent='按 R 切到高亮度，再验证';show();}
+ else if(stage===1){assert(result.trustedKeys.includes('KeyR')&&lamp.level===2,'真实R未改亮度');const r=prep.preparationOf(s),d=r.devices.find(d=>d.type==='lamp');assert(Math.abs(d.seconds-(11.25-lamp.burnT))<1e-8,'高亮预报错误');ui.togglePanel(s,'night');ui.renderPanelHost(s);assert(g.document.querySelector('[data-preparation]').textContent.includes('11.3s/个'),'面板未显示新耗率');result.cases.push({name:'真实E加油、R高亮与DOM预报',period:d.interval,remaining:d.seconds});check('input');stage=2;status.textContent='高亮耗率11.3s/个 · 继续验证燃尽和回归';show();}
+ else if(stage===2){g.__steps(60*8);assert(lamp.fuel===0&&lamp.burnT===0,'高亮没有按时燃尽');check('roundtrip',{roundtrip:true});result.source=await g.__srcCheck();assert(result.source.ok,'源码审计失败');result.replay=g.__replay({seed:4242,diff:'normal',days:3,policy:'home'});g.__quick(true);check('replay');g.__watch(true,20);g.__steps(1200);g.__watch(false);result.watch=g.__testLog();assert(result.watch.length===1&&result.watch[0]==='共 0 类','监控违例');stage=3;document.querySelector('#next').disabled=true;status.textContent='燃耗与真实操作全部通过';show();}
+ }catch(e){fail(e);}};
+document.querySelector('#finish').onclick=()=>{if(g){g.__quick(true);g.__settings.autosave=false;}frame.src='about:blank';result.storage=restore();active=false;show();status.textContent='已结束 · 正式三键恢复';};
+</script>

@@ -1,0 +1,57 @@
+{
+  "format": "l4-r2-progress-v1",
+  "date": "2026-10-08",
+  "complete": false,
+  "inputProof": {
+    "id": "l4-independent-input-2026-10-08T08:52:22.085Z",
+    "codeFingerprint": "4b01428d",
+    "seed": 4242,
+    "diff": "normal",
+    "inputs": 83,
+    "allRecordedInputsTrustedWithBeforeAfter": true,
+    "resourceInjection": false,
+    "teleport": false,
+    "initialHash": "dce097d2",
+    "finalHash": "f66f4ac5",
+    "initialAndFinalReadbackExact": true,
+    "rawReportHash": "dcbacf56",
+    "rawBytes": 265028,
+    "deflateBytes": 10418,
+    "base64Chars": 13892,
+    "fullReportDevelopmentKey": "__deep_light_l4_input_proof_v1",
+    "fullReportFileDelivered": true,
+    "fullReportFile": "docs/fixtures/l4-independent-input.deflate.b64",
+    "independentBrowserFileReadback": {"ok": true, "hash": "dcbacf56", "inputs": 83, "formalKeysUnchanged": [true, true, true], "evidence": "docs/fixtures/l4-input-readback-ledger.json"},
+    "notOriginal790a3093InputLog": true,
+    "actions": ["mine", "take14", "eastExit", "buildStore", "unloadFuel2Food4", "buildLamp", "assignA", "arriveA", "leaveOutpost", "remoteSettlement", "returnToOutpost", "refuel", "returnAHome", "playerHome", "freeze", "roundtripFailure"],
+    "refuel": {"localBoxFuel": [1, 0], "lampFuel": [28, 29]},
+    "freeze": {"steps": 1200, "before": "46e2ba10", "after": "46e2ba10", "differences": []},
+    "roundtrip": {
+      "before": "a28554f",
+      "after": "f66f4ac5",
+      "semanticExact": false,
+      "differences": [
+        {"path": ".firstSlice.startedT", "before": 0, "after": 110.41666666666168},
+        {"path": ".resonance.sites.first.trial", "before": null, "afterStatus": "idle"}
+      ]
+    },
+    "storageRestored": [true, true, true]
+  },
+  "repairVerification": {
+    "codeFingerprint": "32eaa57b",
+    "semanticReconstructionOnly": true,
+    "notNewInputRun": true,
+    "modifiedPaths": [".firstSlice.startedT", ".resonance.sites.first.trial"],
+    "reconstructedHash": "a6bfd407",
+    "originalByteHashNotReproduced": true,
+    "restoredSemanticExact": true,
+    "roundtrip": {"before": "a6bfd407", "after": "a6bfd407", "byteExact": true, "semanticExact": true, "differences": []},
+    "checks": {"menu": 86, "restored": 86, "roundtrip": 86, "new": 86, "loaded": 86, "replay": 86, "fails": []},
+    "sourceAudit": {"files": 95, "fails": []},
+    "watch": {"steps": 1200, "interval": 20, "log": ["共 0 类"]},
+    "replay": {"seed": 4242, "diff": "normal", "policy": "home", "days": 3, "steps": 72001, "deaths": 0, "minHp": 54, "kills": 118, "fuelEnd": 58, "foodEnd": 45, "lightPressureMax": 18, "challengeMulMax": 1.48},
+    "storageRestored": [true, true, true]
+  },
+  "remaining": ["complete event ledger evidence including ore source gap22", "fresh chunk outpost null-to-default normalization audit", "current two-resolution checks", "full pressure gates", "final audit"],
+  "notes": ["Summary is not the full raw report.", "Native lamp drag was performed through the browser tool; current listener records key and click events, not a separate mouseup event.", "Old eight-input calibration had a mutable initial snapshot and remains archived, not accepted as valid source."]
+}

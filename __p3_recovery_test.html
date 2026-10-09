@@ -1,0 +1,124 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>P3 恢复专项验收</title>
+<body style="background:#101923;color:#e5edf5;font:14px monospace;margin:12px">
+<h1>P3 · 恢复专项验收</h1>
+<button id="run">运行专项验收</button><button id="rescue" disabled>准备真实救援</button>
+<button id="advance" disabled>推进救援与休整</button><button id="finish" disabled>结束并恢复存档</button>
+<button id="hud" disabled>准备提示交互</button><button id="verifyHud" disabled>验证提示关闭与切区</button>
+<p id="status">等待运行</p><pre id="result" style="white-space:pre-wrap;max-height:200px;overflow:auto"></pre>
+<iframe id="game" title="P3 隔离游戏" style="width:1280px;max-width:98vw;height:720px"></iframe>
+<script type="module">
+const keys=['deep-light-saves-v2','deep-light-settings-v1','deep-light-ui-v1'], backupKey='__deep_light_p3_backup_v1';
+const frame=document.querySelector('#game'),out=document.querySelector('#result'),status=document.querySelector('#status');
+let active=false,g,ui,workerModule,outcome,report,stock,rule,caseResult,injured,foodBefore,fuelBefore;
+const assert=(ok,msg)=>{if(!ok)throw Error(msg);}, show=()=>out.textContent=JSON.stringify(caseResult,null,2);
+function restore(){const saved=JSON.parse(localStorage.getItem(backupKey)||'null');if(!saved)return null;
+  for(const k of keys)saved[k]==null?localStorage.removeItem(k):localStorage.setItem(k,saved[k]);
+  const exact=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)===saved[k]]));
+  if(Object.values(exact).every(Boolean))localStorage.removeItem(backupKey);return exact;}
+window.addEventListener('beforeunload',()=>{if(active)restore();});
+function fail(e){caseResult.error=String(e.stack||e);caseResult.storage=restore();active=false;status.textContent='失败 · 存档已恢复';show();}
+document.querySelector('#run').onclick=()=>{
+  if(active)return;if(localStorage.getItem(backupKey))restore();
+  const saved=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)]));localStorage.setItem(backupKey,JSON.stringify(saved));
+  localStorage.setItem(keys[1],JSON.stringify({...JSON.parse(saved[keys[1]]||'{}'),autosave:false}));active=true;
+  caseResult={cases:[],checks:[],trustedKeys:[],rescue:null};status.textContent='运行专项场景';frame.src='/?p3-test='+Date.now();
+};
+const fresh=()=>{g.__newGame(4242,'normal');g.__settings.autosave=false;g.__steps(1);g.__quick(true);return g.__state;};
+const addCase=(name,value=true)=>{caseResult.cases.push({name,value});show();};
+frame.onload=async()=>{
+  if(!active)return;g=frame.contentWindow;
+  try{
+    g.__settings.autosave=false;
+    [ui,workerModule,outcome,report,stock,rule]=await g.eval(`Promise.all([import('/js/ui/panels.js'),import('/js/entities/worker.js'),import('/js/systems/nightOutcome.js'),import('/js/systems/recovery.js'),import('/js/systems/storage.js'),import('/js/data/survival.js')])`);
+    const check=(label,opts={})=>{const r=g.__check(opts);caseResult.checks.push({label,...r});assert(r.ok,label+JSON.stringify(r.fails));};
+    check('menu');g.__newGame(4242,'normal');g.__settings.autosave=false;check('new');let s=fresh();
+    const pure=()=>{const before=JSON.stringify(s),r=report.recoveryOf(s);assert(JSON.stringify(s)===before,'报告写状态');return r;};
+    assert(pure().issues.length===0,'健康新局催恢复');addCase('无事不催');
+    s.playerHp=50;s.playerInjury=1;s.playerHunger=10;
+    s.buildings.push({type:'lamp',x:50,y:38,fuel:0,level:1},{type:'wall',x:51,y:38,hp:40,level:1});
+    s.beacons.forEach(b=>b.stock={});s.pack.stock={};stock.syncRes(s);
+    for(const cause of ['dawn','death']){
+      s.nightOutcomes=outcome.createNightOutcomes(1);outcome.recordNightOutcome(s,cause);
+      const r=pure();assert(r.lastNight.result===(cause==='dawn'?'survived':'retreat')&&r.issues.length===4&&r.urgent.length===3,'结果清单错误');
+      assert(r.issues.find(i=>i.kind==='repair').blockers.length===2,'无材料假称可修');addCase('真实结果字段-'+cause,r);
+    }
+    // 用生产中断入口，而不是伪造failed结果。
+    const resonance=await g.eval("import('/js/systems/resonance.js')");
+    s.resonance={sites:{first:{id:'first',status:'built'}},trial:{siteId:'first',status:'active',activeDay:1}};
+    assert(resonance.interruptStandardTrial(s,'玩家阵亡'),'未中断试炼');assert(pure().trialFailure==='玩家阵亡','试炼原因遗漏');addCase('试炼失败清单',pure());
+    const before=pure();g.__saveSlot('s3');assert(g.__loadSlot('s3'),'载入失败');g.__settings.autosave=false;g.__quick(true);s=g.__state;
+    assert(JSON.stringify(pure())===JSON.stringify(before),'存读恢复报告不同');check('roundtrip',{roundtrip:true});addCase('生产存读投影相等');
+    s=fresh();const w=s.workers[0];w.hp=20;w.rescueWound=1;w.rescueWoundT=100;w.rescueRestT=20;w.medicalState='queued';w.medicalClinic={x:3,y:3};s.light[3*s.map.w+3]=0;w.directive.care='guard';
+    const r=pure(),item=r.issues.find(i=>i.target?.worker===(w.id||w.name));
+    assert(item.blockers.includes('照护设为守灯')&&item.blockers.includes('医疗站光线不足'),'照护/医疗条件遗漏');addCase('医疗与守灯条件');
+    w.hp=w.maxHp;w.rescueWound=0;w.rescueRestT=0;w.medicalState='none';assert(!pure().issues.some(i=>i.kind==='injury'),'完成问题不消失');addCase('完成自动移除');
+    w.downed=true;w.chunkX=1;assert(!pure().issues.some(i=>i.kind==='rescue'),'远端混入');addCase('本区边界');
+    s=fresh();s.playerHp=80;outcome.recordNightOutcome(s,'dawn');ui.renderRecoveryHud(s);
+    await new Promise(r=>setTimeout(r,550));ui.renderRecoveryHud(s);
+    assert(!g.document.querySelector('#recovery-note').classList.contains('hidden'),'潮后提示未出现');
+    ui.togglePanel(s,'night');assert(g.document.querySelector('[data-preparation]').textContent.includes('你 · 受伤'),'恢复详情缺失');
+    s.playerHp=s.playerMaxHp;
+    await new Promise(r=>setTimeout(r,550));ui.renderPanelHost(s);ui.renderRecoveryHud(s);
+    assert(!g.document.querySelector('[data-preparation]').textContent.includes('你 · 受伤'),'解决后详情仍残留');
+    assert(g.document.querySelector('#recovery-note').classList.contains('hidden'),'解决后HUD仍残留');
+    addCase('实际DOM低频移除完成问题');
+    ui.closePanel(s);addCase('HUD与详情初始显示');
+    caseResult.source=await g.__srcCheck();assert(caseResult.source.ok,'源码检查失败');
+    status.textContent='自动场景通过 · 可准备真实救援';document.querySelector('#rescue').disabled=false;document.querySelector('#hud').disabled=false;document.querySelector('#finish').disabled=false;show();
+    g.document.addEventListener('click',e=>{if(e.isTrusted&&e.target.closest('[data-recovery-open],[data-recovery-dismiss]')){(caseResult.trustedHudClicks||(caseResult.trustedHudClicks=[])).push(e.target.closest('button').textContent);show();}});
+    g.addEventListener('keydown',e=>{
+      if(!e.isTrusted)return;
+      caseResult.trustedKeys.push(e.code);
+      // 暂停夹具中，在真实按键的生产监听器处理后推进一帧；不伪造keys或调用救援入口。
+      if(e.code==='KeyE'&&caseResult.rescue?.phase==='等待真实E')queueMicrotask(()=>g.__steps(1));
+    });
+  }catch(e){fail(e);}
+};
+document.querySelector('#rescue').onclick=()=>{
+  try{
+    const s=fresh();s.t=390;s.wasDawn=true;s.enemies=[];
+    g.__give('food',30);g.__give('fuel',10);g.__give('vine',12);g.__give('ore',12);
+    const x=Math.floor(s.player.x)-1,y=Math.floor(s.player.y);
+    assert(g.__place('bunk',x,y)===null,'铺位位置不合法');g.__finish(x,y);
+    injured=s.workers[0];s.workers.forEach(w=>{w.x=s.player.x;w.y=s.player.y;w.path=[];w.directive.care='guard';});
+    injured.x=s.player.x+.5;injured.hp=0;workerModule.downWorker(s,injured);
+    foodBefore=stock.spendableOf(s).food;fuelBefore=stock.spendableOf(s).fuel;
+    ui.closePanel(s);ui.renderRecoveryHud(s);
+    caseResult.rescue={phase:'等待真实E',downed:injured.downed,foodBefore,fuelBefore};show();
+    let focus=g.document.querySelector('#p3-input');
+    if(!focus){focus=g.document.createElement('button');focus.id='p3-input';focus.textContent='聚焦救援测试';focus.style='position:fixed;left:8px;bottom:8px;z-index:9999';g.document.body.append(focus);}
+    document.querySelector('#advance').disabled=false;status.textContent='点击游戏画布并按 E，然后推进救援';
+  }catch(e){fail(e);}
+};
+document.querySelector('#advance').onclick=()=>{
+  try{
+    const s=g.__state;assert(caseResult.trustedKeys.includes('KeyE'),'没有可信E键');assert(s.rescue?.worker===injured,'E未启动救援');
+    g.__steps(180);assert(!injured.downed,'救援未完成');assert(injured.rescueRestT>0,'未安置恢复期');
+    const recoveredHp=injured.hp,restStart=injured.rescueRestT;
+    assert(stock.spendableOf(s).food===foodBefore-rule.SURVIVAL.RESCUE.FOOD,'救援食物扣账错误');
+    g.__steps(60*135);assert(injured.alive&&!injured.downed&&injured.hp===injured.maxHp&&injured.rescueWound===0&&injured.rescueRestT===0,'休整恢复未完成');
+    assert(!report.recoveryOf(s).issues.some(i=>i.id===`injury:${injured.id||injured.name}`),'恢复完成仍在清单');
+    caseResult.rescue={phase:'完成',trustedE:true,recoveredHp,restStart,finalHp:injured.hp,maxHp:injured.maxHp,finalWound:injured.rescueWound,foodAfter:stock.spendableOf(s).food,fuelAfter:stock.spendableOf(s).fuel};
+    const check=g.__check({roundtrip:true});assert(check.ok,'救援后自检失败');caseResult.checks.push({label:'救援后',...check});addCase('真实救援-安置-休整完整链',caseResult.rescue);status.textContent='真实救援链通过 · 可结束恢复存档';
+  }catch(e){fail(e);}
+};
+document.querySelector('#finish').onclick=()=>{caseResult.storage=restore();active=false;frame.removeAttribute('src');status.textContent='结束 · 存档已恢复';show();};
+document.querySelector('#hud').onclick=async()=>{
+  try{const s=fresh();s.playerHp=80;s.t=390;s.wasDawn=true;outcome.recordNightOutcome(s,'dawn');
+    await new Promise(r=>setTimeout(r,550));ui.renderRecoveryHud(s);
+    assert(!g.document.querySelector('#recovery-note').classList.contains('hidden'),'恢复提示未出现');
+    caseResult.hudLedger=JSON.stringify({stock:stock.spendableOf(s),hp:s.playerHp,hunger:s.playerHunger});
+    document.querySelector('#verifyHud').disabled=false;status.textContent='实际点击查看待处理，关闭面板，再关闭恢复提示';show();
+  }catch(e){fail(e);}
+};
+document.querySelector('#verifyHud').onclick=async()=>{
+  try{const s=g.__state;assert(caseResult.trustedHudClicks?.includes('查看待处理')&&caseResult.trustedHudClicks?.includes('×'),'缺真实HUD点击');
+    const el=g.document.querySelector('#recovery-note');assert(el.classList.contains('hidden'),'关闭无效');
+    s.chunkX=1;ui.renderRecoveryHud(s);s.chunkX=0;ui.renderRecoveryHud(s);await new Promise(r=>setTimeout(r,550));ui.renderRecoveryHud(s);
+    assert(el.classList.contains('hidden'),'切区返回重复提示');
+    assert(caseResult.hudLedger===JSON.stringify({stock:stock.spendableOf(s),hp:s.playerHp,hunger:s.playerHunger}),'查看提示修改资源或生命');
+    s.day=2;outcome.recordNightOutcome(s,'dawn');ui.renderRecoveryHud(s);assert(!el.classList.contains('hidden'),'新夜结果不再提示');
+    addCase('真实关闭-返回去重-新夜恢复',{sameNightSilent:true,newNightVisible:true,noResourceChange:true});status.textContent='提示交互通过';
+  }catch(e){fail(e);}
+};
+</script></body></html>

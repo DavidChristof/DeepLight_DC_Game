@@ -23,9 +23,11 @@ import { bondLevel } from '../systems/mind.js';
 import { LAYER_NAMES } from '../data/layers.js';
 import { MODS, payloadStats } from '../data/payload.js';
 import { TYPE_NAME } from '../data/combat.js';
+import { crewCardOf, crewEventLine } from '../data/colonists.js';
 import { THEMES } from '../data/night.js';
 
 const ACT_LABEL = { mine: '采集', bloom: '采摭', refine: '炼油', refuel: '加油', harvest: '采收', shaft: '竖井', soothe: '安抚', revive: '复苏', build: '施工', container: '打开容器', station: '打开制造台', payload: '装配载荷', resonance: '预约共鸣' };
+const esc = (text) => String(text).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 
 const TILE_NAME = {
   [T.FLOOR]: '蚀苔地',
@@ -68,7 +70,7 @@ function describeBuilding(state, b) {
     else if (trial.status === 'failed') rows.push(['上次结果', `中断：${trial.failureReason || '可重试'}`]);
     else rows.push(['仪式', '待预约']);
     const tip = trial.status === 'complete' ? `${stage}共鸣已封存` : trial.status === 'active'
-      ? '守住信标至黎明 · 离区、断光或信标被毁即失败'
+      ? '留区守住信标与光 · 阵亡或封灯即失败'
       : trial.status === 'reserved' ? `第 ${trial.targetDay} 天蚀潮 · 留在本区块，守住灯光`
         : '按 E 预约净光 · 亮度需达 1 · 费用：燃料 4、夜髓 1';
     return { title: def.name, kind: 'building', rows, tip, build: b.type };
@@ -327,7 +329,7 @@ export function workerTip(state, w) {
   return {
     title: w.name,
     sub: `拓荒者 · ${JOB_LABEL[w.job] || w.job}`,
-    rows, bars, notes,
+    rows, bars, notes: notes + crewCardOf(w).events.slice(-3).map(e => `<div class="tt-note dim">${esc(crewEventLine(e))}</div>`).join(''),
     portrait: portraitHTML(w),
     tip: w.downed ? `按 E 救援 · 还能撑 ${Math.ceil(w.downT || 0)}s` : (w.rescueState === 'escort' ? '护送中 · 跟着救援者到简易铺位' : (w.medicalState === 'treating' ? '医疗站治疗中 · 伤势会逐步清除' : (w.medicalState === 'queued' ? '等待医疗位 · 先保持在灯下' : (w.hollow ? '⚠ 已蚀化：按住 E 安抚把它拉回来（8 燃料）' : null)))),
     danger: !!w.hollow || !!w.downed,

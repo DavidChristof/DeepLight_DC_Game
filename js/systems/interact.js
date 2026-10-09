@@ -321,6 +321,11 @@ export function tick(state, action) {
   }
   if (action.kind === 'refine') { workOnce(state, action.b); return; }   // 兼容旧调用
   if (action.kind === 'mine') {
+    const m = state.map;
+    // E may reuse a highlighted action across several simulation steps. A mined
+    // cell has already become FLOOR; never lazily refill it through that cache.
+    if (!Number.isInteger(action.i) || action.i < 0 || action.i >= m.tiles.length
+      || NODE_RES[m.tiles[action.i]] !== action.res) return;
     if (action.rock && !canMineRock(state)) return;      // 还没研究「石工」：岩壁只是墙（正常不该走到这里）
     // 徒手凿岩壁慢 2.2 倍：偶尔提一句“有镐更快”，但**不拦着** ——
     // 镐子是提速工具（desc: 挖矿与凿岩快 40%），不是门槛；拦着就会变成石头/工具死循环。
@@ -328,7 +333,6 @@ export function tick(state, action) {
       state._rockWarnT = performance.now() + 3000;
       addFx(state, action.x, action.y, '徒手凿岩壁 · 有石镐快 40%', '#9aa6b5');
     }
-    const m = state.map;
     // 懒初始化：岩壁这类生成期没有初值的地形，用与生成器同一张表（地表/深层同一来源）
     if (m.nodeAmt[action.i] <= 0) m.nodeAmt[action.i] = nodeFallback(m.tiles[action.i]);
     const stored = deposit(state, action.res, 1, action.x + 0.5, action.y + 0.5);   // 自动进最近的容器

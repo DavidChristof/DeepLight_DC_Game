@@ -33,6 +33,9 @@ export function bindInput(canvas) {
     //   ② 不把按键记成“按着”（否则按住空格一直被当成在放光爆）
     const ae = document.activeElement;
     if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+    if (ae?.matches('[data-crew-history] > summary') && ['Enter', ' ', 'Tab'].includes(e.key)) return;
+    if (ae?.tagName === 'BUTTON' && ae.matches('#nighttheme, [data-prep-panel], [data-prep-build], [data-prep-locate], [data-recovery-open], [data-recovery-dismiss]')
+      && ['Enter', ' ', 'Tab'].includes(e.key)) return;
     KEYS.add(e.code);
     if (BLOCK_DEFAULT.has(e.code)) e.preventDefault();
     if (e.code === 'AltLeft' || e.code === 'AltRight') e.preventDefault();   // 免弹浏览器菜单

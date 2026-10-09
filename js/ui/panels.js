@@ -29,9 +29,14 @@ import { equipTool, unequipTool, heldTool } from '../systems/tools.js';
 import { isTide, isDawn, phaseIndexOf } from '../core/time.js';
 import { sfx } from '../core/audio.js';
 import { keyLabel, boundCode } from '../data/keymap.js';
-import { COLONISTS, crewCardOf, assignRole, recordCrewEvent } from '../data/colonists.js';
-import { allCrewWorkers, findCrewWorker, setDirective } from '../systems/taskBoard.js';
-import { isAway, outpostReadinessOf } from '../systems/expedition.js';
+import { COLONISTS, crewCardOf, assignRole, recordCrewEvent, crewEventLine } from '../data/colonists.js';
+import { allCrewWorkers, findCrewWorker, setDirective, requestReturnHome, returnHomeError } from '../systems/taskBoard.js';
+import { ECOLOGY } from '../data/ecology.js';
+import { isAway, outpostReadinessOf, crewSupplyOf } from '../systems/expedition.js';
+import { preparationOf } from '../systems/preparation.js';
+import { PREPARATION } from '../data/night.js';
+import { recoveryOf } from '../systems/recovery.js';
+import { RECOVERY } from '../data/recovery.js';
 
 let selectBuild = () => { };
 let toggleHotbar = () => { };
@@ -238,7 +243,8 @@ function renderNight(state) {
   const cur = state.order || 'auto';
   let next = null;
   if (ops && ops.vents.length) next = Math.max(0, Math.round(Math.min(...ops.vents.map((v) => v.t))));
-  let html = `<div class="psec">夜间指令 · ${tide ? '蚀潮中' : dawn ? '黎明（残留蚀兽正在消解）' : '非蚀潮'}</div>`;
+  let html = '<section data-preparation aria-label="驻地备战"></section>';
+  html += `<div class="psec">夜间指令 · ${tide ? '蚀潮中' : dawn ? '黎明（残留蚀兽正在消解）' : '非蚀潮'}</div>`;
   for (const o of ORDERS) {
     html += `<div class="nrow ${o.id === cur ? 'on' : ''}" data-order="${o.id}">
       <span class="nname">${o.name}</span><span class="ndesc">${o.desc}</span></div>`;
@@ -256,6 +262,158 @@ function renderNight(state) {
 }
 
 // —— 容器面板：容器 ↔ 背包 手动搬运（无搬运 AI；跨层携带靠背包）——
+function preparationHtml(r) {
+  const defenseName = r.actionId === 'air' ? '对空塔' : r.actionId === 'lamp' ? '震荡火力' : r.actionId === 'wall' ? '光伤火力' : '防守火力';
+  let html = `<div class="psec">第 ${r.day} 夜 · ${r.surface ? r.theme : '地表预报'}</div>`;
+  html += r.surface
+    ? `<div class="prep-threat">重点防 ${r.threat} <small>${r.tag}</small></div><div class="ninfo">${r.action.text}</div>
+      <div class="ninfo">${defenseName} ${r.defense.ready}/${r.defense.total} 可开火</div>`
+    : '<div class="ninfo">地下不套用地表蚀潮预报</div>';
+  if (r.surface && r.actionId === 'wall') html += `<div class="ninfo">工事 ${r.defense.walls} · 受损 ${r.defense.damaged}</div>`;
+  html += `<div class="prep-actions"><button type="button" data-prep-build="${r.action.build}">查看${BUILD[r.action.build].name}</button>
+    <button type="button" data-prep-panel="research">查看研究</button><button type="button" data-prep-panel="pack">整理背包</button>
+    <button type="button" data-prep-panel="crew">调度拓荒队</button></div>
+    <div class="bnote">按当前状态估算 · 不保证覆盖或守住</div>
+    <div class="psec">本区灯火 · 可用燃料 ${r.fuelReserve}</div><div class="prep-devices">`;
+  for (const d of r.devices) {
+    const status = d.site ? '施工中' : d.off ? '已熄灭' : !d.burning ? '缺火种' : d.light ? '点燃' : '不提供照明';
+    const duration = d.seconds == null ? '未燃烧' : `约 ${Math.floor(d.seconds)}s`;
+    const material = RES_NAME[d.material] || d.material;
+    const short = d.light && d.seconds < r.untilDawn;
+    html += `<div class="prep-device${short ? ' warn' : ''}">
+      <div class="prep-device-head"><b>${d.name} <small>${d.x},${d.y}</small></b><span>${status}</span></div>
+      <div class="ninfo">${material} ${d.fuel}/${d.maxFuel} · ${duration}</div>
+      <div class="bnote">${d.interval.toFixed(1)}s/个 · ${d.site ? '待建成' : d.refill ? '可添火种' : d.fuel >= d.maxFuel ? '槽已满' : '本区缺火种'}</div>
+      ${short ? '<div class="bnote">照此燃耗撑不到潮落</div>' : ''}
+      ${d.cacheCount ? `<div class="bnote">附近补给站余量 ${d.cacheFuel}</div><div class="bnote">每 ${d.supplySeconds}s 分发 · 与其它设备共用</div>` : ''}
+      <button type="button" data-prep-locate="${d.x},${d.y},${d.type}">定位 · 走近按 ${keyLabel(boundCode('interact'))}</button></div>`;
+  }
+  if (!r.devices.length) html += '<div class="ninfo">本区没有燃烧设备</div>';
+  html += '</div>';
+  html += `<div class="ninfo">营地火 ${r.campLights} · 不耗燃料</div><div class="ninfo">玩家提灯 · ${r.playerLamp ? '随身照明' : '未点亮'}</div>`;
+  if (r.relays.length) html += `<div class="ninfo">棱镜 ${r.relays.filter(b => b.lit).length}/${r.relays.length} 接光 · 不产光</div>`;
+  if (r.graves) html += `<div class="ninfo">墓碑光 ${r.graves} · 不耗燃料</div>`;
+  return html + '<div class="ptip">续航不含补给与受击损失 · 开火另耗燃料</div>';
+}
+
+function recoveryHtml(state) {
+  const r = recoveryOf(state);
+  const esc = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  let html = '<div class="psec">本区待处理</div>';
+  if (r.lastNight) html += `<div class="bnote">第${r.lastNight.day}夜 · ${r.lastNight.result === 'retreat' ? '溃退' : '守夜结束'} · ${r.lastNight.chunkX},${r.lastNight.chunkY}</div>`;
+  if (r.trialFailure) html += `<div class="bnote">共鸣中断 · ${esc(r.trialFailure)}</div>`;
+  if (!r.issues.length) return html + '<div class="ninfo">暂无待处理问题</div>';
+  html += '<div class="bnote">当前状态 · 不等于昨夜新增损失</div><div class="prep-devices">';
+  for (const issue of r.issues) {
+    html += `<div class="prep-device"><b>${esc(issue.title)}</b><div class="ninfo">${esc(issue.detail)}</div>`;
+    if (issue.blockers.length) html += `<div class="bnote">${esc(issue.blockers.join(' · '))}</div>`;
+    if (issue.panel !== 'night') html += `<button type="button" data-prep-panel="${issue.panel}">查看${issue.panel === 'crew' ? '拓荒队' : '背包'}</button>`;
+    if (issue.target?.type) html += `<button type="button" data-prep-locate="${issue.target.x},${issue.target.y},${issue.target.type}">定位</button>`;
+    html += '</div>';
+  }
+  return html + '</div>';
+}
+
+let prepHost = null, prepScope = null, prepAt = 0, prepSig = '';
+let recoveryHud = null;
+export function renderRecoveryHud(state) {
+  const el = document.getElementById('recovery-note');
+  if (!el) return;
+  if (!state.started) { el.classList.add('hidden'); recoveryHud = null; return; }
+  const last = state.nightOutcomes?.history?.at(-1);
+  const key = `${state.seed}|${last?.layerId}|${last?.chunkX}|${last?.chunkY}|${last?.day}|${last?.result}`;
+  if (!recoveryHud || recoveryHud.key !== key) recoveryHud = { key, at: 0, dismissed: false, scope: null };
+  const scope = `${state.layerId}|${state.chunkX}|${state.chunkY}`;
+  if (recoveryHud.scope !== scope) { recoveryHud.scope = scope; recoveryHud.at = 0; }
+  const samePlace = last && last.layerId === state.layerId && last.chunkX === (state.chunkX || 0) && last.chunkY === (state.chunkY || 0);
+  const recent = last && (last.day === state.day || last.day === state.day - 1);
+  if (!samePlace || !recent || recoveryHud.dismissed || isTide(state)) { el.classList.add('hidden'); return; }
+  const now = performance.now();
+  if (now - recoveryHud.at < RECOVERY.refreshMs) return;
+  recoveryHud.at = now;
+  const r = recoveryOf(state);
+  el.classList.toggle('hidden', !r.urgent.length);
+  el.querySelector('[data-recovery-summary]').textContent = r.urgent.map(i => i.title).join(' · ');
+}
+export function setupRecoveryHud(getState) {
+  const el = document.getElementById('recovery-note');
+  if (!el) return;
+  el.querySelector('[data-recovery-open]').addEventListener('click', () => togglePanel(getState(), 'night'));
+  el.querySelector('[data-recovery-dismiss]').addEventListener('click', () => {
+    if (recoveryHud) recoveryHud.dismissed = true;
+    el.classList.add('hidden');
+  });
+}
+let selectedCrewId = null, crewSummaryHost = null, crewSummaryAt = 0, crewSummaryScope = '';
+function selectedCrew(state) {
+  const members = allCrewWorkers(state);
+  return members.find(w => (w.crew && w.crew.id || w.name) === selectedCrewId) || members[0] || null;
+}
+function crewSupplyHtml(r) {
+  if (!r) return '<div class="sempty">选择一名拓荒者</div>';
+  const row = (label, text) => `<div class="crew-supply-row"><span>${escAttr(label)}</span><b>${escAttr(text)}</b></div>`;
+  const coords = p => `${p.x},${p.y}`;
+  const destination = r.hasCommand ? `${r.returnHome ? '营地' : crewOutpostLabel(r.mode)} ${coords(r.target)}` : '未驻守 · 查看所在区块';
+  let html = `<div class="psec">${escAttr(r.name)} · 人员与补给</div><div class="crew-supply-grid">`;
+  html += row('实际位置', coords(r.actual)) + row('命令目标', destination);
+  html += row('职业 / 性格', `${r.role} / ${r.personality}`);
+  html += row('当前任务', `${r.task.label || '待命'} · ${r.task.reason || '等待决策'}`);
+  if (r.travel) html += row('迁移', r.travel.blocked ? '等待区块名额' : `${r.returnHome ? '返营中' : '前往中'} ${Math.ceil(Math.max(0, r.travel.t || 0))}s`);
+  html += row('目标状态', r.pausedReason || `下轮结算 ${Math.ceil(r.nextSec)}s`);
+  if (r.known) {
+    html += row('当地仓库', `${r.supply.used}/${r.supply.cap} · 空位 ${r.supply.free}`);
+    html += row('当地库存', `食物 ${r.supply.food} · 燃料 ${r.supply.fuel}`);
+    html += row('营地火', r.campLights ? `${r.campLights}处 · 不耗灯槽燃料` : '无');
+  }
+  html += '</div>';
+  if (!r.known) return html + '<div class="ptip">尚未探索 · 不显示当地物资</div>';
+  html += '<div class="crew-supply-devices">';
+  for (const b of r.devices) {
+    const status = b.site ? '施工中' : b.off ? '已关闭' : !b.fuel ? '空槽' : `余火 ${Math.ceil(b.seconds)}s`;
+    html += row(`${b.name} ${b.x},${b.y}`, `${status} · ${b.brightness}亮 · 槽内 ${b.fuel}/${b.maxFuel} · ${b.interval.toFixed(1)}s/个`);
+  }
+  html += '</div>';
+  if (r.running) {
+    html += `<div class="crew-supply-grid">${row('下轮取食上限', `${r.food.conditionalMax}份 · 候选 ${r.food.candidates.length}/${r.food.eligible}人`)}${row('守灯岗位支出', `最多 ${r.guardFuelMax}燃料/轮`)}</div>`;
+    html += r.food.candidates.map(w => row(w.name || '拓荒者', `饱食 ${Math.ceil(w.current)} → ${Math.ceil(w.hunger)} · ${w.needsFood ? '达到取食条件' : '暂不取食'}`)).join('');
+    if (r.food.skipped) html += row('未轮到', `${r.food.skipped}人 · 本轮不结算`);
+    html += `<div class="ptip">${r.food.candidates.some(w => w.mode === 'gather') ? '采掘可能提前中断 · 取食以实际结算为准' : '按当前饱食估算 · 不含未来补给'}</div>`;
+  }
+  if (r.lastReason) html += row('上轮结果', r.lastReason);
+  const pending = r.alerts.filter(a => a.status !== 'resolved');
+  if (pending.length) html += row('远端告警', `${pending.length}条 · 前往现场确认`);
+  html += `<div class="ptip">${r.local ? `${escAttr(r.roleNote)} · ${escAttr(r.personalityNote)}` : '远端不采用职业工作倍率 · 好胃口加快饥饿'}</div>`;
+  return html + '<div class="ptip">按当前状态估算 · 库存不计入灯槽续航</div>';
+}
+function refreshCrewSupply(state, hostEl) {
+  const target = hostEl.querySelector('[data-crew-supply]');
+  if (!target) return;
+  const w = selectedCrew(state), d = w && w.directive;
+  const scope = `${state.seed}|${state.layerId}|${state.chunkX}|${state.chunkY}|${w && (w.crew?.id || w.name)}|${JSON.stringify(d)}|${w?.crew?.role}`;
+  const now = performance.now();
+  if (target === crewSummaryHost && scope === crewSummaryScope && now - crewSummaryAt < PREPARATION.refreshMs) return;
+  const html = crewSupplyHtml(crewSupplyOf(state, w));
+  if (target.innerHTML !== html) target.innerHTML = html;
+  crewSummaryHost = target; crewSummaryScope = scope; crewSummaryAt = now;
+}
+
+function refreshPreparation(state, hostEl) {
+  const target = hostEl.querySelector('[data-preparation]');
+  if (!target) return;
+  const scope = `${state.seed}|${state.day}|${state.layerId}|${state.chunkX}|${state.chunkY}|${phaseIndexOf(state)}`;
+  const now = performance.now();
+  if (target === prepHost && prepScope === scope && now - prepAt < PREPARATION.refreshMs) return;
+  const r = preparationOf(state), sig = recoveryHtml(state) + preparationHtml(r);
+  if (target !== prepHost || sig !== prepSig) {
+    const old = document.activeElement;
+    const key = target.contains(old) ? ['prepLocate', 'prepBuild', 'prepPanel'].find(k => old.dataset[k] != null) : null;
+    const value = key ? old.dataset[key] : null;
+    target.innerHTML = sig;
+    if (key) Array.from(target.querySelectorAll('button')).find(el => el.dataset[key] === value)?.focus({ preventScroll: true });
+  }
+  prepHost = target; prepScope = scope; prepAt = now; prepSig = sig;
+}
+
 // 【拖拽】拖一行到对面那一栏 = **整摞搬过去**（跟 MC 一致：拖 = 一整摞；想要一个就用行上的「取1 / 存1」）。
 // 为什么不做“Shift+拖 = 全”：精确的那个动作已经有按钮了，再给拖拽挂修饰键只是让玩家多背一条规则。
 let dragItem = null;
@@ -449,6 +607,7 @@ function outpostFlowHtml(state) {
     <div class="psec">前哨准备 · <b data-live="outpost-count">${r.readyCount}/4</b></div>
     <div class="outpost-steps">${steps}<span class="outpost-step${r.assigned ? ' ok' : ''}" data-live="outpost-step-crew">${r.assigned ? '✓' : '待'} 派拓荒者</span></div>
     <div class="bnote" data-live="outpost-note">${r.local.hasStore && r.local.free <= 0 ? '当地储物箱已满 · 先清空' : '先建箱 → 点灯 → 补食物/燃料 → 派人'}</div>
+    <button type="button" data-prep-panel="night">查看本区备战与灯火</button>
   </div>`;
 }
 
@@ -467,21 +626,26 @@ function crewCareLabel(care) {
   return ({ neutral: '常规照护', medical: '治疗优先', rescue: '救援优先', guard: '仅守灯' })[care] || '常规照护';
 }
 function crewOutpostLabel(mode) {
-  return ({ guard: '守灯', gather: '采掘', silent: '静默撤离' })[mode] || '未设定';
+  return ({ guard: '守灯', gather: '采掘', silent: '静默驻守' })[mode] || '未设定';
 }
 function crewOutpostStatus(state, w) {
   if (!w) return '';
-  if (w.outpostTravel) return w.outpostTravel.blocked ? ' · 等待区块名额' : ` · 前往中 ${Math.ceil(Math.max(0, w.outpostTravel.t || 0))}s`;
+  if (w.directive && w.directive.returnHome) {
+    const error = returnHomeError(state, w);
+    if (error) return ` · ${error}`;
+    if (w.outpostTravel && w.outpostTravel.t === 0) return ' · 营地入口被占';
+  }
+  if (w.outpostTravel) return w.outpostTravel.blocked ? ' · 等待区块名额' : ` · ${w.directive && w.directive.returnHome ? '返营中' : '前往中'} ${Math.ceil(Math.max(0, w.outpostTravel.t || 0))}s`;
   const d = w.directive || {};
   if (!d.outpost || (w.chunkX | 0) !== (d.outpost.x | 0) || (w.chunkY | 0) !== (d.outpost.y | 0)) return '';
   const c = state.chunkStore && state.chunkStore[`${d.outpost.x | 0},${d.outpost.y | 0}`];
   const o = c && c.outpost;
-  if (!o) return d.outpostMode === 'silent' ? ' · 静默撤离' : ' · 守灯中 · 等待首次结算';
+  if (!o) return ` · ${crewOutpostLabel(d.outpostMode)} · 等待首次结算`;
   const eco = o.lastEcology || {};
   const ecoText = Number.isFinite(eco.pressure) ? ` · 光压 ${eco.pressure} · ${eco.tide ? `潮压 ${eco.debt || 0}` : '白天'}` : '';
   const alert = (o.alerts || []).find((a) => a && a.status === 'open');
   const alertText = alert ? ` · 告警：${alert.message || '远端生态异常'}` : '';
-  if (d.outpostMode !== 'gather') return `${d.outpostMode === 'silent' ? ' · 静默撤离' : ' · 守灯中'}${ecoText}${alertText}`;
+  if (d.outpostMode !== 'gather') return ` · ${crewOutpostLabel(d.outpostMode)}${ecoText}${alertText} · ${o.lastReason || '等待结算'}`;
   const n = o.lastNeeds || {};
   const supply = n.fed || n.fuel ? ` · 补给 食物${n.fed || 0} 燃料${n.fuel || 0}` : '';
   return ` · 下轮结算 ${Math.ceil(Math.max(0, o.nextT || 0))}s${supply}${ecoText}${alertText} · ${o.lastReason || '等待结算'}`;
@@ -490,8 +654,9 @@ function renderCrew(state) {
   const members = allCrewWorkers(state);
   const memorial = (state.memorial || []).slice(-COLONISTS.MAX_MEMORIAL_EVENTS).reverse();
   let html = `<div class="psec">拓荒队调度 · ${members.filter((w) => w.alive !== false).length} 名在册 · 复苏 ${state.reviveCount | 0}/${SURVIVAL.REVIVE.MAX_USES}</div>`;
+  html += '<section class="crew-supply" data-crew-supply aria-live="polite"></section>';
   html += outpostFlowHtml(state);
-  html += '<div class="bnote">选中的区块会成为前哨目标；拓荒者按时间迁移，不会瞬移。采掘前哨每 12 秒结算一次，产出只能进入当地容器；潮夜会按当地光压留下有限蚀痕前线，并发出有上限的远端告警，不会在远端额外刷怪。最多同时维持 3 个有人区块。</div>';
+  html += '<div class="bnote">派往此区块 · 最多维持3个有人区块</div>';
   if (memorial.length) {
     html += '<div class="psec memorial-head">离去记录</div>';
     html += memorial.map((m) => {
@@ -509,20 +674,21 @@ function renderCrew(state) {
     const dead = w.alive === false;
     const death = dead && w.deathRecord ? `<div class="crewdeath">第 ${Math.max(1, w.deathRecord.day | 0)} 天离去 · ${escAttr(w.deathRecord.cause || '伤势过重')} · 墓碑已留下</div>` : '';
     const events = (card.events || []).slice(-3).reverse();
-    const eventHtml = events.length ? `<div class="crewevents"><span>经历</span>${events.map((e) => `<em>第 ${Math.max(1, e.day | 0)} 天 · ${escAttr(e.text)}</em>`).join('')}</div>` : '';
-    const outpost = d.outpost ? `前哨 ${d.outpost.x},${d.outpost.y} · ${crewOutpostLabel(d.outpostMode)}${crewOutpostStatus(state, w)}` : '未驻守';
+    const eventHtml = events.length ? `<div class="crewevents"><span>经历</span>${events.map((e) => `<em>${escAttr(crewEventLine(e))}</em>`).join('')}</div><details class="crew-history" data-crew-history="${escAttr(id)}"><summary>查看全部经历 · ${card.events.length}/${COLONISTS.MAX_EVENTS}</summary>${card.events.slice().reverse().map(e => `<div>${escAttr(crewEventLine(e))}</div>`).join('')}</details>` : '';
+    const outpost = d.outpost ? `${d.returnHome ? '返回营地' : '前哨'} ${d.outpost.x},${d.outpost.y}${d.returnHome ? '' : ` · ${crewOutpostLabel(d.outpostMode)}`}${crewOutpostStatus(state, w)}` : '未驻守';
+    const returnError = returnHomeError(state, w);
     const area = d.area ? `工作区 ${d.area.x},${d.area.y}` : '全区';
     const inHere = (w.chunkX | 0) === (state.chunkX | 0) && (w.chunkY | 0) === (state.chunkY | 0);
     html += `<section class="crewcard${dead ? ' dead' : ''}" data-worker="${escAttr(id)}">
       <div class="crewhead"><span class="crewportrait ${escAttr(card.palette)}">${escAttr((w.name || '拓').slice(-1))}</span>
         <span class="crewname">${escAttr(w.name || '拓荒者')}<small>${escAttr(COLONISTS.ROLES[card.role] ? COLONISTS.ROLES[card.role].name : '拓荒者')} · ${escAttr(COLONISTS.PERSONALITIES[card.personality] ? COLONISTS.PERSONALITIES[card.personality].name : '普通')}</small></span>
-        <span class="crewloc">${escAttr(crewLocation(w))}</span></div>
+        <span class="crewloc">${escAttr(crewLocation(w))}</span><button type="button" class="crewctl" data-crew-select data-worker="${escAttr(id)}" aria-pressed="${selectedCrew(state) === w}">查看补给</button></div>
       <div class="crewstats"><span>生命 ${crewBar(crewHpPct(w), '#ff7d8a')}<b>${Math.ceil(w.hp || 0)}/${Math.ceil(w.maxHp || 0)}</b></span>
         <span>饱食 ${crewBar(w.hunger || 0, '#ffd76e')}<b>${Math.ceil(w.hunger || 0)}</b></span>
         <span>士气 ${crewBar(w.morale || 0, '#9ef7a8')}<b>${Math.ceil(w.morale || 0)}</b></span></div>
       ${death}
       ${eventHtml}
-      <div class="crewtask"><b>${escAttr(task.label || '待命')}</b><span>${escAttr(task.reason || '—')}</span></div>
+      <div class="crewtask"><b>${escAttr(d.returnHome ? '返回营地' : task.label || '待命')}</b><span>${escAttr(task.reason || '—')}</span></div>
       <div class="crewmeta"><span>${escAttr(area)}</span><span>${escAttr(outpost)}</span><span>${d.noNight ? '夜班已禁' : '允许夜班'}</span><span>${escAttr(crewCareLabel(d.care || 'neutral'))}</span></div>
       <div class="crewcontrols" role="group" aria-label="${escAttr(w.name || '拓荒者')} 调度">
         <span class="crewgroup-label">职业</span>
@@ -533,7 +699,9 @@ function renderCrew(state) {
         <button type="button" class="crewctl" data-crew-area="set" data-worker="${escAttr(id)}">设为当前工作区</button>
         <button type="button" class="crewctl" data-crew-area="clear" data-worker="${escAttr(id)}">清除工作区</button>
         <button type="button" class="crewctl${d.outpost && d.outpost.x === (state.chunkX | 0) && d.outpost.y === (state.chunkY | 0) ? ' on' : ''}" data-crew-outpost="assign" data-worker="${escAttr(id)}">${inHere ? '驻守本区块' : '派往此区块'}</button>
-        <button type="button" class="crewctl" data-crew-outpost="withdraw" data-worker="${escAttr(id)}">撤回营地</button>
+        <button type="button" class="crewctl" data-crew-outpost="withdraw" data-worker="${escAttr(id)}" title="只取消驻守命令，不自动返回营地">取消驻守</button>
+        <button type="button" class="crewctl" data-crew-outpost="return" data-worker="${escAttr(id)}" ${returnError ? 'disabled' : ''} title="${escAttr(returnError || `返回地表营地0,0 · 计时迁移${ECOLOGY.OUTPOST_TRAVEL_SEC}s`)}">返回营地</button>
+        ${returnError ? `<span class="crewreturn-reason">${escAttr(returnError)}</span>` : ''}
         ${['guard', 'gather', 'silent'].map((m) => `<button type="button" class="crewctl${d.outpost && d.outpostMode === m ? ' on' : ''}" data-crew-outpost-mode="${m}" data-worker="${escAttr(id)}">${crewOutpostLabel(m)}</button>`).join('')}
         <button type="button" class="crewctl${d.noNight ? ' on' : ''}" data-crew-night="toggle" data-worker="${escAttr(id)}">${d.noNight ? '允许夜班' : '禁止夜班'}</button>
         <button type="button" class="crewctl${d.rescue === 'high' ? ' on' : ''}" data-crew-rescue="toggle" data-worker="${escAttr(id)}">${d.rescue === 'high' ? '改为常规救援' : '设为优先救援'}</button>
@@ -1030,7 +1198,7 @@ const FOCUS_SEL = {
   bench: '[data-act="craft"]', codex: '.cx[data-kind]',
   payload: '.brow[data-mod], .brow[data-slot]',
   pack: '.packrow',
-  crew: '[data-crew-role], [data-crew-care], [data-crew-mode], [data-crew-area], [data-crew-outpost], [data-crew-outpost-mode], [data-crew-night], [data-crew-rescue]',
+  crew: '[data-crew-select], [data-crew-role], [data-crew-care], [data-crew-mode], [data-crew-area], [data-crew-outpost], [data-crew-outpost-mode], [data-crew-night], [data-crew-rescue]',
 };
 let focusKey = null;                 // 形如 "type:lamp"，跨重建有效（重建后按 key 重新找回来）
 function focusableRows() {
@@ -1131,10 +1299,16 @@ export function renderPanelHost(state) {
     + `|${phaseIndexOf(state)}|${p ? 'open' : 'shut'}`
     + `|${activeId === 'crew' ? allCrewWorkers(state).map((w) => {
       const d = w.directive || {};
-      return `${w.crew && w.crew.id || w.name}:${w.crew && w.crew.role || ''}:${w.job || 'idle'}:${w.hp | 0}:${w.hunger | 0}:${w.morale | 0}:${d.mode || 'auto'}:${d.noNight ? 1 : 0}:${d.outpost ? `${d.outpost.x},${d.outpost.y}` : ''}:${d.outpostMode || ''}:${d.area ? `${d.area.x},${d.area.y}` : ''}:${d.rescue || 'normal'}:${d.care || 'neutral'}`;
+      const events = w.crew && w.crew.events || [], last = events[events.length - 1];
+      const history = `${events.length}:${last ? `${last.day},${last.kind},${last.text},${last.chunkX},${last.chunkY},${last.command}` : ''}`;
+      return `${w.crew && w.crew.id || w.name}:${w.job || 'idle'}:${w.hp | 0}:${w.hunger | 0}:${w.morale | 0}:${d.mode || 'auto'}:${d.noNight ? 1 : 0}:${d.outpost ? `${d.outpost.x},${d.outpost.y}` : ''}:${d.outpostMode || ''}:${d.area ? `${d.area.x},${d.area.y}` : ''}:${d.rescue || 'normal'}:${d.care || 'neutral'}:${w.crew && w.crew.role || ''}:${d.returnHome ? 1 : 0}:${crewOutpostStatus(state, w)}:${returnHomeError(state, w) || ''}:${w.chunkX},${w.chunkY}:${history}`;
     }).join(';') : ''}|M${activeId === 'crew' ? (state.memorial || []).length : 0}`;
   // 注意：外部把 state._panelSig 置 null（切面板/选中方块/解锁研究…）同样会被判为“结构变了”
   if (state._panelSig !== struct) {
+    const focused = activeId === 'crew' && hostEl.contains(document.activeElement) ? document.activeElement : null;
+    const focusedData = focused?.dataset?.worker ? { ...focused.dataset } : null;
+    const focusedHistory = focused?.closest('[data-crew-history]')?.dataset.crewHistory;
+    const openHistory = Array.from(hostEl.querySelectorAll('[data-crew-history][open]')).map(el => el.dataset.crewHistory);
     const prevBody = hostEl.querySelector('.pbody');
     const prevTop = (prevBody && scrollMemo.key === (activeId || null)) ? prevBody.scrollTop : 0;
     state._panelSig = struct;
@@ -1161,6 +1335,7 @@ export function renderPanelHost(state) {
     }
     hostEl.classList.remove('hidden');
     hostEl.classList.toggle('research-wide', activeId === 'research');
+    hostEl.classList.toggle('preparation-wide', activeId === 'night');
   hostEl.classList.toggle('station-wide', activeId === 'bench' || activeId === 'furnace' || activeId === 'smelter' || activeId === 'clinic');
     hostEl.classList.toggle('crew-wide', activeId === 'crew');
     // 筛选条放在 phead 与 pbody 之间：pbody 才滚，所以筛选框不会跟着列表滑走
@@ -1169,9 +1344,16 @@ export function renderPanelHost(state) {
     ${filBar}
     <div class="pbody">${p.render(state)}</div>`;
     const body = hostEl.querySelector('.pbody');
+    for (const el of hostEl.querySelectorAll('[data-crew-history]')) if (openHistory.includes(el.dataset.crewHistory)) el.open = true;
     if (body) body.scrollTop = prevTop;               // 恢复滚动位置
+    if (focusedData) Array.from(hostEl.querySelectorAll('button[data-worker]')).find(el =>
+      Object.entries(focusedData).every(([k, v]) => el.dataset[k] === v))?.focus({ preventScroll: true });
+    if (focusedHistory) Array.from(hostEl.querySelectorAll('[data-crew-history]')).find(el =>
+      el.dataset.crewHistory === focusedHistory)?.querySelector('summary')?.focus({ preventScroll: true });
     scrollMemo = { key: activeId || null, top: prevTop };
   }
+  if (p) refreshCrewSupply(state, hostEl);
+  if (p) refreshPreparation(state, hostEl);
   if (p) refreshLive(state, hostEl);
   if (p && PANEL_FILTER[activeId]) applyPanelFilter(hostEl, state);   // 重建后把当前查询重新盖上去（筛选本身不重建）
   if (p) applyFocusRing();          // DOM 重建后把“回车要点的那一行”重新圈上
@@ -1389,10 +1571,38 @@ export function panelClick(state, ev) {
   }
   const close = t.closest('.pclose');
   if (close) { closePanel(state); return; }
+  const prepPanel = t.closest('[data-prep-panel]');
+  if (prepPanel) { togglePanel(state, prepPanel.dataset.prepPanel); return; }
+  const prepBuild = t.closest('[data-prep-build]');
+  if (prepBuild) {
+    state.buildCat = CATEGORIES.find(c => c.types.includes(prepBuild.dataset.prepBuild))?.id || state.buildCat;
+    setPanelQuery('build', BUILD[prepBuild.dataset.prepBuild].name);
+    togglePanel(state, 'build'); return;
+  }
+  const locate = t.closest('[data-prep-locate]');
+  if (locate) {
+    const [x, y, type] = locate.dataset.prepLocate.split(',');
+    const b = (state.buildings || []).find(b => b.x === +x && b.y === +y && b.type === type);
+    if (b && state.player) {
+      state.camPan = { x: b.x + 0.5 - state.player.x, y: b.y + 0.5 - state.player.y };
+      state.camera.x = b.x + 0.5; state.camera.y = b.y + 0.5;
+    }
+    return;
+  }
   if (activeId === 'crew') {
     const workerId = (t.closest('[data-worker]') || {}).dataset && (t.closest('[data-worker]') || {}).dataset.worker;
     const w = findCrewWorker(state, workerId);
     if (w) {
+      if (t.closest('[data-crew-select]')) {
+        selectedCrewId = workerId;
+        crewSummaryHost = null;
+        const host = document.getElementById('panel');
+        refreshCrewSupply(state, host);
+        for (const b of host.querySelectorAll('[data-crew-select]')) b.setAttribute('aria-pressed', String(b.dataset.worker === workerId));
+        const body = host.querySelector('.pbody');
+        if (body) body.scrollTop = 0; // 主动查看回到摘要；定时刷新仍保留滚动。
+        return;
+      }
       const mode = t.closest('[data-crew-mode]');
       const role = t.closest('[data-crew-role]');
       const care = t.closest('[data-crew-care]');
@@ -1422,9 +1632,14 @@ export function panelClick(state, ev) {
         setDirective(w, { area: area.dataset.crewArea === 'clear' ? null : { x: state.chunkX | 0, y: state.chunkY | 0 } });
         note = area.dataset.crewArea === 'clear' ? `已清除 ${w.name} 的工作区` : `${w.name} 工作区设为当前区块`;
       } else if (outpost) {
+        if (outpost.dataset.crewOutpost === 'return') {
+          const error = requestReturnHome(state, w);
+          note = error || `${w.name} 已接到返营命令`;
+        } else {
         const withdrawing = outpost.dataset.crewOutpost === 'withdraw';
-        setDirective(w, { outpost: withdrawing ? null : { x: state.chunkX | 0, y: state.chunkY | 0 }, outpostMode: withdrawing ? null : (w.directive && w.directive.outpostMode) || 'guard' });
-        note = withdrawing ? `已登记撤回 ${w.name}` : `${w.name} 已接到前往当前区块的命令`;
+        setDirective(w, { outpost: withdrawing ? null : { x: state.chunkX | 0, y: state.chunkY | 0 }, outpostMode: withdrawing ? null : (w.directive && w.directive.outpostMode) || 'guard' }, state);
+        note = withdrawing ? `已取消 ${w.name} 的驻守命令` : `${w.name} 已接到前往当前区块的命令`;
+        }
       } else if (outpostMode) {
         const mode = outpostMode.dataset.crewOutpostMode;
         setDirective(w, { outpost: w.directive && w.directive.outpost ? w.directive.outpost : { x: state.chunkX | 0, y: state.chunkY | 0 }, outpostMode: mode });

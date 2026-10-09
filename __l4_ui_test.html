@@ -1,0 +1,38 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>L4 两尺寸界面验收</title>
+<style>html,body{margin:0;width:100%;height:100%;background:#101923;color:#eee;font:13px monospace}iframe{position:absolute;inset:0;width:100%;height:100%;border:0}aside{position:fixed;left:8px;bottom:8px;z-index:4;background:#182430;padding:8px;max-width:470px}button{margin:2px}pre{max-height:140px;overflow:auto;white-space:pre-wrap}</style>
+<iframe id="game" title="L4界面游戏"></iframe><aside><div id="status">受控界面夹具，非真实远征。使用浏览器viewport设定两尺寸。</div><button id="start">准备界面</button><button id="verify" disabled>记录布局与焦点</button><button id="end" disabled>恢复并结束</button><details><summary>验收报告</summary><pre id="out"></pre></details></aside>
+<script type="module">
+const keys=['deep-light-saves-v2','deep-light-settings-v1','deep-light-ui-v1'],bk='__deep_light_l4_ui_backup_v1';
+const frame=document.querySelector('#game'),out=document.querySelector('#out'),status=document.querySelector('#status');
+let active=false,g,s,ui,data,tasks,chunks,report={layouts:[],inputs:[],scope:'controlled UI fixture; seeded 12-event histories are not natural expedition evidence'};
+const assert=(v,m)=>{if(!v)throw Error(m);},show=()=>{out.textContent=JSON.stringify(report,null,2);};
+function restore(){const b=JSON.parse(localStorage.getItem(bk)||'null');if(!b)return null;for(const k of keys)b[k]===null?localStorage.removeItem(k):localStorage.setItem(k,b[k]);const r=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)===b[k]]));if(Object.values(r).every(Boolean))localStorage.removeItem(bk);return r;}
+function finish(error){if(error)report.error=String(error.stack||error);if(g?.__settings){g.__settings.autosave=false;g.__quick(true);}active=false;frame.src='about:blank';report.storage=restore();status.textContent=error?'失败，存储已恢复':'界面验收结束，存储已恢复';show();}
+document.querySelector('#start').onclick=()=>{if(active)return;if(localStorage.getItem(bk))restore();const b=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)]));localStorage.setItem(bk,JSON.stringify(b));localStorage.setItem(keys[1],JSON.stringify({...JSON.parse(b[keys[1]]||'{}'),autosave:false}));active=true;frame.src='/?l4-ui='+Date.now();};
+frame.onload=async()=>{if(!active)return;g=frame.contentWindow;try{
+g.__settings.autosave=false;[ui,data,tasks,chunks]=await g.eval("Promise.all([import('/js/ui/panels.js'),import('/js/data/colonists.js'),import('/js/systems/taskBoard.js'),import('/js/world/chunks.js')])");
+g.__newGame(4242,'normal');g.__settings.autosave=false;g.__steps(1);g.__quick(true);s=g.__state;
+const c=chunks.ensureSurfaceChunk(s,1,0),w=s.workers[0];tasks.setDirective(w,{outpost:{x:1,y:0},outpostMode:'gather'},s);chunks.updateOutpostTravel(s,8);
+assert(w.chunkX===1,'受控派驻未抵达');
+for(const member of tasks.allCrewWorkers(s))for(let day=1;day<=12;day++)data.recordCrewEvent(member,'role','界面压力夹具经历 '+day+' · 说明较长的前哨工作记录用于检查换行与完整显示',day);
+ui.togglePanel(s,'crew');ui.renderPanelHost(s);report.workerIds=tasks.allCrewWorkers(s).map(w=>w.crew.id);
+g.document.addEventListener('click',ev=>{if(!ev.isTrusted)return;const el=ev.target.closest('button,summary');if(el){report.inputs.push({type:'click',text:el.textContent,history:el.closest('[data-crew-history]')?.dataset.crewHistory,select:el.dataset.worker});show();}});
+g.document.addEventListener('keydown',ev=>{if(ev.isTrusted){report.inputs.push({type:'key',key:ev.key,text:ev.target.textContent?.slice(0,100)});show();if(ev.key==='F8'){ev.preventDefault();recordLayout();}}});
+document.querySelector('#verify').disabled=false;document.querySelector('#end').disabled=false;status.textContent='在游戏内选择补给、展开两人经历；用End/Tab滚动，然后在游戏内按F8记录（不点外部按钮）。';show();
+}catch(e){finish(e);}};
+function recordLayout(){try{
+const d=g.document,p=d.querySelector('#panel'),body=p.querySelector('.pbody'),r=p.getBoundingClientRect(),histories=[...p.querySelectorAll('[data-crew-history]')],focus=d.activeElement;
+const before={scroll:body.scrollTop,focus:focus.outerHTML,open:histories.map(el=>el.open)};
+assert(r.left>=0&&r.right<=g.innerWidth&&r.top>=0&&r.bottom<=g.innerHeight,'面板越界');assert(g.innerWidth===innerWidth&&g.innerHeight===innerHeight,'游戏与真实viewport不一致');
+assert(histories.length===2&&histories.every(el=>el.open&&el.querySelector('summary').textContent.includes('12/12')),'未展开两份满额经历');
+assert(p.querySelector('[data-crew-supply]').textContent.includes('人员与补给'),'摘要为空');
+assert(body.scrollTop>0&&body.scrollHeight>body.clientHeight,'未实际滚动名册');assert(p.contains(focus)&&focus.matches('button,summary'),'键盘焦点不在游戏操作入口');
+for(const el of [...histories,p.querySelector('[data-crew-supply]'),...p.querySelectorAll('.crewcontrols')])assert(el.scrollWidth<=el.clientWidth+1,'内容横向裁切');
+for(let i=0;i<8;i++)ui.renderPanelHost(s);
+assert(d.activeElement.outerHTML===before.focus&&body.scrollTop===before.scroll,'刷新丢焦点或滚动');assert([...p.querySelectorAll('[data-crew-history]')].every(el=>el.open),'刷新丢展开');
+const row={width:g.innerWidth,height:g.innerHeight,panel:{left:r.left,top:r.top,right:r.right,bottom:r.bottom},histories:2,eventsEach:12,scrollTop:body.scrollTop,scrollHeight:body.scrollHeight,clientHeight:body.clientHeight,focus:focus.textContent,focusPreserved:true,scrollPreserved:true,noHorizontalClip:true,inputs:report.inputs.length};
+report.layouts.push(row);status.textContent='本尺寸布局、展开、焦点和滚动通过；更换viewport后重复。';show();
+}catch(e){finish(e);}}
+document.querySelector('#verify').onclick=()=>{status.textContent='请在游戏操作控件上按F8，避免外部按钮抢走焦点。';};
+document.querySelector('#end').onclick=()=>finish();window.addEventListener('beforeunload',()=>{if(active)finish(Error('interrupted'));});
+</script></html>

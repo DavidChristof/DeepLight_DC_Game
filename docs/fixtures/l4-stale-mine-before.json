@@ -1,0 +1,40 @@
+{
+  "scope": "isolated stale-action reproduction, not original input chain",
+  "steps": 120,
+  "codeFingerprint": "32eaa57b",
+  "controlled": {
+    "removedWorkers": [
+      "crew-c630s4",
+      "crew-d01tv1"
+    ],
+    "oldPosition": [
+      49,
+      36
+    ],
+    "newPosition": [
+      80.5,
+      5.5
+    ],
+    "notNaturalEncounter": true
+  },
+  "before": {
+    "ore": 4,
+    "node": 5,
+    "tile": 2,
+    "target": "mine"
+  },
+  "trustedE": true,
+  "after": {
+    "ore": 24,
+    "node": 0,
+    "tile": 0
+  },
+  "gain": 20,
+  "exceedsNode": true,
+  "targetStillCached": true,
+  "storage": {
+    "deep-light-saves-v2": true,
+    "deep-light-settings-v1": true,
+    "deep-light-ui-v1": true
+  }
+}

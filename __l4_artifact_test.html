@@ -1,0 +1,65 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>L4 补录文件读回</title>
+<body style="background:#101923;color:#e5edf5;font:15px monospace;margin:24px">
+<h1>L4 · 独立输入文件读回</h1>
+<p>从仓库文件读取；不启动游戏，不读取开发检查点，不修改正式存档。</p>
+<button id="read">读取并校验独立补录文件</button>
+<button id="ledger">核对补录账本</button>
+<button id="eventLedger">读取并核验三日事件账本</button>
+<button id="categoryLedger">读取并核验岗位与初始槽量</button>
+<p id="status">未执行</p><pre id="out" style="white-space:pre-wrap"></pre>
+<script type="module">
+import { auditInputArtifact, INPUT_FILE } from './tools/l4_input_artifact.mjs';
+import { FORMAL_KEYS } from './tools/l4_matrix_artifact.mjs';
+import { auditInputLedger } from './tools/l4_ledger_audit.mjs';
+import { auditLedgerArtifact, auditCategoryArtifact } from './tools/l4_ledger_rules.mjs';
+const out = document.querySelector('#out'), status = document.querySelector('#status');
+async function read(withLedger = false) {
+  const before = FORMAL_KEYS.map(k => localStorage.getItem(k));
+  try {
+    const response = await fetch('/' + INPUT_FILE, { cache: 'no-store' });
+    if (!response.ok) throw Error('文件HTTP ' + response.status);
+    const packed = (await response.text()).trim();
+    const bytes = Uint8Array.from(atob(packed), c => c.charCodeAt(0));
+    const raw = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'))).text();
+    const value = JSON.parse(raw), result = auditInputArtifact(value, raw);
+    if (!result.ok) throw Error('补录文件完整性失败');
+    const ledger = withLedger ? auditInputLedger(value.report) : null;
+    const unchanged = Object.fromEntries(FORMAL_KEYS.map((k, i) => [k, localStorage.getItem(k) === before[i]]));
+    out.textContent = JSON.stringify({ file: INPUT_FILE, rawBytes: new TextEncoder().encode(raw).length,
+      compressedBytes: bytes.length, ...result, ledger, currentFormalKeysUnchanged: unchanged }, null, 2);
+    status.textContent = result.ok && Object.values(unchanged).every(Boolean)
+      ? withLedger ? '账本已核对：搬运可对账，采集来源仍有缺口；L4尚未收口。'
+        : '文件独立读回通过；原存读失败记录完整保留，L4尚未收口。' : '读回失败，见下方明细。';
+  } catch (e) { status.textContent = '读回错误：' + e.message; }
+}
+document.querySelector('#read').onclick = () => read();
+document.querySelector('#ledger').onclick = () => read(true);
+document.querySelector('#eventLedger').onclick = async () => {
+  const before = FORMAL_KEYS.map(k => localStorage.getItem(k));
+  try {
+    const file = 'docs/fixtures/l4-ledger-full.deflate.b64', response = await fetch('/' + file, { cache: 'no-store' });
+    if (!response.ok) throw Error('HTTP ' + response.status);
+    const bytes = Uint8Array.from(atob((await response.text()).trim()), c => c.charCodeAt(0));
+    const raw = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'))).text();
+    const result = auditLedgerArtifact(JSON.parse(raw), raw);
+    const formalKeysUnchanged = Object.fromEntries(FORMAL_KEYS.map((k, i) => [k, localStorage.getItem(k) === before[i]]));
+    out.textContent = JSON.stringify({ file, ...result, formalKeysUnchanged }, null, 2);
+    status.textContent = result.ok && Object.values(formalKeysUnchanged).every(Boolean)
+      ? '三日连续链事件账本核验通过；其他L4门仍待验收。' : '账本核验失败，见明细。';
+  } catch (e) { status.textContent = '事件账本读回错误：' + e.message; }
+};
+document.querySelector('#categoryLedger').onclick = async () => {
+  const before = FORMAL_KEYS.map(k => localStorage.getItem(k));
+  try {
+    const file = 'docs/fixtures/l4-ledger-categories.deflate.b64', response = await fetch('/' + file, { cache: 'no-store' });
+    if (!response.ok) throw Error('HTTP ' + response.status);
+    const bytes = Uint8Array.from(atob((await response.text()).trim()), c => c.charCodeAt(0));
+    const raw = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'))).text();
+    const result = auditCategoryArtifact(JSON.parse(raw), raw);
+    const formalKeysUnchanged = Object.fromEntries(FORMAL_KEYS.map((k, i) => [k, localStorage.getItem(k) === before[i]]));
+    out.textContent = JSON.stringify({ file, ...result, formalKeysUnchanged }, null, 2);
+    status.textContent = result.ok && Object.values(formalKeysUnchanged).every(Boolean)
+      ? '岗位与初始槽量文件核验通过；其他L4门仍待验收。' : '类别账本核验失败，见明细。';
+  } catch (e) { status.textContent = '类别账本读回错误：' + e.message; }
+};
+</script></body></html>

@@ -2,7 +2,7 @@
 
 > **面向**：下一个接手本项目的 AI（Codex / GPT / 其他模型）+ 未来的作者本人。
 > **性质**：接手入口，保存稳定的代码地图、验证纪律和设计约束。先读 §0–3、§5–8；§4 和附录的旧进度按需查。**当前阶段与下一步只维护在 [`docs/STATUS.md`](docs/STATUS.md)**；W20-R 的详细阶段门见 [`docs/ENDGAME.md`](docs/ENDGAME.md)。
-> **最近更新**：2026-10-02；v0.8.0-alpha.1版本整理，R6已收口；当前状态见 `docs/STATUS.md`，版本边界见 `CHANGELOG.md`。
+> **最近更新**：2026-10-09；v0.8.0-alpha.1，W22-L L4收口及前哨绑定契约同步；当前状态见 `docs/STATUS.md`，版本边界见 `CHANGELOG.md`。
 
 ---
 
@@ -12,9 +12,9 @@
 |---|---|
 | **是什么** | 2D 顶视角「永夜殖民经营 + 蚀潮防守」原型。Canvas 2D，一天 400 秒为一循环，目标是让灯塔活过一波波蚀潮 |
 | **技术** | **原生 JS ES Modules · 零构建 · 零依赖 · 零 npm · 零测试框架**（这是硬约束，见 §6.2） |
-| **体量** | 最近一次源码审计覆盖 91 个 `.js`；具体数量随代码变化，以当前 `__srcCheck()` 输出为准 |
+| **体量** | 最近一次源码审计覆盖 95 个 `.js`；具体数量随代码变化，以当前 `__srcCheck()` 输出为准 |
 | **跑法** | 根目录 `py -3.12 serve.py 8000` → <http://localhost:8000> |
-| **自检** | 浏览器控制台 `__check()` → 当前应 `{ok:true, ran:80, fails:[]}` |
+| **自检** | 浏览器控制台 `__check()` → 当前应 `{ok:true, ran:86, fails:[]}` |
 | **当前状态** | v0.8.0-alpha.1「余辉共鸣」；完整流程可玩至三站正式结局，W20-R R0–R6已验收；见 [`docs/STATUS.md`](docs/STATUS.md) |
 | **版本控制** | ✅ **git 仓库已初始化并推送 GitHub**（分支 `main`，远端 `DeepLight_DC_Game`） |
 | **你的第一步** | 先读 [`docs/STATUS.md`](docs/STATUS.md) 的当前阶段，再读相应计划的未验收判据；不要从 §4 的历史增量推断今日进度 |
@@ -27,9 +27,9 @@
 cd d:\26Program\DC_Game
 Start-Process py -ArgumentList "-3.12","serve.py","8000" -WindowStyle Hidden -PassThru
 # 浏览器打开 http://localhost:8000 ，按 F12 在控制台里：
-__check()                    # 期望 {ok:true, ran:80, fails:[]}
+__check()                    # 期望 {ok:true, ran:86, fails:[]}
 __check({roundtrip:true})    # 额外真跑一遍「存档→读档→恢复建筑」
-__srcCheck()                 # 异步源码审计，期望 {ok:true, files:91, fails:[]}
+__srcCheck()                 # 异步源码审计，期望 {ok:true, files:95, fails:[]}
 ```
 
 > ⚠️ **绝对不要用 `python serve.py`**：这台机器 PATH 上的 `python` 是 LilyPond 自带的嵌入式解释器（**没有 `_socket` 模块**），服务器起不来。必须 `py -3.12`。
@@ -68,7 +68,7 @@ __srcCheck()                 # 异步源码审计，期望 {ok:true, files:91, f
 ```
 index.html          游戏入口（<canvas> + HUD/面板的 DOM 骨架）
 VERSION / CHANGELOG.md  版本号与版本记录
-__r*.html           隔离开发验收页，不是玩家入口；部分依赖本机开发检查点
+__r*.html / __p0_failure_audit.html  隔离开发验收页，不是玩家入口；R页部分依赖本机检查点，P0从新局重建
 serve.py            本地静态服务器（no-store 禁缓存 + 音频 MIME + 多线程）
 css/style.css
 js/                 全部逻辑，7 个子目录（见 §2）
@@ -78,6 +78,8 @@ docs/               计划与台账（见 §7）
 ```
 
 ### 1.3 本地存储键（改存档格式前必看）
+
+前哨绑定契约（D343修复、D345动态验收）：新局／旧档尚无outpost时，绑定区块不得仅因检查救援而创建默认对象，缺省/null保持；已有对象继续迁移旧告警，真实结算仍可初始化。完整存读／旧告警幂等的当前证据见STATUS与L4_EXPEDITION。
 
 | localStorage 键 | 内容 |
 |---|---|
@@ -94,6 +96,8 @@ docs/               计划与台账（见 §7）
 地表区块的 `nodes` 是完整的非零剩余量清单，缺项代表采空，不能只覆盖到生成值上；`restoreSurfaceTerrain()` 对当前与远端区块统一恢复。可选 `tileDiffs` 保存相对确定性基图的地形变化（含岩壁开凿），不改 v2 键或逻辑格。旧档可从节点清单恢复耗尽资源，但未曾保存的岩壁开凿历史无法补回。存读断言同时比较所有地表区块的 tiles 与 nodeAmt。
 
 ### 1.4 地图与时间常量（改数值先看这两个文件）
+
+W21-P新增可选nightOutcomes：最多16条玩家当地夜结果，同日幂等；旧档缺字段未知，不回填。active共鸣阵亡/封灯先失败再清场/跳潮，黎明拒绝零HP；完成/结局不撤销。复归仍在当前地图中心，遗落包仍单包覆盖，不据旧“回营”文案猜已返回原点。P1验收用`__p1_failure_test.html`（?input=1附加真E门）与`__p1_perf_test.html`；隔离备份、顺序执行。`__wave().最近夜结果`输出副本。
 
 - `js/core/state.js`：`TILE = 16` · `VIEW_W = 720` · `VIEW_H = 480`（内部固定分辨率，CSS 缩放适配窗口）
 - 地表地图：`genMap(96, 72, seed)`（`js/main.js`）→ **96×72 格**，同种子 = 同地图
@@ -135,10 +139,14 @@ docs/               计划与台账（见 §7）
 | **真输入** | `__click(sx,sy)` `__rclick` `__move` `__screenOf(tx,ty)`（瓦格坐标 → 真实屏幕像素，配 Playwright 打真键鼠） |
 | 存档 | `__saveSlot` `__loadSlot` `__reload` `__wipe` `__newGame(seed, diff)` `__settings` |
 
-> 源码清单（91 个）由 `js/dev/filelist.js` 维护；调试句柄可用 `Object.keys(window).filter((k) => k.startsWith('__')).sort()` 列出。
+> 源码清单（95 个）由 `js/dev/filelist.js` 维护；调试句柄可用 `Object.keys(window).filter((k) => k.startsWith('__')).sort()` 列出。
 > 每个句柄的用途都在 `js/main.js` 末尾有中文注释。
 
 R6-C 起，`__replay()` 的每日行还包含逐夜生成来源、标准波次名额/实际生成、峰值同屏、当夜光压与挑战系数；`chunksVisited` 按模拟步记录，不只依赖日末快照。它用于平衡诊断，不替代真实输入或完整前哨施工 E2E。
+
+P4起回放按本地可支付库存判断home/expedition决策，补油支付失败不加油；玩家死亡在复归清标志前独立计数，不从HP骤增猜测。未知policy明确报错，内置策略仍没有outpost；三策略对照使用`__p4_decision_test.html`的显式自定义夹具与相同预置补给，不能把它当真人从零建造。证据见`docs/P4_DECISIONS.md`。
+
+P4信息契约：silent仅静默驻守，withdraw仅取消前哨意图，不自动返营；守灯状态显示实际lastReason。侧栏人数仅本区，空区不推断全队死亡。名册任务按TASKS.JOBS而非手写旧白名单校验。真实输入页`__p4_input_test.html`先备份正式三键/关闭autosave，再以可信点击和D/E/A驱动生产交互；设施/补给/出口附近位置是夹具，不冒称从零施工。
 
 **用法示例**（控制台）：
 ```js
@@ -194,6 +202,9 @@ js/systems/     按帧推进的系统
   systems/firstSlice.js 首日软引导、第一潮、余波与远征事件写入（W17-F1/F3）
   expedition.js   远征 HUD、回营方向、准备度状态卡与满仓提示（W18-G1/G2）
   seal.js       封灯撤退（W14-A 第 7 步）
+  nightOutcome.js 玩家当地夜结果：溃退/自然黎明，有界保存（W21-P P1）
+  preparation.js 只读驻地备战：真实候选威胁、火力条件、逐灯续航（W21-P P2，__prep）
+  recovery.js    只读本区恢复问题/阻碍，data/recovery.js显示预算（W21-P P3，__recovery）
   carry.js      结构装载体（把塔背起来，W14-A 第 5 步）
   nightops.js   夜行指令（夜采/守卫/巡逻）    mind.js   心志/羁绊/墓碑/蚀化
   interact.js   E 键交互总入口（**交互优先级**在这里，多系统抢输入的老窝）
@@ -208,7 +219,7 @@ js/ui/          HUD 与面板
   inspect.js    悬停/名册/详情     icons.js  程序绘制图标
 
 js/dev/         **开发工具层（生产代码不依赖它）**
-  selftest.js   ★ 不变量检测器；当前预期 80 项断言，源码审计清单 91 文件（以运行结果为准）
+  selftest.js   ★ 不变量检测器；当前预期 86 项断言，源码审计清单 95 文件（以运行结果为准）
   observe.js    战斗/终局观测台（__combat/__wave/__dps/__lab/__abilities/__resonance；含理论潮前预算）
   replay.js     ★ 标准局回放台：确定性 RNG + 政策 + 曲线表；G3 远征策略为一次相邻区块往返
   filelist.js   源文件清单（@generated，供 __srcCheck fetch 自己；新增文件要手工加进去）
@@ -225,9 +236,9 @@ js/dev/         **开发工具层（生产代码不依赖它）**
 
 | 层 | 命令 | 期望 | 抓什么 |
 |---|---|---|---|
-| **运行时断言** | `__check()` | `{ok:true, ran:80, fails:[]}` | 不变量：账本守恒、上限、null 语义、数据表交叉一致、派生数据同步、拓荒者身份与任务边界、首局切片状态、远征观测契约与终局可达性探针 |
+| **运行时断言** | `__check()` | `{ok:true, ran:86, fails:[]}` | 不变量：账本守恒、上限、null 语义、数据表交叉一致、派生数据同步、拓荒者身份与任务边界、首局切片状态、远征观测契约与终局可达性探针 |
 | **存档往返** | `__check({roundtrip:true})` | 同上 | 「改了内存没改序列化」这类静默丢字段 |
-| **源码审计** | `__srcCheck()` | `{ok:true, files:91, fails:[]}` | 用了没 import 的符号、`sfx()`/`sprite()` 拼错键、`maybeHint` 键不在表里 |
+| **源码审计** | `__srcCheck()` | `{ok:true, files:95, fails:[]}` | 用了没 import 的符号、`sfx()`/`sprite()` 拼错键、`maybeHint` 键不在表里 |
 | **真实键鼠 E2E** | Playwright 打真事件 | 手点能走通 | 只有真输入才暴露的：面板焦点、拖拽、改键、右键误触 |
 | **长跑体检** | `__watch(true,20)` + 玩一局 → `__testLog()` | 0 类违例 | 只在特定世界状态下才出现的（见 §6.1 第一条） |
 | **难度曲线** | `__replay({seed,diff,days,policy})` | 见 §4.3 | 平衡改动是不是"感觉好多了"—— 要数字 |
@@ -407,6 +418,30 @@ __watch(true,20)           1200 步 / 0 类违例
 
 ## 5. 当前优先级与可选方向
 
+采集执行契约：nearAct是画面高亮缓存，多个模拟步之间可能陈旧；interact.tick的mine分支必须先校验索引及当前地形对应资源，再允许懒初始化。耗尽FLOOR不得借旧ORE动作反复产出。data.nodeamt包含独立菜单探针；__l4_mining_test.html保留真实E的单矿点受控复现。补录文件读回／账本工具仅审计开发证据，不进入SRC_FILES、不改模拟；文件和范围见docs/fixtures/README.md。
+
+存读契约补充：firstSlice.startedT=0是合法首局起点，不得用`|| 当前时刻`回填；缺失／非有限值才回退。三站resonance已有sites时不得把全局trial再次迁移到空首站；没有sites的旧单站仍迁移。save.roundtrip比较原始firstSlice／resonance，不以预先normalize隐藏数据变化。L4独立输入开发键`__deep_light_l4_input_proof_v1`与旧790a3093来源分开，测试快照须深复制；proofRecheck是声明两字段重建的受控复核，不是新真输入运行。完整文件交付与当前缺口见STATUS／L4_EXPEDITION。
+
+L4来源文件`docs/fixtures/l4-healthy-checkpoint.deflate.b64`通过原生DecompressionStream读回，校验790a3093；旧inputLog缺失明确保留，不从其他分支补猜。`__l4_matrix_test.html`受控策略调用生产支付／施工／寻路／搬运，补距离和工作节拍，不冒称真键鼠；独立开发键保存短校准、长矩阵与有界失败历史。来源代码兼容指纹变化须明确核对，不能静默放宽。
+
+L4完整结果文件`docs/fixtures/l4-matrix-results.deflate.b64`采用deflate＋Base64，解压后按dictionary／parts无损重建原报告，FNV701ba65c；独立工具`tools/l4_matrix_artifact.mjs`共用于浏览器读回及Node CLI校验，不是玩法源码或测试框架，不加入SRC_FILES。矩阵页导出／文件读回按钮不写正式三键；旧日志缺失不因此消失。serve.py登记.mjs的JavaScript MIME；服务响应旧MIME时先核实实例，不重复启动或因查询权限不足误判服务不存在。具体读取命令见docs/fixtures/README。
+
+存读稳定约束：restoreBuildings保留已完工建筑已保存work；restoreSurfaceChunks在当前分支continue前恢复nightops，当前与休眠区块同样保持夜辉草剩余次数和潮穴计时。save.roundtrip新增施工状态／进度、所有地表夜行节点对账；不改v2格式，不删除字段凑矩阵签名。
+
+L4开发验收页`__l4_expedition_test.html`从新局以真实输入建立前哨，独立开发键`__deep_light_l4_checkpoints_v1`/`__deep_light_l4_evidence_v1`保留来源、快照校验及日志；可指定校验值续跑，不生成物资或直接搬移实体。正式三键备份并恢复；重载后重新开watch，本实例明确计步，不用旧watch时间冒称仍在监控。等待按120步分片，避免长同步模拟造成浏览器输入超时；动态进度见L4_EXPEDITION与STATUS，不能据夹具存在宣称L4已收口。
+
+L4检查点新条目独立保存inputLog／inputHistory／controlled；旧条目只有计数时不能从共用最新分支日志补猜。恢复测试来源每轮深拷贝，避免加载入口借用对象后默认字段写入污染第二轮。`__l4_policy_test.html`当前只做两独立实例20秒确定性校准，证据键`__deep_light_l4_policy_evidence_v1`；不是三日六轮策略完成报告。受控告警、正常返营、标准回归分别报告，源码与完整状态比较不可删字段凑一致。
+
+L3接线契约：data.colonists记录有界前哨经历；实际迁移成功和远端结算失败才写入，报告／加载只读。可选crew.dispatchMemory含有界命令编号、最多3种命令标记与每日最多12个停工键，独立于12条可见历史；满额不淘汰当日去重，次日实际发生再记。旧档不补历史，snapshot复制去重数组。名册／详情／__crew共用身份卡，历史展开刷新保留焦点并让原生summary处理Enter／空格／Tab。当前86断言／95源码；L3_EXPERIENCES与D329–D330保留功能、等价优化及最终验收证据。专项__l3_experiences_test.html，压力__p1_perf_test.html?l3=1；压力L3模式收集全部预算失败后仍以失败列表为空才报通过。minimap群系地面色每次烘焙只解析一次，周期／像素输出不变。
+
+L2稳定契约：expedition.crewSupplyOf只读已有目标区块，chunkSupplyOf共用容器口径；preparation.deviceStatusOf共用槽内续航，库存与岗位燃料分列。chunks导出的stationedOutpostWorkers/remoteFoodNeed与生产同源，候选最多3人但采掘可提前中断，取食仅条件性上限。__crew.members新增supply；名册临时选择不入档，500ms／变更刷新且保留焦点／滚动。L2时85断言／95源码，L2_SUPPLY记证据；专项__l2_supply_test.html、压力__p1_perf_test.html?l2=1。未改存档格式或数值。
+
+L1稳定契约：可选directive.returnHome仅真布尔true且目标HOME_CHUNK有效，缺字段为旧驻守；taskBoard统一requestReturnHome，null成功、字符串拒绝。相邻地表8秒计时、深潜暂停、待兑现险情／伤员拒绝；重复不重设、改派／取消清旧引用、入口有限候选待位、到达清目的转auto且保留偏好。__outposts含返营目的／阻碍；名册共用准入原因。夹具__l0_dispatch_audit.html／__l1_return_test.html，性能__p1_perf_test.html?l1=1；证据L0_DISPATCH_AUDIT／L1_RETURN_HOME。L1时84断言／95源码；旧历史83不改写。
+
+P2接手契约：`preparationOf()`不写模拟/存档；夜行面板500ms当地索引刷新，切区/层/阶段立即刷新。耗率来自`logistics.buildingBurnSec()`，P2当时保留原表达式；后续D323独立恢复非炉具BUILD周期、炉具FUELS周期，工地不烧、燃尽无欠账，侧栏也读同一函数。保留研究适用范围与倍率，旧burnT秒数原样存读。开发验收页`__p2_preparation_test.html`已按新表更新，燃耗专项`__fuel_test.html`；规则见`docs/FUEL_RULES.md`。P2历史82/93、旧69646曲线不作为新燃耗预期，D323时83/95，L1后84/95。
+
+P3接手契约：`recoveryOf()`只读本区实体和库存，不归因未知历史，不付款、不执行治疗。夜行详情500ms更新；潮后HUD最多三项，可关闭，同一夜切区返回不重弹，下一夜可重新提示。清单不保存，存读后按实际状态重建。专项页`__p3_recovery_test.html`，性能页`__p1_perf_test.html?p3=1`附加打开恢复详情负载。证据与边界见`docs/P3_RECOVERY.md`。
+
 当前优先级、阶段状态和下一项验收以 [`docs/STATUS.md`](docs/STATUS.md) 为准；W20-R 每步的详细交付与成本见 [`docs/ENDGAME.md`](docs/ENDGAME.md)。接手时按状态页所列单个子门推进，完成后同步两页，避免在本节继续追加逐日进度。
 
 | 方向 | 安排 | 资料 |
@@ -476,8 +511,10 @@ __watch(true,20)           1200 步 / 0 类违例
 | `docs/VISUAL_UI.md` | **已收口 · W16-E 视觉与交互重制计划** | V0–V7 已落地；五日回放/性能/四态自检通过，登记素材 17/17 已接入，面板入口已原生按钮化；远征回放、跨区块库存、Canvas 放置/采集/点火/容器/安抚右键链与长跑监控均已实测 |
 | `docs/ART_REBUILD.md` | **专题 · W19-V 32px 视觉重制记录** | V8 样板与主要浏览器验收已完成；扩展暂缓 |
 | `docs/ENDGAME.md` | **活 · W20-R 余辉共鸣终局闭环** | R0–R6已验收；真实三站胜局、失败恢复、结局存读与性能边界见D307–D314。危险充能为可选R4x，未实施 |
+| `docs/PLAYABILITY.md` / `docs/P0_FAILURE_AUDIT.md` / `docs/P1_FAILURE_RULES.md` / `docs/P2_PREPARATION.md` / `docs/P3_RECOVERY.md` / `docs/P4_DECISIONS.md` | **计划与证据 · W21-P 守夜与归途** | P0–P4完成；历史证据保留原计数，当前86断言/95源码。真实救援/搬运/驻守语义、三路线矩阵及非空详情压力门通过；执行状态看STATUS，不把夹具当正式通关 |
 | `docs/FIRST_SLICE.md` | **专题 · W17-F 首局垂直切片记录** | F0–F4 已完成；首局体验改动时读 |
 | `docs/EXPEDITION_OUTPOST.md` | **已收口 · W18-G 远征与前哨补给闭环** | G0/G1/G2/G3 已完成；后续另立内容打磨小步 |
+| `docs/KEEP_THE_LIGHT.md` / `docs/L0_DISPATCH_AUDIT.md` / `docs/L1_RETURN_HOME.md` / `docs/L2_SUPPLY.md` / `docs/L3_EXPERIENCES.md` / `docs/L4_PLAN.md` / `docs/L4_EXPEDITION.md` | **计划与证据 · W22-L 留灯等你** | L0–L4已验收，D345收口；复用计时迁移，不做逐区旅行或离屏战斗；旧未知历史及当前证据边界见L4_EXPEDITION，下一项看STATUS |
 | `docs/BUG_HUNT.md` | **活 · Bug 与验证台账** | 查询实测、错误与检测器失误；不作当前状态入口 |
 | `docs/COPY.md` | **活 · 文案规范** | **改任何玩家可见文字前必读**（三原则 + 禁用清单 + 术语表 + 全量文案） |
 | `docs/PAYLOAD.md` | 历史 · W14-A 第 2 步子计划 ✅ | 要动载荷系统时查设计取舍 |
@@ -492,9 +529,9 @@ __watch(true,20)           1200 步 / 0 类违例
 ## 8. 接手后的前 30 分钟（推荐动作清单）
 
 1. 跑起来：`Start-Process py -ArgumentList "-3.12","serve.py","8000" -WindowStyle Hidden -PassThru` → 打开 <http://localhost:8000>
-2. 控制台跑基线：`__check()` / `__check({roundtrip:true})` / `__srcCheck()` → 以当前记录核对 **80 / 80 / 91，0 失败**；再看 `__slice()` 是否为 `wake`
+2. 控制台跑基线：`__check()` / `__check({roundtrip:true})` / `__srcCheck()` → 以当前记录核对 **86 / 86 / 95，0 失败**；再看 `__slice()` 是否为 `wake`
 3. `__newGame(4242,'normal')` → `__steps(60*400)` 走一天，看 `__testLog()` 有没有违例；`__combat()` `__wave()` `__dps()` 各看一眼（**这是你的仪表盘**）
-4. 跑一次难度曲线：`__replay({ seed: 4242, diff: 'normal', days: 3, policy: 'home' })` → 跟BUG_HUNT D314的当前基线对账（69646步、死亡0、最低HP39、击杀91）；§4.3为旧版历史，不要求匹配旧曲线。
+4. 跑一次难度曲线：`__replay({ seed: 4242, diff: 'normal', days: 3, policy: 'home' })` → 跟BUG_HUNT D323的新燃耗基线对账（72001步、死亡0、最低HP54、击杀118）；D314及§4.3为旧版历史，不要求匹配旧曲线。
 5. 真玩一局（WASD + 鼠标，按 `P` 暂停思考），体会昼夜节奏与"光 = 生命"
 6. 读 `DESIGN_V2.md` §1 设计铁律 + §5 可选方向对应章节
 7. **开工下一步**：查 [`docs/STATUS.md`](docs/STATUS.md) 的当前子门和未验收项，再读对应专题计划；不要按本文件 §4 的历史“下一步”启动旧阶段。

@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><title>P0 失败规则审计</title>
+<body style="margin:16px;background:#101923;color:#e5edf5;font:14px monospace">
+<h1>P0 · 失败规则审计</h1>
+<p>只复现现行规则，不修复玩法。最小夹具不依赖旧存档或路线检查点。</p>
+<button id="run">运行审计</button><p id="status">等待运行</p>
+<pre id="summary" style="white-space:pre-wrap"></pre>
+<details><summary>完整证据</summary><pre id="out" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details>
+<iframe id="game" title="P0 隔离实例" style="width:min(960px,96vw);height:600px;border:1px solid #607080"></iframe>
+<script type="module">
+const keys=['deep-light-saves-v2','deep-light-settings-v1','deep-light-ui-v1'];
+const recoveryKey='__deep_light_p0_backup_v1';
+const frame=document.querySelector('#game'), out=document.querySelector('#out');
+const summary=document.querySelector('#summary'), status=document.querySelector('#status'), button=document.querySelector('#run');
+let active=false, completed=false;
+const clone=x=>JSON.parse(JSON.stringify(x));
+const emit=(name,data)=>{out.textContent+=`${name}: ${JSON.stringify(data,null,2)}\n`;};
+const assert=(value,message)=>{if(!value)throw Error(message);};
+function restore(){
+  const saved=JSON.parse(localStorage.getItem(recoveryKey)||'null');
+  if(!saved)return null;
+  for(const k of keys)saved[k]==null?localStorage.removeItem(k):localStorage.setItem(k,saved[k]);
+  const exact=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)===saved[k]]));
+  if(Object.values(exact).every(Boolean))localStorage.removeItem(recoveryKey);
+  return exact;
+}
+window.addEventListener('beforeunload',()=>{if(active)restore();});
+button.addEventListener('click',()=>{
+  if(active)return;active=true;completed=false;button.disabled=true;out.textContent='';summary.textContent='';
+  if(localStorage.getItem(recoveryKey))emit('interrupted-backup-recovery',restore());
+  const saved=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)]));
+  localStorage.setItem(recoveryKey,JSON.stringify(saved));
+  localStorage.setItem(keys[1],JSON.stringify({...JSON.parse(saved[keys[1]]||'{}'),autosave:false}));
+  status.textContent='启动隔离游戏';frame.src=`/?p0-audit=${Date.now()}`;
+});
+frame.addEventListener('load',async()=>{
+  if(!active||completed)return;
+  const game=frame.contentWindow;
+  const result={ok:false,checks:[],cases:[],source:null,watch:null,replay:null,storage:null};
+  try{
+    game.__settings.autosave=false;game.__quick(true);
+    const [{handleDeath,applyDamage},{sealNow},{ensureLayer,bindLayer},{tryCrossSurfaceExit},
+      {syncRes},{hurtPlayer},{T},{compute}]=await Promise.all([
+      import('/js/systems/combat.js'),import('/js/systems/seal.js'),import('/js/systems/layer.js'),
+      import('/js/world/chunks.js'),import('/js/systems/storage.js'),import('/js/systems/survival.js'),
+      import('/js/world/map.js'),import('/js/world/light.js')]);
+    const check=(label,opts={})=>{
+      const r=game.__check({includeKnown:true,...opts});result.checks.push({label,...r});
+      assert(r.ok,`${label}: ${JSON.stringify(r.fails)}`);
+    };
+    check('menu');
+    function fresh(t=340){
+      game.__newGame(4242,'normal');game.__settings.autosave=false;game.__quick(true);
+      const s=game.__state;s.workers.length=0;s.enemies.length=0;
+      s.day=2;s.t=t;s.wasTide=true;s.wasDawn=false;s.noSpawnT=999;s.spawnT=999;
+      s.playerInvuln=0;s.playerRestT=0;s.playerInjury=0;s.playerHp=100;
+      s.pack.stock={ore:4};s.equip.held='pick';
+      const camp=s.beacons[0];camp.stock={fuel:20};syncRes(s);
+      return s;
+    }
+    const capture=s=>({day:s.day,t:s.t,layer:s.layerId,chunk:[s.chunkX,s.chunkY],
+      position:[s.player.x,s.player.y],hp:s.playerHp,dead:s.playerDead,
+      maxHp:s.playerMaxHp,hunger:s.playerHunger,injury:s.playerInjury,
+      enemies:s.enemies.length,bossRef:!!s.bossRef,kills:s.kills,
+      bossDefeated:!!s.milestone.bossDefeated,clearedDay:s.milestone.clearedDay??null,
+      stock:clone(s.res),pack:clone(s.pack.stock),deathPack:clone(s.deathPack),
+      trial:clone(s.resonance?.trial||null),site:s.resonance?.sites?.third?.status||null,
+      ending:clone(s.ending||null),lastSealDay:s.lastSealDay||0});
+    const report=(id,stages)=>{result.cases.push({id,stages});emit(id,stages);};
+    // Expected outcomes deliberately describe the current version, including its defects.
+    for(const [id,t,target] of [['ordinary-tide',340,390],['dusk',310,390],['day',120,120+1/60],['dawn',395,395+1/60]]){
+      const s=fresh(t);game.__spawn('bud',s.player.x+5,s.player.y+5);
+      const before=capture(s);s.playerHp=0;game.__steps(1);const after=capture(s);
+      assert(Math.abs(after.t-target)<1e-7&&after.hp===45&&!after.dead&&after.enemies===0,`${id}: death recovery changed`);
+      assert(after.stock.fuel===10&&after.deathPack.stock.ore===4&&after.deathPack.held==='pick',`${id}: death custody changed`);
+      const once=JSON.stringify(after);handleDeath(s);assert(JSON.stringify(capture(s))===once,`${id}: duplicate settlement`);
+      report(id,{before,after,idempotent:true});
+    }
+    {
+      const s=fresh();s.player.x=s.map.w-0.1;s.player.y=s.map.h/2;
+      assert(tryCrossSurfaceExit(s)&&s.chunkX===1,'remote exit setup');
+      s.t=340;s.noSpawnT=999;s.player.x=20.5;s.player.y=20.5;
+      s.pack.stock={ore:4,fuel:6};syncRes(s);const before=capture(s);
+      s.playerHp=0;game.__steps(1);const after=capture(s);
+      assert(after.chunk[0]===1&&after.layer==='surface'&&after.position[0]===s.map.w/2+1,'remote death changed chunk');
+      assert(after.deathPack.chunkX===1&&after.deathPack.x===20.5,'remote deathPack identity');
+      report('remote-death-stays-in-current-chunk',{before,after});
+    }
+    {
+      const s=fresh(120);ensureLayer(s,'depth1');bindLayer(s,'depth1');
+      s.enemies.length=0;s.player.x=20.5;s.player.y=20.5;game.__spawn('bud',25.5,25.5);
+      const before=capture(s);s.playerHp=0;game.__steps(1);const after=capture(s);
+      assert(after.layer==='depth1'&&after.position[0]===45&&after.position[1]===32,'depth death location changed');
+      assert(after.deathPack.layerId==='depth1'&&Math.abs(after.t-(120+1/60))<1e-7,'depth time/custody');
+      report('depth-death-stays-in-current-layer',{before,after});
+    }
+    {
+      const s=fresh(120);ensureLayer(s,'depth3');bindLayer(s,'depth3');s.enemies.length=0;
+      s.player.x=20.5;s.player.y=20.5;s.map.set(20,20,T.LAVA);s.playerHp=0.01;
+      const before=capture(s);game.__steps(1);const first=capture(s);game.__steps(1);const second=capture(s);
+      assert(first.hp===0&&!first.dead&&second.hp===45,'lava zero-HP interval not reproduced');
+      report('lava-death-detected-one-step-late',{before,first,second});
+    }
+    function trial(t=340){
+      const s=fresh(t);const x=48,y=36;
+      s.milestone.bossDefeated=true;s.milestone.clearedDay=1;
+      const tr={siteId:'third',status:'active',targetDay:2,activeDay:2,attempts:1,result:null,
+        failureReason:null,themeId:'swarm',lightPressure:0,challengeMul:1,completedDay:null};
+      s.resonance={version:2,sites:{
+        first:{id:'first',status:'complete',chunkX:1,chunkY:0,x,y,completedDay:1},
+        second:{id:'second',status:'complete',chunkX:3,chunkY:0,x,y,completedDay:1},
+        third:{id:'third',status:'built',chunkX:0,chunkY:0,x,y,completedDay:null,trial:{...tr}}},trial:tr};
+      s.buildings.push({type:'resonanceBeacon',resonanceSiteId:'third',x,y,hp:140,fuel:0});
+      // Existing origin camp light, not injected illumination, keeps the beacon lit.
+      compute(s);assert(s.light[y*s.map.w+x]>=1,'fixture lacks real artificial light');
+      return s;
+    }
+    {
+      const s=trial();const before=capture(s);s.playerHp=0;
+      game.__steps(1);const first=capture(s);game.__steps(1);const second=capture(s);
+      assert(first.trial.status==='active'&&first.t===390&&second.trial.status==='complete','trial death exploit changed');
+      assert(second.ending&&second.ending.sites.length===3,'death route does not settle ending');
+      report('trial-death-then-dawn-success',{before,first,second});
+      const record=JSON.stringify(s.ending);assert(game.__saveSlot('s3')&&game.__loadSlot('s3'),'production save/load');
+      game.__settings.autosave=false;game.__quick(true);
+      assert(JSON.stringify(game.__state.ending)===record,'ending changed after roundtrip');
+      report('death-derived-ending-persists',{unchanged:true,ending:game.__state.ending});
+    }
+    {
+      const s=trial(380-1/120);s.playerHp=0;const before=capture(s);
+      game.__steps(1);const after=capture(s);
+      assert(after.trial.status==='complete'&&after.hp===45&&after.ending?.crew?.[0]?.status==='幸存','dawn-before-death ordering changed');
+      report('dawn-boundary-zero-HP-success',{before,after});
+    }
+    {
+      const s=trial();s.playerHp=1;
+      game.__spawn('bud',s.player.x,s.player.y);
+      const before=capture(s);game.__steps(1);const first=capture(s);game.__steps(1);const second=capture(s);
+      assert(first.hp===45&&first.t===390&&first.trial.status==='active'&&second.trial.status==='complete','enemy lethal trial control');
+      report('actual-enemy-lethal-hit-can-complete-trial',{before,first,second});
+    }
+    {
+      const s=trial(380-1/120);const before=capture(s);game.__steps(1);const after=capture(s);
+      assert(after.trial.status==='complete'&&after.hp===100&&!after.deathPack,'natural dawn positive control');
+      report('natural-dawn-alive-success',{before,after});
+    }
+    {
+      const s=trial();s.beacons.length=0;s.player.x=20.5;s.player.y=20.5;compute(s);
+      assert(s.light[36*s.map.w+48]===0,'blackout fixture remains lit');
+      const before=capture(s);game.__steps(1);const after=capture(s);
+      assert(after.trial.status==='failed'&&after.site!=='complete'&&!after.ending,'blackout failure control');
+      report('blackout-fails-trial-control',{before,after});
+    }
+    {
+      const s=trial();s.buildings.push({type:'lamp',x:50,y:36,hp:90,fuel:12,burnT:0});
+      compute(s);const before=capture(s);assert(sealNow(s),'seal fixture refused');
+      game.__steps(1);const after=capture(s);
+      assert(after.lastSealDay===2&&after.trial.status==='complete','seal-trial bypass changed');
+      report('seal-retreat-can-complete-trial-under-camp-light',{before,after,lampFuel:s.buildings.find(b=>b.type==='lamp').fuel});
+    }
+    {
+      const s=fresh();s.day=7;s.bossSpawnedThisNight=true;
+      const boss=game.__spawn('core',s.player.x+12,s.player.y+10);s.bossRef=boss;
+      const before=capture(s);s.playerHp=0;game.__steps(1);const after=capture(s);
+      assert(!after.bossRef&&!after.bossDefeated&&after.kills===before.kills&&after.maxHp===before.maxHp,'death credited Boss reward');
+      report('boss-cleared-by-death-not-defeated',{before,after});
+    }
+    {
+      const s=fresh();s.playerHp=0;game.__steps(1);const original=clone(s.deathPack);
+      s.pack.stock={};s.equip.held=null;s.t=340;hurtPlayer(s,1000);game.__steps(1);
+      const emptyPreserves=JSON.stringify(s.deathPack)===JSON.stringify(original);
+      s.pack.stock={ore:1};s.player.x=30.5;s.player.y=30.5;s.t=340;hurtPlayer(s,1000);game.__steps(1);
+      assert(emptyPreserves&&s.deathPack.stock.ore===1&&s.deathPack.x===30.5,'single deathPack overwrite semantics');
+      report('repeat-death-single-package',{original,emptyPreserves,replacement:clone(s.deathPack)});
+    }
+    {
+      const s=fresh();const boss=game.__spawn('core',s.player.x+10,s.player.y+10);s.bossRef=boss;
+      applyDamage(s,boss,1e9);const after=capture(s);
+      assert(after.bossDefeated&&after.kills===1&&after.maxHp>100,'real Boss credit control');
+      report('actual-boss-kill-positive-control',{after});
+    }
+    // Full-game regression in unmodified fresh states, not malformed audit fixtures.
+    game.__newGame(4242,'normal');game.__settings.autosave=false;
+    check('new-game');check('roundtrip',{roundtrip:true});game.__quick(true);
+    result.replay=game.__replay({seed:4242,diff:'normal',days:3,policy:'home'});
+    game.__settings.autosave=false;game.__quick(true);check('replay');check('replay-roundtrip',{roundtrip:true});
+    result.source=await game.__srcCheck();assert(result.source.ok,'source audit');
+    game.__watch(true,20);game.__steps(1200);game.__watch(false);
+    result.watch=game.__testLog();assert(game.__testLogRaw().length===0,'watch violations');
+    result.ok=true;
+  }catch(error){result.failure=String(error.stack||error);emit('failure',result.failure);}
+  finally{
+    if(game.__settings)game.__settings.autosave=false;
+    game.__quick?.(true);game.__watch?.(false);result.storage=restore();
+    result.ok=result.ok&&!!result.storage&&Object.values(result.storage).every(Boolean);
+    emit('final',result);summary.textContent=JSON.stringify({ok:result.ok,cases:result.cases.length,
+      checks:result.checks.map(r=>({label:r.label,ok:r.ok,ran:r.ran})),source:result.source?{ok:result.source.ok,files:result.source.files,fails:result.source.fails}:null,
+      replay:result.replay?{ranDays:result.replay.ranDays,steps:result.replay.steps,deaths:result.replay.deaths,
+        minHp:result.replay.minHp,kills:result.replay.kills}:null,watch:result.watch,storage:result.storage,failure:result.failure},null,2);
+    completed=true;active=false;button.disabled=false;
+    out.dataset.result=result.ok?'passed':'failed';status.textContent=result.ok?'P0 当前规则复现与回归通过 · 正式存档已恢复':'P0 未通过 · 查看完整证据';
+  }
+});
+</script></body></html>

@@ -8,6 +8,9 @@ export const COLONISTS = Object.freeze({
   MAX_RELATIONS: 4,
   MAX_MEMORIAL_EVENTS: 24,
   MAX_EVENTS: 12,
+  MAX_STOP_KEYS: 12,
+  MAX_STOP_KEY_LENGTH: 48,
+  MAX_COMMAND: 2147483647,
   MAX_ACTIVE_TASKS: 1,
   ID_PREFIX: 'crew',
   ROLES: Object.freeze({
@@ -29,7 +32,53 @@ export const COLONISTS = Object.freeze({
 
 const ROLE_IDS = Object.freeze(Object.keys(COLONISTS.ROLES));
 const PERSONALITY_IDS = Object.freeze(Object.keys(COLONISTS.PERSONALITIES));
-const CREW_EVENT_KINDS = Object.freeze(['join', 'role', 'down', 'rescue', 'death', 'revive']);
+export const CREW_EVENT_KINDS = Object.freeze(['join', 'role', 'down', 'rescue', 'death', 'revive', 'outpostArrival', 'outpostReturn', 'outpostCancel', 'outpostStop']);
+const DISPATCH_KINDS = Object.freeze(['outpostArrival', 'outpostReturn', 'outpostCancel']);
+export const OUTPOST_STOP_TEXT = Object.freeze({ food: '缺粮，未能进食', fuel: '缺燃料，守灯暂停', storage: '无处存放，采掘暂停' });
+
+// 只有生产/发令写入口创建；报告与旧档缺字段不补猜历史。
+export function dispatchMemoryOf(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  return { command: Number.isSafeInteger(raw.command) && raw.command >= 0 && raw.command <= COLONISTS.MAX_COMMAND ? raw.command : 0,
+    recorded: Array.isArray(raw.recorded) ? [...new Set(raw.recorded.filter(k => DISPATCH_KINDS.includes(k)))].slice(0, DISPATCH_KINDS.length) : [],
+    stopDay: Number.isSafeInteger(raw.stopDay) && raw.stopDay > 0 ? raw.stopDay : 0,
+    stopKeys: Array.isArray(raw.stopKeys) ? [...new Set(raw.stopKeys.filter(k => typeof k === 'string' && k.length <= COLONISTS.MAX_STOP_KEY_LENGTH && /^-?\d+,-?\d+:(food|fuel|storage)$/.test(k)))].slice(0, COLONISTS.MAX_STOP_KEYS) : [] };
+}
+
+export function beginCrewDispatch(worker) {
+  const card = ensureCrewCard(worker);
+  const old = dispatchMemoryOf(card.dispatchMemory) || { command: 0, recorded: [], stopDay: 0, stopKeys: [] };
+  card.dispatchMemory = { ...old, command: old.command >= COLONISTS.MAX_COMMAND ? 1 : old.command + 1, recorded: [] };
+  return card.dispatchMemory.command;
+}
+
+export function recordOutpostEvent(worker, kind, chunk, day, reason = '', mode = '') {
+  if (!worker || !chunk || !Number.isInteger(chunk.x) || !Number.isInteger(chunk.y) || !Number.isSafeInteger(day) || day < 1 || (!DISPATCH_KINDS.includes(kind) && kind !== 'outpostStop')) return null;
+  if (kind === 'outpostStop' && !Object.prototype.hasOwnProperty.call(OUTPOST_STOP_TEXT, reason)) return null;
+  const card = ensureCrewCard(worker);
+  const memory = dispatchMemoryOf(card.dispatchMemory) || { command: 0, recorded: [], stopDay: 0, stopKeys: [] };
+  const x = chunk.x | 0, y = chunk.y | 0;
+  if (kind === 'outpostStop') {
+    if (memory.stopDay !== day) { memory.stopDay = day; memory.stopKeys = []; }
+    const key = `${x},${y}:${reason}`;
+    if (memory.stopKeys.includes(key) || memory.stopKeys.length >= COLONISTS.MAX_STOP_KEYS) return null;
+    memory.stopKeys.push(key);
+  } else {
+    if (memory.recorded.includes(kind)) return null;
+    memory.recorded.push(kind);
+  }
+  const text = kind === 'outpostArrival' ? '抵达前哨' : kind === 'outpostReturn' ? '已回到营地'
+    : kind === 'outpostCancel' ? '取消驻守，留在原处'
+      : reason === 'food' && mode === 'gather' ? '缺粮，采掘暂停' : OUTPOST_STOP_TEXT[reason];
+  const event = { day, kind, text, chunkX: x, chunkY: y, command: memory.command, ...(reason ? { reason } : {}) };
+  card.dispatchMemory = memory;
+  card.events = [...normalizeCrewEvents(card.events), event].slice(-COLONISTS.MAX_EVENTS);
+  return { ...event };
+}
+
+export function crewEventLine(event) {
+  return `第 ${event.day} 天 · ${event.text}${Number.isFinite(event.chunkX) && Number.isFinite(event.chunkY) ? ` · 地表 ${event.chunkX},${event.chunkY}` : ''}`;
+}
 
 function normalizeCrewEvents(raw) {
   if (!Array.isArray(raw)) return [];
@@ -37,6 +86,9 @@ function normalizeCrewEvents(raw) {
     day: Math.max(1, Number.isFinite(e && e.day) ? e.day | 0 : 1),
     kind: String(e && e.kind || ''),
     text: String(e && e.text || '').slice(0, 48),
+    ...(Number.isFinite(e && e.chunkX) && Number.isFinite(e && e.chunkY) ? { chunkX: e.chunkX | 0, chunkY: e.chunkY | 0 } : {}),
+    ...(Number.isSafeInteger(e && e.command) && e.command >= 0 && e.command <= COLONISTS.MAX_COMMAND ? { command: e.command } : {}),
+    ...(Object.prototype.hasOwnProperty.call(OUTPOST_STOP_TEXT, e && e.reason) ? { reason: e.reason } : {}),
   })).filter((e) => CREW_EVENT_KINDS.includes(e.kind) && e.text);
 }
 
@@ -130,6 +182,7 @@ export function ensureCrewCard(worker, index = 0, joinedDay = 1, stored = null) 
     palette: old.palette || COLONISTS.ROLES[role].palette,
     portrait: old.portrait || COLONISTS.ROLES[role].portrait,
     events: normalizeCrewEvents(old.events),
+    ...(dispatchMemoryOf(old.dispatchMemory) ? { dispatchMemory: dispatchMemoryOf(old.dispatchMemory) } : {}),
   };
   return worker.crew;
 }
@@ -148,5 +201,6 @@ export function crewCardOf(worker, index = 0, joinedDay = 1) {
     palette: card.palette || COLONISTS.ROLES[role].palette,
     portrait: card.portrait || COLONISTS.ROLES[role].portrait,
     events: normalizeCrewEvents(card.events),
+    ...(dispatchMemoryOf(card.dispatchMemory) ? { dispatchMemory: dispatchMemoryOf(card.dispatchMemory) } : {}),
   };
 }

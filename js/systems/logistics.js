@@ -5,22 +5,29 @@ import { BUILD, LIGHT_LEVELS } from '../data/buildings.js';
 import { burnSecOf } from '../data/fire.js';
 import { lampBurnMul, smeltBurnMul } from './research.js';
 
+// 生产与备战预报共用实际耗率；只读，不重算/推进燃烧计时。
+export function buildingBurnSec(b, state) {
+  const def = BUILD[b.type];
+  if (!def || !def.burnSec) return null;
+  const level = LIGHT_LEVELS[b.level == null ? 1 : b.level] || LIGHT_LEVELS[1];
+  const fireMul = def.fireMat ? smeltBurnMul(state) : 1;
+  return burnSecOf(b, def) * lampBurnMul(state) * fireMul / level.burn;
+}
+
 // 本地实时运行与前哨 12 秒结算共用同一燃烧公式，避免远端点灯成为免费光源。
 export function burnBuildingFuel(buildings, state, dt) {
   const elapsed = Math.max(0, Number(dt) || 0);
   if (!elapsed) return;
   for (const b of buildings || []) {
     const def = BUILD[b.type];
-    if (!def || !def.burnSec || !(b.fuel > 0) || b.off) continue;
-    const level = LIGHT_LEVELS[b.level == null ? 1 : b.level] || LIGHT_LEVELS[1];
-    const fireMul = def.fireMat ? smeltBurnMul(state) : 1;
-    const burnSec = burnSecOf(b, def) * lampBurnMul(state) * fireMul / level.burn;
+    if (!def || !def.burnSec || b.site || !(b.fuel > 0) || b.off) continue;
+    const burnSec = buildingBurnSec(b, state);
     b.burnT = (b.burnT || 0) + elapsed;
-    while (b.burnT >= burnSec) {
+    while (b.fuel > 0 && b.burnT >= burnSec) {
       b.burnT -= burnSec;
       b.fuel--;
     }
-    if (b.fuel <= 0) b.fuel = 0;
+    if (b.fuel <= 0) { b.fuel = 0; b.burnT = 0; } // 燃尽后不累积补油时的旧欠账
   }
 }
 

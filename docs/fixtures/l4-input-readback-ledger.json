@@ -1,0 +1,498 @@
+{
+  "file": "docs/fixtures/l4-independent-input.deflate.b64",
+  "rawBytes": 265028,
+  "compressedBytes": 10418,
+  "ok": true,
+  "scope": "file integrity, not gameplay acceptance",
+  "fails": [],
+  "hash": "dcbacf56",
+  "proofId": "l4-independent-input-2026-10-08T08:52:22.085Z",
+  "inputs": 83,
+  "initialHash": "dce097d2",
+  "finalHash": "f66f4ac5",
+  "originalRoundtripPassed": false,
+  "originalDifferences": [
+    {
+      "path": ".firstSlice.startedT",
+      "before": 0,
+      "after": 110.41666666666168
+    },
+    {
+      "path": ".resonance.sites.first.trial",
+      "before": null,
+      "after": {
+        "siteId": "first",
+        "status": "idle",
+        "targetDay": null,
+        "activeDay": null,
+        "attempts": 0,
+        "result": null,
+        "failureReason": null,
+        "themeId": null,
+        "lightPressure": null,
+        "challengeMul": null,
+        "completedDay": null
+      }
+    }
+  ],
+  "storage": {
+    "deep-light-saves-v2": true,
+    "deep-light-settings-v1": true,
+    "deep-light-ui-v1": true
+  },
+  "ledger": {
+    "format": "l4-input-ledger-audit-v1",
+    "scope": "independent 83-input chain, not original six-run event ledger",
+    "complete": false,
+    "proofId": "l4-independent-input-2026-10-08T08:52:22.085Z",
+    "initial": {
+      "stock": {
+        "ore": 4,
+        "vine": 4,
+        "fuel": 2,
+        "food": 6,
+        "pick": 1
+      },
+      "slots": {},
+      "tools": {
+        "pick": 1
+      },
+      "deathPack": null
+    },
+    "final": {
+      "stock": {
+        "ore": 157,
+        "vine": 12,
+        "fuel": 0,
+        "food": 6,
+        "pick": 0
+      },
+      "slots": {
+        "fuel": 29
+      },
+      "tools": {
+        "pick": 2
+      },
+      "deathPack": null
+    },
+    "transfers": [
+      {
+        "inputIndex": 8,
+        "label": "取1",
+        "rows": [
+          {
+            "account": "pack",
+            "key": "ore",
+            "delta": 1
+          },
+          {
+            "account": "0,0/camp/45,36",
+            "key": "ore",
+            "delta": -1
+          }
+        ],
+        "net": {
+          "ore": 0
+        }
+      },
+      {
+        "inputIndex": 9,
+        "label": "取1",
+        "rows": [
+          {
+            "account": "pack",
+            "key": "ore",
+            "delta": 1
+          },
+          {
+            "account": "0,0/camp/45,36",
+            "key": "ore",
+            "delta": -1
+          }
+        ],
+        "net": {
+          "ore": 0
+        }
+      },
+      {
+        "inputIndex": 10,
+        "label": "取1",
+        "rows": [
+          {
+            "account": "pack",
+            "key": "ore",
+            "delta": 1
+          },
+          {
+            "account": "0,0/camp/45,36",
+            "key": "ore",
+            "delta": -1
+          }
+        ],
+        "net": {
+          "ore": 0
+        }
+      },
+      {
+        "inputIndex": 11,
+        "label": "取1",
+        "rows": [
+          {
+            "account": "pack",
+            "key": "ore",
+            "delta": 1
+          },
+          {
+            "account": "0,0/camp/45,36",
+            "key": "ore",
+            "delta": -1
+          }
+        ],
+        "net": {
+          "ore": 0
+        }
+      },
+      {
+        "inputIndex": 12,
+        "label": "取1",
+        "rows": [
+          {
+            "account": "pack",
+            "key": "vine",
+            "delta": 1
+          },
+          {
+            "account": "0,0/camp/45,36",
+            "key": "vine",
+            "delta": -1
+          }
+        ],
+        "net": {
+          "vine": 0
+        }
+      },
+      {
+        "inputIndex": 13,
+        "label": "取1",
+        "rows": [
+          {
+            "account": "pack",
+            "key": "vine",
+            "delta": 1
+          },
+          {
+            "account": "0,0/camp/45,36",
+            "key": "vine",
+            "delta": -1
+          }
+        ],
+        "net": {
+          "vine": 0
+        }
+      },
+      {
+        "inputIndex": 14,
+        "label": "取1",
+        "rows": [
+          {
+            "account": "pack",
+            "key": "vine",
+            "delta": 1
+          },
+          {
+            "account": "0,0/camp/45,36",
+            "key": "vine",
+            "delta": -1
+          }
+        ],
+        "net": {
+          "vine": 0
+        }
+      },
+      {
+        "inputIndex": 15,
+        "label": "取1",
+        "rows": [
+          {
+            "account": "pack",
+            "key": "vine",
+            "delta": 1
+          },
+          {
+            "account": "0,0/camp/45,36",
+            "key": "vine",
+            "delta": -1
+          }
+        ],
+        "net": {
+          "vine": 0
+        }
+      },
+      {
+        "inputIndex": 16,
+        "label": "取1",
+        "rows": [
+          {
+            "account": "pack",
+            "key": "fuel",
+            "delta": 1
+          },
+          {
+            "account": "0,0/camp/45,36",
+            "key": "fuel",
+            "delta": -1
+          }
+        ],
+        "net": {
+          "fuel": 0
+        }
+      },
+      {
+        "inputIndex": 17,
+        "label": "取1",
+        "rows": [
+          {
+            "account": "pack",
+            "key": "fuel",
+            "delta": 1
+          },
+          {
+            "account": "0,0/camp/45,36",
+            "key": "fuel",
+            "delta": -1
+          }
+        ],
+        "net": {
+          "fuel": 0
+        }
+      },
+      {
+        "inputIndex": 18,
+        "label": "取1",
+        "rows": [
+          {
+            "account": "pack",
+            "key": "food",
+            "delta": 1
+          },
+          {
+            "account": "0,0/camp/45,36",
+            "key": "food",
+            "delta": -1
+          }
+        ],
+        "net": {
+          "food": 0
+        }
+      },
+      {
+        "inputIndex": 19,
+        "label": "取1",
+        "rows": [
+          {
+            "account": "pack",
+            "key": "food",
+            "delta": 1
+          },
+          {
+            "account": "0,0/camp/45,36",
+            "key": "food",
+            "delta": -1
+          }
+        ],
+        "net": {
+          "food": 0
+        }
+      },
+      {
+        "inputIndex": 20,
+        "label": "取1",
+        "rows": [
+          {
+            "account": "pack",
+            "key": "food",
+            "delta": 1
+          },
+          {
+            "account": "0,0/camp/45,36",
+            "key": "food",
+            "delta": -1
+          }
+        ],
+        "net": {
+          "food": 0
+        }
+      },
+      {
+        "inputIndex": 21,
+        "label": "取1",
+        "rows": [
+          {
+            "account": "pack",
+            "key": "food",
+            "delta": 1
+          },
+          {
+            "account": "0,0/camp/45,36",
+            "key": "food",
+            "delta": -1
+          }
+        ],
+        "net": {
+          "food": 0
+        }
+      },
+      {
+        "inputIndex": 37,
+        "label": "全",
+        "rows": [
+          {
+            "account": "pack",
+            "key": "fuel",
+            "delta": -2
+          },
+          {
+            "account": "1,0/store/5,37",
+            "key": "fuel",
+            "delta": 2
+          }
+        ],
+        "net": {
+          "fuel": 0
+        }
+      },
+      {
+        "inputIndex": 38,
+        "label": "全",
+        "rows": [
+          {
+            "account": "pack",
+            "key": "food",
+            "delta": -4
+          },
+          {
+            "account": "1,0/store/5,37",
+            "key": "food",
+            "delta": 4
+          }
+        ],
+        "net": {
+          "food": 0
+        }
+      }
+    ],
+    "newBuildings": [
+      {
+        "chunk": "1,0",
+        "type": "store",
+        "x": 5,
+        "y": 37,
+        "cost": {
+          "ore": 2,
+          "vine": 2
+        },
+        "note": "建成后默认槽量按既有BUILD规则单列，非玩家搬运"
+      },
+      {
+        "chunk": "1,0",
+        "type": "lamp",
+        "x": 3,
+        "y": 35,
+        "cost": {
+          "ore": 2,
+          "vine": 2
+        },
+        "note": "建成后默认槽量按既有BUILD规则单列，非玩家搬运"
+      }
+    ],
+    "constructionCost": {
+      "ore": 4,
+      "vine": 4
+    },
+    "initialization": {
+      "fuel": 30
+    },
+    "refuels": [
+      {
+        "inputIndex": 77,
+        "slotBefore": 28,
+        "slotAfter": 29,
+        "rows": [
+          {
+            "account": "1,0/store/5,37",
+            "key": "fuel",
+            "delta": -1
+          }
+        ]
+      }
+    ],
+    "firstNodes": [
+      {
+        "chunk": "0,0",
+        "sums": {
+          "2": 290,
+          "3": 352,
+          "4": 9
+        }
+      }
+    ],
+    "lastNodes": [
+      {
+        "chunk": "0,0",
+        "sums": {
+          "2": 155,
+          "3": 340,
+          "4": 9
+        }
+      },
+      {
+        "chunk": "1,0",
+        "sums": {
+          "2": 225,
+          "3": 408,
+          "4": 9
+        }
+      }
+    ],
+    "sources": {
+      "oreOutputRequired": 157,
+      "oreNodeNetLoss": 135,
+      "oreSourceGap": 22,
+      "vineOutputRequired": 12,
+      "vineNodeNetLoss": 12
+    },
+    "unresolved": [
+      {
+        "inputIndex": 72,
+        "reason": "同期模拟或非转移净变化，不能归为纯搬运",
+        "rows": [
+          {
+            "account": "0,0/camp/45,36",
+            "key": "ore",
+            "delta": 2
+          }
+        ],
+        "net": {
+          "ore": 2
+        }
+      },
+      {
+        "category": "ore source attribution",
+        "amount": 22,
+        "reason": "节点净减少不等于实际采集次数；原报告未逐事件记录矿脉补量，不能将差额推断为矿工收益"
+      }
+    ],
+    "notes": [
+      "16个零时间点击区间可独立验证搬运双方；不把同期采集视为转移。",
+      "新探索区块的确定性资源存量不是采集收入。",
+      "工具从容器移到人物后仍需计入；原逐输入ledger未记录装备，起终完整快照有记录。",
+      "未发生进食、制作或救援，不能从本链验证这些事件。燃耗／岗位支付须补逐事件证据。",
+      "材料成本按当前数据表核对；表无变化不代表历史事件已全被记录。"
+    ]
+  },
+  "currentFormalKeysUnchanged": {
+    "deep-light-saves-v2": true,
+    "deep-light-settings-v1": true,
+    "deep-light-ui-v1": true
+  }
+}

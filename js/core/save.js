@@ -1,6 +1,6 @@
 // core/save.js —— 存档：3 个手动槽位 + 1 个自动槽位（localStorage）
 import { taskForSave, directiveForSave } from '../data/tasks.js';
-import { COLONISTS } from '../data/colonists.js';
+import { COLONISTS, dispatchMemoryOf } from '../data/colonists.js';
 
 const KEY = 'deep-light-saves-v2';      // { auto: data, s1: data, s2: data, s3: data }
 const LEGACY = 'deep-light-save-v1';    // 旧版单槽存档，首次运行时迁移到 auto
@@ -119,6 +119,7 @@ export function snapshot(state) {
     milestone: state.milestone,
     resonance: state.resonance ? JSON.parse(JSON.stringify(state.resonance)) : null,
     runStats: state.runStats ? JSON.parse(JSON.stringify(state.runStats)) : null,
+    nightOutcomes: state.nightOutcomes ? JSON.parse(JSON.stringify(state.nightOutcomes)) : null,
     ending: state.ending ? JSON.parse(JSON.stringify(state.ending)) : null,
     research: state.research,
     layerId: state.layerId,
@@ -166,7 +167,7 @@ export function snapshot(state) {
         to: { x: w.outpostTravel.to.x | 0, y: w.outpostTravel.to.y | 0 },
         t: Math.max(0, Number(w.outpostTravel.t) || 0), blocked: !!w.outpostTravel.blocked,
       } : null,
-      crew: w.crew ? { ...w.crew } : null,
+      crew: w.crew ? { ...w.crew, ...(w.crew.dispatchMemory ? { dispatchMemory: dispatchMemoryOf(w.crew.dispatchMemory) } : {}) } : null,
       task: taskForSave(w.task),
       directive: directiveForSave(w.directive),
       traits: w.traits || null, sanity: w.sanity, bonds: w.bonds || null,

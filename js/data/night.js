@@ -49,6 +49,18 @@ const ROTATION = ['swarm', 'moth', 'shell', 'mix', 'owl', 'mix'];
 
 export const NIGHT = { PREVIEW_SECS: 5, ROTATION };
 
+// 信息层节流，不改变模拟步长或波次。行动按敌人实际字段选择。
+export const PREPARATION = {
+  refreshMs: 500,
+  actions: {
+    swarm: { text: '把火力放进光里', build: 'towerGlow' },
+    lamp: { text: '护住灯火 · 检查震荡火力', build: 'towerShock' },
+    wall: { text: '检查工事 · 配置光伤火力', build: 'towerGlow' },
+    air: { text: '检查对空 · 墙挡不住夜枭', build: 'towerGlow' },
+    boss: { text: '守住营地 · 备足火力与燃料', build: 'towerGlow' },
+  },
+};
+
 export function themeIdOf(state) {
   const day = (state && state.day) || 1;
   if (day % BOSS.EVERY === 0) return 'mix';

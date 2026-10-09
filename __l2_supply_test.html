@@ -1,0 +1,71 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>L2 人员补给验收</title>
+<body style="background:#101923;color:#e5edf5;font:14px monospace;margin:12px">
+<h1>L2 · 人员与补给</h1><p>隔离场景；保护正式存档。切选与改岗使用游戏内按钮。</p>
+<button id="run">开始验收</button><button id="verify" disabled>验证切选与改岗</button><button id="regression" disabled>运行回归与开关对照</button><button id="demo" disabled>展示前哨摘要</button><button id="end" disabled>恢复并结束</button>
+<button data-size="1280,720">1280×720</button><button data-size="1920,1080">1920×1080</button><button id="layout">检查布局</button>
+<p id="status">等待开始</p><pre id="out" style="white-space:pre-wrap;max-height:200px;overflow:auto"></pre>
+<iframe id="game" title="补给测试游戏" style="width:1280px;max-width:98vw;height:720px"></iframe>
+<script type="module">
+const keys=['deep-light-saves-v2','deep-light-settings-v1','deep-light-ui-v1'], backupKey='__deep_light_l2_backup_v1';
+const frame=document.querySelector('#game'),out=document.querySelector('#out'),status=document.querySelector('#status');
+let active=false,g,s,c,t,save,ui,e,prep,replay,report;
+const assert=(v,msg)=>{if(!v)throw Error(msg);};
+const show=()=>{out.textContent=JSON.stringify(report,null,2);localStorage.setItem('__deep_light_l2_evidence_v1',out.textContent);};
+function restore(){const b=JSON.parse(localStorage.getItem(backupKey)||'null');if(!b)return null;for(const k of keys)b[k]==null?localStorage.removeItem(k):localStorage.setItem(k,b[k]);const r=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)===b[k]]));if(Object.values(r).every(Boolean))localStorage.removeItem(backupKey);return r;}
+function finish(){if(g){g.__settings.autosave=false;g.__quick(true);}frame.src='about:blank';report.storage=restore();active=false;show();}
+function fail(err){report.error=String(err.stack||err);status.textContent='失败 · 正式三键恢复';finish();}
+window.addEventListener('beforeunload',()=>{if(active)restore();});
+const fresh=()=>{g.__newGame(4242,'normal');g.__settings.autosave=false;g.__steps(1);g.__quick(true);s=g.__state;return s.workers[0];};
+const check=(name,opts={})=>{const r=g.__check(opts);report.checks.push({name,...r});assert(r.ok,name+JSON.stringify(r.fails));};
+const stockSnapshot=()=>{const r=save.snapshot(g.__state);delete r.at;return r;};
+const test=(name,fn)=>{fn();report.cases.push({name,ok:true});};
+function base(n=1){const workers=Array.from({length:n},(_,i)=>({name:'队员'+i,alive:true,chunkX:1,chunkY:0,hunger:80,traits:{bad:'slowhand'},crew:{id:'test'+i,role:'miner',personality:'slowhand'},directive:{outpost:{x:1,y:0},outpostMode:'silent'}}));const chunk={id:'1,0',cx:1,cy:0,workers,beacons:[],buildings:[{type:'store',stock:{food:4,fuel:10}},{type:'lamp',x:2,y:2,fuel:2,level:1,burnT:3}],outpost:{nextT:6,lastReason:'上轮无工作'}};return {state:{layerId:'surface',chunkX:0,chunkY:0,chunkStore:{'0,0':{id:'0,0',workers:[]},'1,0':chunk},research:{unlocked:{}},pack:{stock:{food:99,fuel:99}}},chunk,w:workers[0],workers};}
+const get=p=>e.crewSupplyOf(p.state,p.w);
+document.querySelector('#run').onclick=()=>{if(active)return;if(localStorage.getItem(backupKey))restore();const b=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)]));localStorage.setItem(backupKey,JSON.stringify(b));localStorage.setItem(keys[1],JSON.stringify({...JSON.parse(b[keys[1]]||'{}'),autosave:false}));active=true;report={cases:[],checks:[],trusted:[],layouts:[]};frame.src='/?l2-test='+Date.now();};
+frame.onload=async()=>{if(!active)return;g=frame.contentWindow;try{
+g.__settings.autosave=false;[c,t,save,ui,e,prep,replay]=await g.eval(`Promise.all([import('/js/world/chunks.js'),import('/js/systems/taskBoard.js'),import('/js/core/save.js'),import('/js/ui/panels.js'),import('/js/systems/expedition.js'),import('/js/systems/preparation.js'),import('/js/dev/replay.js')])`);
+check('menu');g.__newGame(4242,'normal');g.__settings.autosave=false;check('new');
+test('01 单人正常饱食',()=>{const r=get(base());assert(r.food.candidates.length===1&&r.food.conditionalMax===0&&r.running,'单人');});
+test('02 三人取食上界',()=>{const p=base(3);p.workers.forEach(w=>w.hunger=40);const r=get(p);assert(r.food.conditionalMax===3&&r.food.skipped===0,'三人');});
+test('03 超处理上限',()=>{const p=base(4);p.workers.forEach(w=>w.hunger=40);const r=get(p);assert(r.food.conditionalMax===3&&r.food.skipped===1,'上限');});
+test('04 好胃口跨过阈值',()=>{const p=base();p.w.hunger=51;p.w.traits.bad='glutton';const r=get(p);assert(Math.abs(r.food.candidates[0].hunger-44.76)<1e-9&&r.food.conditionalMax===1,'性格');});
+test('05 正常阈值边界',()=>{const p=base();p.w.hunger=49.8;assert(get(p).food.conditionalMax===1,'阈值');p.w.hunger=49.81;assert(get(p).food.conditionalMax===0,'阈值上侧');});
+test('06 采掘提前中断未让后人进食',()=>{const w=fresh(),q=c.ensureSurfaceChunk(s,1,0),other=s.workers[1];s.workers.splice(s.workers.indexOf(w),1);s.workers.splice(s.workers.indexOf(other),1);q.workers.push(w,other);for(const v of [w,other]){v.chunkX=1;v.chunkY=0;v.hunger=40;t.setDirective(v,{outpost:{x:1,y:0},outpostMode:'gather'});}q.ecoPatches=[];q.beacons=[{hp:100,power:6,stock:{food:4,fuel:10}}];const r=e.crewSupplyOf(s,w);assert(r.food.conditionalMax===2&&r.food.conditional,'条件性');c.updateOutpostSettlement(s,12);assert(other.hunger===40&&q.outpost.lastNeeds.fed===1,'提前中断');});
+test('07 灯槽36秒减已烧3秒',()=>assert(get(base()).devices[0].seconds===33,'续航'));
+test('08 空灯槽',()=>{const p=base();p.chunk.buildings[1].fuel=0;assert(get(p).devices[0].seconds===null&&!get(p).devices[0].light,'空槽');});
+test('09 关闭灯',()=>{const p=base();p.chunk.buildings[1].off=true;assert(get(p).devices[0].seconds===null,'关闭');});
+test('10 工地不燃烧',()=>{const p=base();p.chunk.buildings[1].site=true;assert(!get(p).devices[0].burning,'工地');});
+test('11 灯档位与研究',()=>{const p=base();p.chunk.buildings[1].level=2;assert(get(p).devices[0].interval===11.25,'高亮');p.state.research.unlocked.lamp=true;assert(Math.abs(get(p).devices[0].interval-17.4375)<1e-9,'研究');});
+test('12 营地火单列',()=>{const p=base();p.chunk.beacons=[{hp:100,power:6,stock:{}}];assert(get(p).campLights===1&&get(p).devices.length===1,'营地火');});
+test('13 无箱',()=>{const p=base();p.chunk.buildings=p.chunk.buildings.slice(1);assert(get(p).supply.cap===0,'无箱');});
+test('14 满仓',()=>{const p=base();p.chunk.buildings[0].stock={food:60};assert(get(p).supply.free===0&&get(p).supply.used===60,'满仓');});
+test('15 库存不加入槽续航',()=>{const p=base();p.chunk.buildings[0].stock.fuel=100;assert(get(p).devices[0].seconds===33,'混入库存');});
+test('16 背包隔离',()=>assert(get(base()).supply.food===4&&get(base()).supply.fuel===10,'混入背包'));
+test('17 在途不参与结算',()=>{const p=base();p.w.outpostTravel={x:1,y:0,t:5};assert(get(p).food.eligible===0&&!get(p).running&&get(p).travel.t===5,'在途');});
+test('18 取消后查看实际位置',()=>{const p=base();p.w.directive={};const r=get(p);assert(!r.hasCommand&&r.actual.x===1&&r.target.x===1&&!r.running,'取消');});
+test('19 返营等待保留两种坐标',()=>{const p=base();p.w.directive={returnHome:true,outpost:{x:0,y:0}};p.w.outpostTravel={t:0,blocked:true};const r=get(p);assert(r.returnHome&&r.actual.x===1&&r.target.x===0&&r.travel.blocked,'等待');});
+test('20 无人区块休眠',()=>{const p=base();p.chunk.workers=[];assert(!get(p).active&&get(p).pausedReason==='区块已暂停','休眠');});
+test('21 深潜暂停',()=>{const p=base();p.state.layerId='depth1';assert(!get(p).running&&get(p).nextSec===null,'深潜');});
+test('22 未知目标不生成',()=>{const p=base();p.w.directive.outpost={x:99,y:99};const before=JSON.stringify(p.state);assert(!get(p).known&&get(p).supply===null&&JSON.stringify(p.state)===before,'未知');});
+test('23 静默仍消耗食物及灯槽',()=>{const p=base();p.w.hunger=40;const r=get(p);assert(r.food.conditionalMax===1&&r.devices[0].burning&&r.guardFuelMax===0,'静默');});
+test('24 守灯岗位与灯槽分开',()=>{const p=base(3);p.workers.forEach(w=>w.directive.outpostMode='guard');const r=get(p);assert(r.guardFuelMax===3&&r.devices[0].seconds===33,'岗位');});
+test('25 读报告全状态不变',()=>{const p=base(4),before=JSON.stringify(p.state);for(let i=0;i<10;i++)get(p);assert(JSON.stringify(p.state)===before,'只读');});
+test('28 告警状态原样报告',()=>{const p=base();p.chunk.outpost.alerts=[{id:'open',status:'open',rescuePending:true},{id:'done',status:'resolved',rescuePending:false}];const r=get(p);assert(r.alerts[0].rescuePending&&r.alerts[1].status==='resolved'&&r.alerts!==p.chunk.outpost.alerts,'告警');});
+const w=fresh();ui.togglePanel(s,'crew');report.firstId=w.crew.id;report.secondId=s.workers[1].crew.id;report.secondName=s.workers[1].name;
+report.checkpointKey='__deep_light_l2_checkpoint_v1';localStorage.setItem(report.checkpointKey,JSON.stringify(stockSnapshot()));
+g.document.addEventListener('click',ev=>{const b=ev.target.closest('[data-crew-select],[data-crew-role]');if(ev.isTrusted&&b){report.trusted.push({id:b.dataset.worker,select:b.hasAttribute('data-crew-select'),role:b.dataset.crewRole||null});show();}});
+document.querySelector('#verify').disabled=false;document.querySelector('#regression').disabled=false;document.querySelector('#demo').disabled=false;document.querySelector('#end').disabled=false;status.textContent='请实际选择第二人，再将其职业改为行医';show();
+}catch(err){fail(err);}};
+document.querySelector('#verify').onclick=()=>{try{const r=g.document.querySelector('[data-crew-supply]');assert(report.trusted.some(v=>v.select&&v.id===report.secondId),'未真实切选');assert(report.trusted.some(v=>v.role==='medic'&&v.id===report.secondId),'未真实改岗');assert(r.textContent.includes(report.secondName)&&r.textContent.includes('行医'),'摘要未立即更新');test('26 可信切选',()=>assert(r.textContent.includes(report.secondName),'姓名'));test('27 可信改岗即时刷新',()=>assert(r.textContent.includes('行医'),'职业'));report.inputVerified=true;status.textContent='真实输入通过';show();}catch(err){fail(err);}};
+document.querySelectorAll('[data-size]').forEach(b=>b.onclick=()=>{const [w,h]=b.dataset.size.split(',');frame.style.width=w+'px';frame.style.height=h+'px';frame.style.maxWidth='none';});
+document.querySelector('#layout').onclick=()=>{try{assert(active,'未运行');const d=g.document,p=d.querySelector('#panel'),r=p.getBoundingClientRect(),summary=p.querySelector('[data-crew-supply]'),q=summary.getBoundingClientRect();assert(r.left>=0&&r.right<=d.documentElement.clientWidth&&r.top>=0&&r.bottom<=d.documentElement.clientHeight,'面板越界');assert(summary.scrollWidth<=summary.clientWidth+1&&q.left>=r.left&&q.right<=r.right,'摘要横向裁切');report.layouts.push({width:d.documentElement.clientWidth,height:d.documentElement.clientHeight,panel:{left:r.left,right:r.right,top:r.top,bottom:r.bottom},summaryWidth:summary.clientWidth});show();}catch(err){fail(err);}};
+document.querySelector('#regression').onclick=async()=>{try{assert(report.inputVerified,'先实际切选与改岗');check('roundtrip',{roundtrip:true});check('after-load');const source=await g.__srcCheck();report.source=source;assert(source.ok,'源码');
+const a=g.__replay({seed:4242,diff:'normal',days:3,policy:'home'});g.__settings.autosave=false;const snapA=stockSnapshot();check('replay');
+let opened=false,ticks=0;const b=g.__replay({seed:4242,diff:'normal',days:3,policy:(S,api,ctx)=>{replay.POLICIES.home(S,api,ctx);if(!opened){ui.togglePanel(S,'crew');opened=true;}if((ticks++%2)===0)ui.renderPanelHost(S);}});g.__settings.autosave=false;const snapB=stockSnapshot();check('open-replay');
+const signature=r=>{const copy={...r};delete copy.ms;delete copy.policy;return JSON.stringify(copy);};
+assert(signature(a)===signature(b),'完整回放签名不同');assert(JSON.stringify(snapA)===JSON.stringify(snapB),'完整生产快照不同');report.panelComparison={equal:true,snapshotEqual:true,refreshes:Math.ceil(ticks/2),steps:a.steps,deaths:a.deaths,minHp:a.minHp,kills:a.kills,fuelEnd:a.fuelEnd,foodEnd:a.foodEnd,lightPressureMax:a.lightPressureMax,challengeMulMax:a.challengeMulMax};
+check('replay-roundtrip',{roundtrip:true});g.__watch(true,20);g.__steps(1200);g.__watch(false);report.watch=g.__testLog();assert(report.watch.length===1&&report.watch[0].includes('0 类'),'watch');status.textContent='功能与回归通过 · 可恢复结束';show();
+}catch(err){fail(err);}};
+document.querySelector('#end').onclick=()=>{finish();status.textContent='已结束 · 正式三键已恢复';};
+document.querySelector('#demo').onclick=()=>{try{const w=fresh(),q=c.ensureSurfaceChunk(s,1,0);q.buildings=[{type:'store',x:6,y:36,hp:100,stock:{food:8,fuel:10}},{type:'lamp',x:7,y:36,hp:100,fuel:2,level:1,burnT:3}];s.workers.splice(s.workers.indexOf(w),1);q.workers.push(w);w.chunkX=1;w.chunkY=0;w.hunger=40;t.setDirective(w,{outpost:{x:1,y:0},outpostMode:'guard'});q.outpost={nextT:6,lastReason:'燃料不足，守灯暂停',alerts:[]};ui.togglePanel(s,'crew');if(s.activePanel!=='crew')ui.togglePanel(s,'crew');ui.renderPanelHost(s);status.textContent='受控前哨展示 · 不是真实从零施工';show();}catch(err){fail(err);}};
+</script></body></html>

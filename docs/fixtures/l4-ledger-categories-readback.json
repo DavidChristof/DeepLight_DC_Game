@@ -1,0 +1,55 @@
+{
+  "file": "docs/fixtures/l4-ledger-categories.deflate.b64",
+  "ok": true,
+  "fails": [],
+  "scope": "isolated guard/build categories, not fair strategy matrix",
+  "source": "45e27812",
+  "hash": "c3f20557",
+  "endHash": "f82eb47",
+  "events": 46,
+  "counts": {
+    "construction": 2,
+    "localMine": 21,
+    "localCharge": 21,
+    "initialFuel": 1,
+    "guard": 1
+  },
+  "totals": {
+    "construction": {
+      "ore": -2,
+      "vine": -2
+    },
+    "localMine": {
+      "vine": 21
+    },
+    "localCharge": {
+      "3": -21
+    },
+    "initialFuel": {
+      "fuel": 30
+    },
+    "guard": {
+      "fuel": -1
+    }
+  },
+  "unknown": [],
+  "slots": [
+    0,
+    30
+  ],
+  "remoteTicks": [
+    0,
+    1
+  ],
+  "formalKeysRestored": {
+    "deep-light-saves-v2": true,
+    "deep-light-settings-v1": true,
+    "deep-light-ui-v1": true
+  },
+  "notFairStrategyMatrix": true,
+  "formalKeysUnchanged": {
+    "deep-light-saves-v2": true,
+    "deep-light-settings-v1": true,
+    "deep-light-ui-v1": true
+  }
+}

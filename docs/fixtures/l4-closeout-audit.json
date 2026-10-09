@@ -1,0 +1,6434 @@
+{
+  "gates": [
+    {
+      "id": "R1.six-runs-file",
+      "status": "通过",
+      "evidence": "l4-matrix-results.deflate.b64 / 701ba65c"
+    },
+    {
+      "id": "R2.trusted-input",
+      "status": "通过",
+      "evidence": "l4-independent-input.deflate.b64 / dcbacf56 / 83条"
+    },
+    {
+      "id": "R2.continuous-ledger",
+      "status": "通过",
+      "evidence": "l4-ledger-full.deflate.b64 / 81ba6178"
+    },
+    {
+      "id": "R2.missing-categories",
+      "status": "通过",
+      "evidence": "l4-ledger-categories.deflate.b64 / c3f20557"
+    },
+    {
+      "id": "R2.historical-checkpoint.639ab452",
+      "status": "通过",
+      "evidence": "l4-d332-checkpoints.json / original D332 checkpoint, no original inputLog"
+    },
+    {
+      "id": "R2.historical-checkpoint.4f2d0bc0",
+      "status": "通过",
+      "evidence": "l4-d332-checkpoints.json / original D332 checkpoint, no original inputLog"
+    },
+    {
+      "id": "fix.current-version",
+      "status": "通过",
+      "evidence": "l4-outpost-after-regression.json"
+    },
+    {
+      "id": "fix.snapshot-and-legacy",
+      "status": "通过",
+      "evidence": "full snapshot, no-alert bind and old-alert idempotence"
+    },
+    {
+      "id": "R3.four-states-and-roundtrip",
+      "status": "通过",
+      "evidence": "menu / new / loaded / replay plus controlled legacy end"
+    },
+    {
+      "id": "R3.source-watch-baseline",
+      "status": "通过",
+      "evidence": "l4-outpost-after-regression.json"
+    },
+    {
+      "id": "R3.two-actual-viewports",
+      "status": "通过",
+      "evidence": "l4-ui-results.json; summary and history screenshots"
+    },
+    {
+      "id": "R3.pressure-version",
+      "status": "通过",
+      "evidence": "l4-pressure-results.json"
+    },
+    {
+      "id": "R3.single-chunk-night",
+      "status": "通过",
+      "evidence": {
+        "file": "l4-pressure-results.json",
+        "peakMs": 6.3,
+        "budgetMs": 8
+      }
+    },
+    {
+      "id": "R3.three-chunk-night",
+      "status": "通过",
+      "evidence": {
+        "file": "l4-pressure-results.json",
+        "peakMs": 6,
+        "budgetMs": 12
+      }
+    },
+    {
+      "id": "R3.eight-switches",
+      "status": "通过",
+      "evidence": "l4-pressure-results.json / 3 cold + 5 warm"
+    },
+    {
+      "id": "R3.all-pressure-failures-retained",
+      "status": "通过",
+      "evidence": "first complete pressure run, no discarded budget failure"
+    },
+    {
+      "id": "R3.formal-storage",
+      "status": "通过",
+      "evidence": "all three test reports"
+    }
+  ],
+  "historicalLimits": [
+    "旧来源完整inputLog未记录，由独立83条输入补证覆盖必要操作；不伪造原日志",
+    "旧83输入矿物差额22仍未知；当前新连续链432事件未知0，不倒写旧历史",
+    "六轮含死亡跳黎明，不是连续无伤守完三夜",
+    "矩阵为4b01428d历史版本；不声称cf354bf8六轮复放"
+  ],
+  "scope": "artifact and evidence audit; not a new gameplay replay",
+  "currentFingerprint": "cf354bf8",
+  "matrix": {
+    "ok": true,
+    "fails": [],
+    "runs": 6,
+    "same": {
+      "supply": true,
+      "return": true,
+      "onsite": true
+    },
+    "source": "790a3093",
+    "code": "4b01428d",
+    "reportHash": "701ba65c"
+  },
+  "input": {
+    "ok": true,
+    "scope": "file integrity, not gameplay acceptance",
+    "fails": [],
+    "hash": "dcbacf56",
+    "proofId": "l4-independent-input-2026-10-08T08:52:22.085Z",
+    "inputs": 83,
+    "initialHash": "dce097d2",
+    "finalHash": "f66f4ac5",
+    "originalRoundtripPassed": false,
+    "originalDifferences": [
+      {
+        "path": ".firstSlice.startedT",
+        "before": 0,
+        "after": 110.41666666666168
+      },
+      {
+        "path": ".resonance.sites.first.trial",
+        "before": null,
+        "after": {
+          "siteId": "first",
+          "status": "idle",
+          "targetDay": null,
+          "activeDay": null,
+          "attempts": 0,
+          "result": null,
+          "failureReason": null,
+          "themeId": null,
+          "lightPressure": null,
+          "challengeMul": null,
+          "completedDay": null
+        }
+      }
+    ],
+    "storage": {
+      "deep-light-saves-v2": true,
+      "deep-light-settings-v1": true,
+      "deep-light-ui-v1": true
+    }
+  },
+  "ledger": {
+    "ok": true,
+    "fails": [],
+    "scope": "one current three-day supply continuation plus observation-off control",
+    "source": "45e27812",
+    "startHash": "5479c839",
+    "endHash": "6be3c1c0",
+    "steps": 63792,
+    "rngCalls": 1006,
+    "events": 432,
+    "counts": {
+      "localMine": 113,
+      "localCharge": 113,
+      "construction": 2,
+      "remoteMine": 39,
+      "remoteCharge": 39,
+      "fireTransfer": 24,
+      "recipe": 42,
+      "transfer": 4,
+      "burn": 43,
+      "refuel": 4,
+      "eat": 4,
+      "deathMove": 2,
+      "deathPenalty": 3
+    },
+    "totals": {
+      "localMine": {
+        "vine": 64,
+        "ore": 49
+      },
+      "localCharge": {
+        "2": -49,
+        "3": -64
+      },
+      "construction": {
+        "ore": -2,
+        "vine": -3
+      },
+      "remoteMine": {
+        "vine": 39
+      },
+      "remoteCharge": {
+        "3": -39
+      },
+      "fireTransfer": {
+        "vine": 0
+      },
+      "recipe": {
+        "ore": -21,
+        "fuel": 42
+      },
+      "transfer": {
+        "fuel": 0
+      },
+      "burn": {
+        "vine": -12,
+        "fuel": -31
+      },
+      "refuel": {
+        "fuel": 0
+      },
+      "eat": {
+        "food": -4
+      },
+      "deathMove": {
+        "pick": 0
+      },
+      "deathPenalty": {
+        "fuel": -25
+      }
+    },
+    "recipeBatches": 21,
+    "penalties": [
+      {
+        "event": 330,
+        "day": 1,
+        "chunk": "0,0",
+        "available": 20,
+        "paid": 10,
+        "expected": 10
+      },
+      {
+        "event": 427,
+        "day": 2,
+        "chunk": "0,0",
+        "available": 20,
+        "paid": 10,
+        "expected": 10
+      },
+      {
+        "event": 431,
+        "day": 3,
+        "chunk": "0,0",
+        "available": 10,
+        "paid": 5,
+        "expected": 5
+      }
+    ],
+    "unknown": [],
+    "initialTotals": {
+      "ore": 175,
+      "vine": 124,
+      "food": 4,
+      "fuel": 31,
+      "pick": 2
+    },
+    "finalTotals": {
+      "ore": 201,
+      "vine": 212,
+      "fuel": 17,
+      "pick": 2
+    },
+    "notOriginal83InputLedger": true,
+    "notAllThreeStrategiesEventJournal": true
+  },
+  "category": {
+    "ok": true,
+    "fails": [],
+    "scope": "isolated guard/build categories, not fair strategy matrix",
+    "source": "45e27812",
+    "hash": "c3f20557",
+    "endHash": "f82eb47",
+    "events": 46,
+    "counts": {
+      "construction": 2,
+      "localMine": 21,
+      "localCharge": 21,
+      "initialFuel": 1,
+      "guard": 1
+    },
+    "totals": {
+      "construction": {
+        "ore": -2,
+        "vine": -2
+      },
+      "localMine": {
+        "vine": 21
+      },
+      "localCharge": {
+        "3": -21
+      },
+      "initialFuel": {
+        "fuel": 30
+      },
+      "guard": {
+        "fuel": -1
+      }
+    },
+    "unknown": [],
+    "slots": [
+      0,
+      30
+    ],
+    "remoteTicks": [
+      0,
+      1
+    ],
+    "formalKeysRestored": {
+      "deep-light-saves-v2": true,
+      "deep-light-settings-v1": true,
+      "deep-light-ui-v1": true
+    },
+    "notFairStrategyMatrix": true
+  },
+  "historicalCheckpoints": {
+    "entries": [
+      {
+        "at": "2026-10-06T09:06:00.008Z",
+        "source": {
+          "seed": 4242,
+          "diff": "normal",
+          "resourceInjection": false,
+          "teleport": false,
+          "syntheticGameInput": false,
+          "codeFingerprint": "a50829fe",
+          "sourceFiles": 95,
+          "version": "0.8.0-alpha.1"
+        },
+        "hash": "639ab452",
+        "inputs": 96,
+        "snapshot": {
+          "seed": 4242,
+          "day": 3,
+          "t": 152.11666666667077,
+          "spawnT": 4.676000000000002,
+          "nightSpawnDay": 2,
+          "nightSpawnBudget": 21,
+          "nightSpawnUsed": 6,
+          "noSpawnT": 0,
+          "wasTide": false,
+          "wasDawn": false,
+          "nightLightPressure": 0,
+          "nightChallengeMul": 1,
+          "firstSlice": {
+            "version": 1,
+            "active": true,
+            "phase": "light",
+            "startedDay": 1,
+            "startedT": 96.33333333332915,
+            "flags": {
+              "wake": true,
+              "gather": true,
+              "firstLight": true
+            },
+            "history": [
+              {
+                "phase": "wake",
+                "day": 1,
+                "t": 0
+              },
+              {
+                "phase": "gather",
+                "day": 1,
+                "t": 99.79999999999562
+              },
+              {
+                "phase": "light",
+                "day": 1,
+                "t": 169.2000000000268
+              }
+            ],
+            "choice": null,
+            "metrics": {
+              "duskLamps": 0,
+              "tidePressure": 0,
+              "tideChallengeMul": 1,
+              "aftermathBlight": 0,
+              "expeditionCx": 0,
+              "expeditionCy": 0,
+              "expeditionDay": 0,
+              "returnDay": 0
+            }
+          },
+          "reviveCount": 0,
+          "bossSpawnedThisNight": false,
+          "rescue": null,
+          "lastSealDay": 0,
+          "diff": "normal",
+          "px": 49,
+          "py": 36,
+          "res": {
+            "ore": 175,
+            "vine": 151,
+            "fuel": 1,
+            "data": 0,
+            "core": 0,
+            "food": 0,
+            "night": 0,
+            "stone": 0,
+            "coal": 0,
+            "pick": 0
+          },
+          "kills": 0,
+          "playerHp": 45,
+          "playerMaxHp": 100,
+          "playerHunger": 31.109200000009068,
+          "playerInjury": 2,
+          "pulseMul": 1,
+          "bossTier": 0,
+          "milestone": {
+            "bossDefeated": false,
+            "bossDay": 7,
+            "clearedDay": 0
+          },
+          "resonance": {
+            "version": 2,
+            "trial": {
+              "siteId": "first",
+              "status": "idle",
+              "targetDay": null,
+              "activeDay": null,
+              "attempts": 0,
+              "result": null,
+              "failureReason": null,
+              "themeId": null,
+              "lightPressure": null,
+              "challengeMul": null,
+              "completedDay": null
+            },
+            "sites": {
+              "first": {
+                "id": "first",
+                "status": "locked",
+                "chunkX": 1,
+                "chunkY": 0,
+                "x": null,
+                "y": null,
+                "completedDay": null,
+                "trial": {
+                  "siteId": "first",
+                  "status": "idle",
+                  "targetDay": null,
+                  "activeDay": null,
+                  "attempts": 0,
+                  "result": null,
+                  "failureReason": null,
+                  "themeId": null,
+                  "lightPressure": null,
+                  "challengeMul": null,
+                  "completedDay": null
+                }
+              },
+              "second": {
+                "id": "second",
+                "status": "locked",
+                "chunkX": 3,
+                "chunkY": 0,
+                "x": null,
+                "y": null,
+                "completedDay": null,
+                "trial": null
+              },
+              "third": {
+                "id": "third",
+                "status": "locked",
+                "chunkX": 0,
+                "chunkY": 0,
+                "x": null,
+                "y": null,
+                "completedDay": null,
+                "trial": null
+              }
+            }
+          },
+          "runStats": {
+            "version": 1,
+            "maxLightPressure": 0,
+            "nightHarvests": 0,
+            "rescues": 0,
+            "hollowings": 0,
+            "soothings": 0,
+            "workerDeaths": 0,
+            "revivals": 0
+          },
+          "nightOutcomes": {
+            "version": 1,
+            "knownSinceDay": 1,
+            "history": [
+              {
+                "day": 1,
+                "result": "retreat",
+                "cause": "death",
+                "layerId": "surface",
+                "chunkX": 2,
+                "chunkY": 0
+              },
+              {
+                "day": 2,
+                "result": "retreat",
+                "cause": "death",
+                "layerId": "surface",
+                "chunkX": 2,
+                "chunkY": 0
+              }
+            ]
+          },
+          "ending": null,
+          "research": {
+            "unlocked": {}
+          },
+          "layerId": "surface",
+          "chunkX": 2,
+          "chunkY": 0,
+          "equip": {
+            "held": null
+          },
+          "buildings": [],
+          "chunks": [
+            {
+              "x": 0,
+              "y": 0,
+              "biome": "tundra",
+              "buildings": [
+                {
+                  "type": "shaft",
+                  "x": 70,
+                  "y": 54,
+                  "hp": 140,
+                  "fuel": 0,
+                  "burnT": 0,
+                  "growth": 0,
+                  "level": 1,
+                  "site": 0,
+                  "work": 0,
+                  "stock": null,
+                  "craft": null,
+                  "prog": 0,
+                  "made": 0,
+                  "off": 0,
+                  "open": null,
+                  "recipe": null,
+                  "fireMat": null,
+                  "mods": null,
+                  "natural": 1,
+                  "entry": 0,
+                  "mounted": null,
+                  "resonanceSiteId": null
+                }
+              ],
+              "beacons": [
+                {
+                  "x": 45,
+                  "y": 36,
+                  "power": 9,
+                  "radius": 7.5,
+                  "hp": 300,
+                  "maxHp": 300,
+                  "stock": {
+                    "ore": 110,
+                    "vine": 0,
+                    "fuel": 0,
+                    "food": 0,
+                    "pick": 0
+                  }
+                },
+                {
+                  "x": 51,
+                  "y": 36,
+                  "power": 9,
+                  "radius": 7.5,
+                  "hp": 300,
+                  "maxHp": 300,
+                  "stock": {
+                    "vine": 123,
+                    "ore": 65
+                  }
+                }
+              ],
+              "enemies": [],
+              "nodes": [
+                560,
+                5,
+                655,
+                5,
+                656,
+                5,
+                657,
+                5,
+                669,
+                4,
+                750,
+                5,
+                751,
+                5,
+                752,
+                5,
+                753,
+                5,
+                754,
+                5,
+                764,
+                4,
+                765,
+                4,
+                766,
+                4,
+                836,
+                1,
+                847,
+                5,
+                848,
+                5,
+                849,
+                5,
+                861,
+                4,
+                933,
+                4,
+                944,
+                5,
+                1028,
+                4,
+                1123,
+                4,
+                1148,
+                4,
+                1224,
+                4,
+                1243,
+                4,
+                1244,
+                4,
+                1245,
+                4,
+                1319,
+                4,
+                1320,
+                4,
+                1321,
+                4,
+                1338,
+                4,
+                1339,
+                4,
+                1340,
+                4,
+                1341,
+                4,
+                1342,
+                4,
+                1414,
+                4,
+                1415,
+                4,
+                1416,
+                4,
+                1417,
+                4,
+                1418,
+                4,
+                1435,
+                4,
+                1436,
+                4,
+                1437,
+                4,
+                1511,
+                4,
+                1512,
+                4,
+                1513,
+                4,
+                1528,
+                4,
+                1532,
+                4,
+                1608,
+                4,
+                1623,
+                4,
+                1624,
+                4,
+                1625,
+                4,
+                1718,
+                4,
+                1719,
+                4,
+                1720,
+                4,
+                1721,
+                4,
+                1722,
+                4,
+                1815,
+                4,
+                1816,
+                4,
+                1817,
+                4,
+                1912,
+                4,
+                2486,
+                5,
+                2581,
+                5,
+                2582,
+                5,
+                2583,
+                5,
+                2678,
+                5,
+                2767,
+                4,
+                2862,
+                4,
+                2863,
+                4,
+                2864,
+                4,
+                2957,
+                4,
+                2958,
+                4,
+                2959,
+                4,
+                2960,
+                4,
+                2961,
+                4,
+                3054,
+                4,
+                3055,
+                4,
+                3056,
+                4,
+                4103,
+                3,
+                4696,
+                3,
+                5512,
+                3,
+                6532,
+                5,
+                6627,
+                5,
+                6628,
+                5,
+                6629,
+                5,
+                6724,
+                5
+              ],
+              "tileDiffs": [
+                739,
+                0,
+                834,
+                0,
+                835,
+                0,
+                929,
+                0,
+                930,
+                0,
+                931,
+                0,
+                932,
+                0,
+                1026,
+                0,
+                1027,
+                0,
+                2080,
+                0,
+                2175,
+                0,
+                2176,
+                0,
+                2177,
+                0,
+                2270,
+                0,
+                2271,
+                0,
+                2272,
+                0,
+                2273,
+                0,
+                2274,
+                0,
+                2367,
+                0,
+                2368,
+                0,
+                2369,
+                0,
+                2464,
+                0,
+                3151,
+                0,
+                4076,
+                0,
+                4077,
+                0,
+                4078,
+                0,
+                4079,
+                0,
+                4080,
+                0,
+                4173,
+                0,
+                4174,
+                0,
+                4175,
+                0,
+                4270,
+                0,
+                4288,
+                0,
+                4383,
+                0,
+                4384,
+                0,
+                4385,
+                0,
+                4480,
+                0,
+                4653,
+                0,
+                4748,
+                0,
+                4749,
+                0,
+                4750,
+                0,
+                4843,
+                0,
+                4844,
+                0,
+                4845,
+                0,
+                4846,
+                0,
+                4847,
+                0,
+                4940,
+                0,
+                4941,
+                0,
+                4942,
+                0,
+                5037,
+                0,
+                5643,
+                0,
+                5738,
+                0,
+                5739,
+                0,
+                5740,
+                0,
+                5833,
+                0,
+                5834,
+                0,
+                5835,
+                0,
+                5836,
+                0,
+                5837,
+                0,
+                5930,
+                0,
+                5931,
+                0,
+                5932,
+                0,
+                6027,
+                0
+              ],
+              "blight": [],
+              "fronts": [],
+              "patches": [
+                {
+                  "x": 80,
+                  "y": 6,
+                  "kind": "ore",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 0.8999999999998264
+                },
+                {
+                  "x": 78,
+                  "y": 7,
+                  "kind": "ore",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 0.8999999999998264
+                },
+                {
+                  "x": 80,
+                  "y": 7,
+                  "kind": "ore",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 0.8999999999998264
+                },
+                {
+                  "x": 82,
+                  "y": 7,
+                  "kind": "ore",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 0.8999999999998264
+                },
+                {
+                  "x": 64,
+                  "y": 23,
+                  "kind": "ore",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 0.8999999999998264
+                },
+                {
+                  "x": 47,
+                  "y": 42,
+                  "kind": "ore",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 0.8999999999998264
+                },
+                {
+                  "x": 48,
+                  "y": 42,
+                  "kind": "ore",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 0.8999999999998264
+                },
+                {
+                  "x": 46,
+                  "y": 44,
+                  "kind": "ore",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 0.8999999999998264
+                },
+                {
+                  "x": 44,
+                  "y": 50,
+                  "kind": "ore",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 0.8999999999998264
+                }
+              ],
+              "creatures": [
+                {
+                  "kind": "moth",
+                  "x": 80.5,
+                  "y": 6.5,
+                  "state": "forage",
+                  "t": 0.18333333333333332,
+                  "alive": true
+                },
+                {
+                  "kind": "moth",
+                  "x": 78.5,
+                  "y": 7.5,
+                  "state": "forage",
+                  "t": 0.18333333333333332,
+                  "alive": true
+                }
+              ],
+              "outpost": {
+                "nextT": 12,
+                "ticks": 0,
+                "lightPressure": 0,
+                "frontDebt": 0,
+                "lastEcology": {},
+                "alerts": [],
+                "lastYield": {},
+                "lastNeeds": {},
+                "lastReason": "等待有人驻守"
+              },
+              "nightops": {
+                "day": 0,
+                "tideOn": false,
+                "blooms": [
+                  {
+                    "x": 45,
+                    "y": 12,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 49,
+                    "y": 26,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 59,
+                    "y": 19,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 32,
+                    "y": 22,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 42,
+                    "y": 48,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 58,
+                    "y": 39,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  }
+                ],
+                "vents": [
+                  {
+                    "x": 58,
+                    "y": 46,
+                    "t": 12,
+                    "burst": 0
+                  },
+                  {
+                    "x": 47,
+                    "y": 22,
+                    "t": 23,
+                    "burst": 0
+                  }
+                ]
+              }
+            },
+            {
+              "x": 2,
+              "y": 0,
+              "biome": "vineMist",
+              "buildings": [],
+              "beacons": [],
+              "enemies": [],
+              "nodes": [
+                129,
+                4,
+                209,
+                4,
+                224,
+                4,
+                225,
+                4,
+                226,
+                4,
+                304,
+                4,
+                305,
+                4,
+                306,
+                4,
+                319,
+                4,
+                320,
+                4,
+                321,
+                4,
+                322,
+                4,
+                323,
+                4,
+                401,
+                4,
+                416,
+                4,
+                417,
+                4,
+                418,
+                4,
+                513,
+                4,
+                581,
+                5,
+                606,
+                4,
+                676,
+                5,
+                677,
+                5,
+                678,
+                5,
+                701,
+                4,
+                702,
+                4,
+                703,
+                4,
+                773,
+                5,
+                798,
+                4,
+                1885,
+                4,
+                1980,
+                4,
+                1981,
+                4,
+                1982,
+                4,
+                2013,
+                5,
+                2073,
+                5,
+                2077,
+                4,
+                2108,
+                5,
+                2109,
+                5,
+                2110,
+                5,
+                2161,
+                4,
+                2168,
+                5,
+                2169,
+                5,
+                2170,
+                5,
+                2205,
+                5,
+                2256,
+                4,
+                2257,
+                4,
+                2258,
+                4,
+                2263,
+                5,
+                2264,
+                5,
+                2265,
+                5,
+                2266,
+                5,
+                2267,
+                5,
+                2353,
+                4,
+                2360,
+                5,
+                2361,
+                5,
+                2362,
+                5,
+                2373,
+                5,
+                2457,
+                5,
+                2459,
+                3,
+                2468,
+                5,
+                2469,
+                5,
+                2470,
+                5,
+                2563,
+                5,
+                2564,
+                5,
+                2565,
+                5,
+                2566,
+                5,
+                2567,
+                5,
+                2660,
+                5,
+                2661,
+                5,
+                2662,
+                5,
+                2757,
+                5,
+                2849,
+                4,
+                2944,
+                4,
+                2945,
+                4,
+                2946,
+                4,
+                3041,
+                4,
+                3333,
+                4,
+                3428,
+                4,
+                3429,
+                4,
+                3430,
+                4,
+                3467,
+                5,
+                3525,
+                4,
+                3562,
+                5,
+                3563,
+                5,
+                3564,
+                5,
+                3657,
+                5,
+                3658,
+                5,
+                3659,
+                5,
+                3660,
+                5,
+                3661,
+                5,
+                3749,
+                4,
+                3754,
+                5,
+                3755,
+                5,
+                3756,
+                5,
+                3763,
+                3,
+                3844,
+                4,
+                3845,
+                4,
+                3846,
+                4,
+                3851,
+                5,
+                3939,
+                4,
+                3940,
+                4,
+                3941,
+                4,
+                3942,
+                4,
+                3943,
+                4,
+                4036,
+                4,
+                4037,
+                4,
+                4038,
+                4,
+                4130,
+                4,
+                4133,
+                4,
+                4225,
+                4,
+                4226,
+                4,
+                4227,
+                4,
+                4320,
+                4,
+                4321,
+                4,
+                4322,
+                4,
+                4323,
+                4,
+                4324,
+                4,
+                4417,
+                4,
+                4418,
+                4,
+                4419,
+                4,
+                4485,
+                3,
+                4514,
+                4,
+                5477,
+                4,
+                5572,
+                4,
+                5573,
+                4,
+                5574,
+                4,
+                5667,
+                4,
+                5668,
+                4,
+                5669,
+                4,
+                5670,
+                4,
+                5671,
+                4,
+                5764,
+                4,
+                5765,
+                4,
+                5766,
+                4,
+                5861,
+                4,
+                6045,
+                4,
+                6140,
+                4,
+                6141,
+                4,
+                6142,
+                4,
+                6237,
+                4,
+                6341,
+                4,
+                6381,
+                4,
+                6436,
+                4,
+                6437,
+                4,
+                6438,
+                4,
+                6476,
+                4,
+                6477,
+                4,
+                6478,
+                4,
+                6533,
+                4,
+                6552,
+                4,
+                6571,
+                4,
+                6572,
+                4,
+                6647,
+                4,
+                6648,
+                4,
+                6649,
+                4,
+                6668,
+                4,
+                6744,
+                4
+              ],
+              "tileDiffs": [],
+              "blight": [
+                2747,
+                1
+              ],
+              "fronts": [
+                {
+                  "x": 59,
+                  "y": 28,
+                  "core": 2747,
+                  "cells": [
+                    2747
+                  ],
+                  "level": 3,
+                  "growT": 518.9333333333244,
+                  "pressure": 6,
+                  "source": "tide"
+                }
+              ],
+              "patches": [
+                {
+                  "x": 17,
+                  "y": 2,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 8.599999999999831
+                },
+                {
+                  "x": 35,
+                  "y": 3,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 8.599999999999831
+                },
+                {
+                  "x": 49,
+                  "y": 23,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 8.599999999999831
+                },
+                {
+                  "x": 65,
+                  "y": 30,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 8.599999999999831
+                },
+                {
+                  "x": 4,
+                  "y": 41,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 8.599999999999831
+                },
+                {
+                  "x": 3,
+                  "y": 46,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 8.599999999999831
+                },
+                {
+                  "x": 4,
+                  "y": 58,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 8.599999999999831
+                },
+                {
+                  "x": 92,
+                  "y": 63,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 8.599999999999831
+                },
+                {
+                  "x": 5,
+                  "y": 66,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 8.599999999999831
+                },
+                {
+                  "x": 5,
+                  "y": 67,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 8.599999999999831
+                },
+                {
+                  "x": 43,
+                  "y": 68,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 8.599999999999831
+                }
+              ],
+              "creatures": [
+                {
+                  "kind": "moth",
+                  "x": 17.5,
+                  "y": 2.5,
+                  "state": "forage",
+                  "t": 0.2333333333333333,
+                  "alive": true
+                },
+                {
+                  "kind": "moth",
+                  "x": 35.5,
+                  "y": 3.5,
+                  "state": "forage",
+                  "t": 0.2333333333333333,
+                  "alive": true
+                }
+              ],
+              "outpost": {
+                "nextT": 12,
+                "ticks": 0,
+                "lightPressure": 0,
+                "frontDebt": 0,
+                "lastEcology": {},
+                "alerts": [],
+                "lastYield": {},
+                "lastNeeds": {},
+                "lastReason": "等待有人驻守"
+              },
+              "nightops": {
+                "day": 0,
+                "tideOn": false,
+                "blooms": [
+                  {
+                    "x": 23,
+                    "y": 30,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 63,
+                    "y": 40,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 37,
+                    "y": 58,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 51,
+                    "y": 44,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 35,
+                    "y": 53,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 31,
+                    "y": 17,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  }
+                ],
+                "vents": [
+                  {
+                    "x": 27,
+                    "y": 40,
+                    "t": 12,
+                    "burst": 0
+                  },
+                  {
+                    "x": 34,
+                    "y": 32,
+                    "t": 23,
+                    "burst": 0
+                  }
+                ]
+              }
+            },
+            {
+              "x": 1,
+              "y": 0,
+              "biome": "vineMist",
+              "buildings": [
+                {
+                  "type": "store",
+                  "x": 4,
+                  "y": 37,
+                  "hp": 60,
+                  "fuel": 0,
+                  "burnT": 0,
+                  "growth": 0,
+                  "level": 1,
+                  "site": 0,
+                  "work": 0,
+                  "stock": {
+                    "fuel": 1,
+                    "vine": 28
+                  },
+                  "craft": null,
+                  "prog": 0,
+                  "made": 0,
+                  "off": 0,
+                  "open": null,
+                  "recipe": null,
+                  "fireMat": null,
+                  "mods": null,
+                  "natural": 0,
+                  "entry": 0,
+                  "mounted": null,
+                  "resonanceSiteId": null
+                },
+                {
+                  "type": "lamp",
+                  "x": 4,
+                  "y": 35,
+                  "hp": null,
+                  "fuel": 0,
+                  "burnT": 0,
+                  "growth": 0,
+                  "level": 1,
+                  "site": 0,
+                  "work": 0,
+                  "stock": null,
+                  "craft": null,
+                  "prog": 0,
+                  "made": 0,
+                  "off": 0,
+                  "open": null,
+                  "recipe": null,
+                  "fireMat": null,
+                  "mods": null,
+                  "natural": 0,
+                  "entry": 0,
+                  "mounted": null,
+                  "resonanceSiteId": null
+                }
+              ],
+              "beacons": [],
+              "enemies": [],
+              "nodes": [
+                1068,
+                4,
+                1163,
+                4,
+                1164,
+                4,
+                1165,
+                4,
+                1260,
+                4,
+                1473,
+                4,
+                1568,
+                4,
+                1569,
+                4,
+                1570,
+                4,
+                1657,
+                5,
+                1663,
+                4,
+                1664,
+                4,
+                1665,
+                4,
+                1666,
+                4,
+                1667,
+                4,
+                1752,
+                5,
+                1753,
+                5,
+                1754,
+                5,
+                1760,
+                4,
+                1761,
+                4,
+                1762,
+                4,
+                1849,
+                5,
+                2343,
+                5,
+                2438,
+                5,
+                2439,
+                5,
+                2440,
+                5,
+                2519,
+                4,
+                2520,
+                4,
+                2521,
+                4,
+                2533,
+                5,
+                2534,
+                5,
+                2535,
+                5,
+                2536,
+                5,
+                2537,
+                5,
+                2555,
+                4,
+                2556,
+                4,
+                2557,
+                4,
+                2614,
+                4,
+                2615,
+                4,
+                2616,
+                4,
+                2630,
+                5,
+                2631,
+                5,
+                2632,
+                5,
+                2678,
+                3,
+                2711,
+                4,
+                2712,
+                4,
+                2713,
+                4,
+                2727,
+                5,
+                2808,
+                4,
+                2913,
+                4,
+                3008,
+                4,
+                3009,
+                4,
+                3103,
+                4,
+                3104,
+                4,
+                3105,
+                4,
+                3106,
+                4,
+                3107,
+                4,
+                3200,
+                4,
+                3201,
+                4,
+                3202,
+                4,
+                3297,
+                4,
+                3402,
+                5,
+                3423,
+                4,
+                3518,
+                4,
+                3519,
+                4,
+                3520,
+                4,
+                3615,
+                4,
+                3893,
+                5,
+                3980,
+                4,
+                3988,
+                5,
+                3989,
+                5,
+                3990,
+                5,
+                4077,
+                4,
+                4078,
+                4,
+                4079,
+                4,
+                4083,
+                5,
+                4084,
+                5,
+                4085,
+                5,
+                4086,
+                5,
+                4087,
+                5,
+                4174,
+                4,
+                4180,
+                5,
+                4181,
+                5,
+                4182,
+                5,
+                4277,
+                5,
+                4441,
+                4,
+                4536,
+                4,
+                4537,
+                4,
+                4538,
+                4,
+                4570,
+                4,
+                4601,
+                4,
+                4633,
+                4,
+                4665,
+                4,
+                4666,
+                4,
+                4667,
+                4,
+                4672,
+                4,
+                4696,
+                4,
+                4697,
+                4,
+                4698,
+                4,
+                4762,
+                4,
+                4767,
+                4,
+                4768,
+                4,
+                4769,
+                4,
+                4793,
+                4,
+                4864,
+                4,
+                5010,
+                3,
+                5059,
+                4,
+                5154,
+                4,
+                5155,
+                4,
+                5156,
+                4,
+                5251,
+                4,
+                5324,
+                4,
+                5419,
+                4,
+                5420,
+                4,
+                5421,
+                4,
+                5514,
+                4,
+                5515,
+                4,
+                5516,
+                4,
+                5517,
+                4,
+                5518,
+                4,
+                5611,
+                4,
+                5612,
+                4,
+                5613,
+                4,
+                5708,
+                4,
+                5798,
+                3,
+                6211,
+                5,
+                6306,
+                5,
+                6307,
+                5,
+                6308,
+                5,
+                6401,
+                5,
+                6402,
+                5,
+                6403,
+                5,
+                6404,
+                5,
+                6405,
+                5,
+                6445,
+                4,
+                6498,
+                5,
+                6499,
+                5,
+                6500,
+                5,
+                6540,
+                4,
+                6541,
+                4,
+                6542,
+                4,
+                6595,
+                5,
+                6637,
+                4
+              ],
+              "tileDiffs": [
+                1857,
+                0,
+                2424,
+                0,
+                2460,
+                0,
+                2617,
+                0,
+                2618,
+                0,
+                2652,
+                0,
+                3010,
+                0
+              ],
+              "blight": [],
+              "fronts": [],
+              "patches": [
+                {
+                  "x": 33,
+                  "y": 19,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 3.3833333333331517
+                },
+                {
+                  "x": 24,
+                  "y": 25,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 3.3833333333331517
+                },
+                {
+                  "x": 60,
+                  "y": 25,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 3.3833333333331517
+                },
+                {
+                  "x": 25,
+                  "y": 27,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 3.3833333333331517
+                },
+                {
+                  "x": 26,
+                  "y": 27,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 3.3833333333331517
+                },
+                {
+                  "x": 60,
+                  "y": 27,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 3.3833333333331517
+                },
+                {
+                  "x": 34,
+                  "y": 31,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 3.3833333333331517
+                },
+                {
+                  "x": 33,
+                  "y": 34,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 3.3833333333331517
+                },
+                {
+                  "x": 47,
+                  "y": 42,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 3.3833333333331517
+                },
+                {
+                  "x": 43,
+                  "y": 56,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 3.3833333333331517
+                },
+                {
+                  "x": 44,
+                  "y": 56,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 3.3833333333331517
+                },
+                {
+                  "x": 45,
+                  "y": 58,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 3.3833333333331517
+                }
+              ],
+              "creatures": [
+                {
+                  "kind": "moth",
+                  "x": 33.5,
+                  "y": 19.5,
+                  "state": "forage",
+                  "t": 0.7166666666666672,
+                  "alive": true
+                },
+                {
+                  "kind": "moth",
+                  "x": 24.5,
+                  "y": 25.5,
+                  "state": "forage",
+                  "t": 0.7166666666666672,
+                  "alive": true
+                }
+              ],
+              "outpost": {
+                "nextT": 6.58333333333314,
+                "ticks": 51,
+                "lightPressure": 0,
+                "frontDebt": 0,
+                "lastEcology": {
+                  "tide": false,
+                  "pressure": 0,
+                  "ratio": 0,
+                  "debt": 0,
+                  "event": ""
+                },
+                "alerts": [],
+                "lastYield": {},
+                "lastNeeds": {
+                  "fed": 0,
+                  "hungry": 1,
+                  "foodShort": 1,
+                  "fuel": 0
+                },
+                "lastReason": "等待有人驻守"
+              },
+              "nightops": {
+                "day": 0,
+                "tideOn": false,
+                "blooms": [
+                  {
+                    "x": 35,
+                    "y": 31,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 29,
+                    "y": 27,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 49,
+                    "y": 47,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 66,
+                    "y": 49,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 58,
+                    "y": 26,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 50,
+                    "y": 52,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  }
+                ],
+                "vents": [
+                  {
+                    "x": 35,
+                    "y": 43,
+                    "t": 12,
+                    "burst": 0
+                  },
+                  {
+                    "x": 54,
+                    "y": 50,
+                    "t": 23,
+                    "burst": 0
+                  }
+                ]
+              }
+            }
+          ],
+          "activeEnemies": null,
+          "stores": {
+            "beacons": [],
+            "pack": {}
+          },
+          "blight": [
+            2747,
+            1
+          ],
+          "fronts": [
+            {
+              "x": 59,
+              "y": 28,
+              "core": 2747,
+              "cells": [
+                2747
+              ],
+              "level": 3,
+              "growT": 518.9333333333244,
+              "pressure": 6,
+              "source": "tide"
+            }
+          ],
+          "patches": [
+            {
+              "x": 17,
+              "y": 2,
+              "kind": "vine",
+              "amount": 3,
+              "cap": 3,
+              "stage": 1,
+              "nextT": 8.599999999999831
+            },
+            {
+              "x": 35,
+              "y": 3,
+              "kind": "vine",
+              "amount": 3,
+              "cap": 3,
+              "stage": 1,
+              "nextT": 8.599999999999831
+            },
+            {
+              "x": 49,
+              "y": 23,
+              "kind": "vine",
+              "amount": 3,
+              "cap": 3,
+              "stage": 1,
+              "nextT": 8.599999999999831
+            },
+            {
+              "x": 65,
+              "y": 30,
+              "kind": "vine",
+              "amount": 3,
+              "cap": 3,
+              "stage": 1,
+              "nextT": 8.599999999999831
+            },
+            {
+              "x": 4,
+              "y": 41,
+              "kind": "vine",
+              "amount": 3,
+              "cap": 3,
+              "stage": 1,
+              "nextT": 8.599999999999831
+            },
+            {
+              "x": 3,
+              "y": 46,
+              "kind": "vine",
+              "amount": 3,
+              "cap": 3,
+              "stage": 1,
+              "nextT": 8.599999999999831
+            },
+            {
+              "x": 4,
+              "y": 58,
+              "kind": "vine",
+              "amount": 3,
+              "cap": 3,
+              "stage": 1,
+              "nextT": 8.599999999999831
+            },
+            {
+              "x": 92,
+              "y": 63,
+              "kind": "vine",
+              "amount": 3,
+              "cap": 3,
+              "stage": 1,
+              "nextT": 8.599999999999831
+            },
+            {
+              "x": 5,
+              "y": 66,
+              "kind": "vine",
+              "amount": 3,
+              "cap": 3,
+              "stage": 1,
+              "nextT": 8.599999999999831
+            },
+            {
+              "x": 5,
+              "y": 67,
+              "kind": "vine",
+              "amount": 3,
+              "cap": 3,
+              "stage": 1,
+              "nextT": 8.599999999999831
+            },
+            {
+              "x": 43,
+              "y": 68,
+              "kind": "vine",
+              "amount": 3,
+              "cap": 3,
+              "stage": 1,
+              "nextT": 8.599999999999831
+            }
+          ],
+          "creatures": [
+            {
+              "kind": "moth",
+              "x": 17.5,
+              "y": 2.5,
+              "state": "forage",
+              "t": 0.2333333333333333,
+              "alive": true
+            },
+            {
+              "kind": "moth",
+              "x": 35.5,
+              "y": 3.5,
+              "state": "forage",
+              "t": 0.2333333333333333,
+              "alive": true
+            }
+          ],
+          "relics": {},
+          "relicTiles": {},
+          "observed": {
+            "seep": 0
+          },
+          "body": {
+            "lava": 0
+          },
+          "graves": [],
+          "memorial": [],
+          "deathPack": {
+            "x": 4.749999999999998,
+            "y": 36.5,
+            "layerId": "surface",
+            "chunkX": 2,
+            "chunkY": 0,
+            "stock": {
+              "ore": 0,
+              "vine": 0,
+              "fuel": 0,
+              "food": 1
+            },
+            "held": "pick",
+            "day": 1
+          },
+          "mind": {
+            "day": 3,
+            "hollowed": 0,
+            "soothed": 0,
+            "bossSeen": -1
+          },
+          "seen": {
+            "fuelEmpty": true
+          },
+          "workers": [
+            {
+              "name": "拓荒者 B",
+              "hp": 90,
+              "hunger": 72.34866666664146,
+              "morale": 100,
+              "x": 67.21023861531621,
+              "y": 8.488668323649906,
+              "layerId": "surface",
+              "chunkX": 0,
+              "chunkY": 0,
+              "outpostTravel": null,
+              "crew": {
+                "id": "crew-d01tv1",
+                "role": "farmer",
+                "personality": "glutton",
+                "origin": "营地拓荒者",
+                "joinedDay": 1,
+                "palette": "moss",
+                "portrait": "colonist_farmer",
+                "events": [
+                  {
+                    "day": 1,
+                    "kind": "join",
+                    "text": "加入拓荒队"
+                  }
+                ]
+              },
+              "task": {
+                "id": "gather:resource:0,0:68,8",
+                "job": "gather",
+                "label": "采集",
+                "priority": 35,
+                "status": "active",
+                "reason": "目标已选，等待或重新规划路径",
+                "target": {
+                  "x": 68,
+                  "y": 8,
+                  "kind": "resource",
+                  "res": "vine",
+                  "chunkX": 0,
+                  "chunkY": 0
+                },
+                "reservation": "gather:resource:0,0:68,8"
+              },
+              "directive": {
+                "version": 1,
+                "mode": "auto",
+                "area": null,
+                "outpost": null,
+                "outpostMode": null,
+                "returnHome": false,
+                "noNight": false,
+                "rescue": "normal",
+                "care": "neutral"
+              },
+              "traits": {
+                "good": "farmer",
+                "bad": "glutton"
+              },
+              "sanity": 100,
+              "bonds": {
+                "拓荒者 A": 107.89999999999516
+              },
+              "grief": 0,
+              "hollow": false,
+              "grave": null,
+              "deathRecord": null,
+              "alive": true,
+              "downed": false,
+              "downT": 0,
+              "rescueWound": 0,
+              "rescueWoundT": 0,
+              "rescueState": "none",
+              "rescueBed": null,
+              "rescueRestT": 0,
+              "medicalState": "none",
+              "medicalClinic": null,
+              "medicalT": 0,
+              "tool": null,
+              "overwork": 0,
+              "shiftDay": 1
+            },
+            {
+              "name": "拓荒者 A",
+              "hp": 90,
+              "hunger": 0,
+              "morale": 100,
+              "x": 92.5,
+              "y": 36.5,
+              "layerId": "surface",
+              "chunkX": 0,
+              "chunkY": 0,
+              "outpostTravel": null,
+              "crew": {
+                "id": "crew-c630s4",
+                "role": "scholar",
+                "personality": "glutton",
+                "origin": "营地拓荒者",
+                "joinedDay": 1,
+                "palette": "violet",
+                "portrait": "colonist_scholar",
+                "events": [
+                  {
+                    "day": 1,
+                    "kind": "join",
+                    "text": "加入拓荒队"
+                  },
+                  {
+                    "day": 1,
+                    "kind": "outpostArrival",
+                    "text": "抵达前哨",
+                    "chunkX": 1,
+                    "chunkY": 0,
+                    "command": 1
+                  },
+                  {
+                    "day": 2,
+                    "kind": "outpostStop",
+                    "text": "缺粮，采掘暂停",
+                    "chunkX": 1,
+                    "chunkY": 0,
+                    "command": 1,
+                    "reason": "food"
+                  },
+                  {
+                    "day": 3,
+                    "kind": "outpostStop",
+                    "text": "缺粮，采掘暂停",
+                    "chunkX": 1,
+                    "chunkY": 0,
+                    "command": 1,
+                    "reason": "food"
+                  },
+                  {
+                    "day": 3,
+                    "kind": "outpostReturn",
+                    "text": "已回到营地",
+                    "chunkX": 0,
+                    "chunkY": 0,
+                    "command": 2
+                  }
+                ],
+                "dispatchMemory": {
+                  "command": 2,
+                  "recorded": [
+                    "outpostReturn"
+                  ],
+                  "stopDay": 3,
+                  "stopKeys": [
+                    "1,0:food"
+                  ]
+                }
+              },
+              "task": {
+                "id": "idle:crew-c630s4",
+                "job": "idle",
+                "label": "待命",
+                "priority": 0,
+                "status": "idle",
+                "reason": "已回到营地",
+                "target": null,
+                "reservation": null
+              },
+              "directive": {
+                "version": 1,
+                "mode": "auto",
+                "area": null,
+                "outpost": null,
+                "outpostMode": null,
+                "returnHome": false,
+                "noNight": false,
+                "rescue": "normal",
+                "care": "neutral"
+              },
+              "traits": {
+                "good": "scholar",
+                "bad": "glutton"
+              },
+              "sanity": 100,
+              "bonds": {
+                "拓荒者 B": 107.89999999999516
+              },
+              "grief": 0,
+              "hollow": false,
+              "grave": null,
+              "deathRecord": null,
+              "alive": true,
+              "downed": false,
+              "downT": 0,
+              "rescueWound": 0,
+              "rescueWoundT": 0,
+              "rescueState": "none",
+              "rescueBed": null,
+              "rescueRestT": 0,
+              "medicalState": "none",
+              "medicalClinic": null,
+              "medicalT": 0,
+              "tool": "pick",
+              "overwork": 0,
+              "shiftDay": 1
+            }
+          ]
+        }
+      },
+      {
+        "at": "2026-10-06T09:09:12.473Z",
+        "source": {
+          "seed": 4242,
+          "diff": "normal",
+          "resourceInjection": false,
+          "teleport": false,
+          "syntheticGameInput": false,
+          "codeFingerprint": "a50829fe",
+          "sourceFiles": 95,
+          "version": "0.8.0-alpha.1"
+        },
+        "hash": "4f2d0bc0",
+        "inputs": 83,
+        "snapshot": {
+          "seed": 4242,
+          "day": 1,
+          "t": 315.4000000000418,
+          "spawnT": 0,
+          "nightSpawnDay": 0,
+          "nightSpawnBudget": 0,
+          "nightSpawnUsed": 0,
+          "noSpawnT": 0,
+          "wasTide": false,
+          "wasDawn": false,
+          "nightLightPressure": 0,
+          "nightChallengeMul": 1,
+          "firstSlice": {
+            "version": 1,
+            "active": true,
+            "phase": "light",
+            "startedDay": 1,
+            "startedT": 96.33333333332915,
+            "flags": {
+              "wake": true,
+              "gather": true,
+              "firstLight": true
+            },
+            "history": [
+              {
+                "phase": "wake",
+                "day": 1,
+                "t": 0
+              },
+              {
+                "phase": "gather",
+                "day": 1,
+                "t": 99.79999999999562
+              },
+              {
+                "phase": "light",
+                "day": 1,
+                "t": 169.2000000000268
+              }
+            ],
+            "choice": null,
+            "metrics": {
+              "duskLamps": 0,
+              "tidePressure": 0,
+              "tideChallengeMul": 1,
+              "aftermathBlight": 0,
+              "expeditionCx": 0,
+              "expeditionCy": 0,
+              "expeditionDay": 0,
+              "returnDay": 0
+            }
+          },
+          "reviveCount": 0,
+          "bossSpawnedThisNight": false,
+          "rescue": null,
+          "lastSealDay": 0,
+          "diff": "normal",
+          "px": 3.666666666666667,
+          "py": 36.5,
+          "res": {
+            "ore": 175,
+            "vine": 126,
+            "fuel": 1,
+            "data": 0,
+            "core": 0,
+            "food": 3,
+            "night": 0,
+            "stone": 0,
+            "coal": 0,
+            "pick": 0
+          },
+          "kills": 0,
+          "playerHp": 100,
+          "playerMaxHp": 100,
+          "playerHunger": 79.4711000000075,
+          "playerInjury": 0,
+          "pulseMul": 1,
+          "bossTier": 0,
+          "milestone": {
+            "bossDefeated": false,
+            "bossDay": 7,
+            "clearedDay": 0
+          },
+          "resonance": {
+            "version": 2,
+            "trial": {
+              "siteId": "first",
+              "status": "idle",
+              "targetDay": null,
+              "activeDay": null,
+              "attempts": 0,
+              "result": null,
+              "failureReason": null,
+              "themeId": null,
+              "lightPressure": null,
+              "challengeMul": null,
+              "completedDay": null
+            },
+            "sites": {
+              "first": {
+                "id": "first",
+                "status": "locked",
+                "chunkX": 1,
+                "chunkY": 0,
+                "x": null,
+                "y": null,
+                "completedDay": null,
+                "trial": {
+                  "siteId": "first",
+                  "status": "idle",
+                  "targetDay": null,
+                  "activeDay": null,
+                  "attempts": 0,
+                  "result": null,
+                  "failureReason": null,
+                  "themeId": null,
+                  "lightPressure": null,
+                  "challengeMul": null,
+                  "completedDay": null
+                }
+              },
+              "second": {
+                "id": "second",
+                "status": "locked",
+                "chunkX": 3,
+                "chunkY": 0,
+                "x": null,
+                "y": null,
+                "completedDay": null,
+                "trial": null
+              },
+              "third": {
+                "id": "third",
+                "status": "locked",
+                "chunkX": 0,
+                "chunkY": 0,
+                "x": null,
+                "y": null,
+                "completedDay": null,
+                "trial": null
+              }
+            }
+          },
+          "runStats": {
+            "version": 1,
+            "maxLightPressure": 0,
+            "nightHarvests": 0,
+            "rescues": 1,
+            "hollowings": 0,
+            "soothings": 0,
+            "workerDeaths": 0,
+            "revivals": 0
+          },
+          "nightOutcomes": {
+            "version": 1,
+            "knownSinceDay": 1,
+            "history": []
+          },
+          "ending": null,
+          "research": {
+            "unlocked": {}
+          },
+          "layerId": "surface",
+          "chunkX": 1,
+          "chunkY": 0,
+          "equip": {
+            "held": "pick"
+          },
+          "buildings": [
+            {
+              "type": "store",
+              "x": 4,
+              "y": 37,
+              "hp": 60,
+              "fuel": 0,
+              "burnT": 0,
+              "growth": 0,
+              "level": 1,
+              "site": 0,
+              "work": 0,
+              "stock": {
+                "food": 3,
+                "fuel": 1,
+                "pick": 0
+              },
+              "craft": null,
+              "prog": 0,
+              "made": 0,
+              "off": 0,
+              "open": null,
+              "recipe": null,
+              "fireMat": null,
+              "mods": null,
+              "natural": 0,
+              "entry": 0,
+              "mounted": null,
+              "resonanceSiteId": null
+            },
+            {
+              "type": "lamp",
+              "x": 4,
+              "y": 35,
+              "hp": null,
+              "fuel": 23,
+              "burnT": 17.40000000000211,
+              "growth": 0,
+              "level": 1,
+              "site": 0,
+              "work": 0,
+              "stock": null,
+              "craft": null,
+              "prog": 0,
+              "made": 0,
+              "off": 0,
+              "open": null,
+              "recipe": null,
+              "fireMat": null,
+              "mods": null,
+              "natural": 0,
+              "entry": 0,
+              "mounted": null,
+              "resonanceSiteId": null
+            }
+          ],
+          "chunks": [
+            {
+              "x": 0,
+              "y": 0,
+              "biome": "tundra",
+              "buildings": [
+                {
+                  "type": "shaft",
+                  "x": 70,
+                  "y": 54,
+                  "hp": 140,
+                  "fuel": 0,
+                  "burnT": 0,
+                  "growth": 0,
+                  "level": 1,
+                  "site": 0,
+                  "work": 0,
+                  "stock": null,
+                  "craft": null,
+                  "prog": 0,
+                  "made": 0,
+                  "off": 0,
+                  "open": null,
+                  "recipe": null,
+                  "fireMat": null,
+                  "mods": null,
+                  "natural": 1,
+                  "entry": 0,
+                  "mounted": null,
+                  "resonanceSiteId": null
+                }
+              ],
+              "beacons": [
+                {
+                  "x": 45,
+                  "y": 36,
+                  "power": 9,
+                  "radius": 7.5,
+                  "hp": 300,
+                  "maxHp": 300,
+                  "stock": {
+                    "ore": 110,
+                    "vine": 0,
+                    "fuel": 0,
+                    "food": 0,
+                    "pick": 0
+                  }
+                },
+                {
+                  "x": 51,
+                  "y": 36,
+                  "power": 9,
+                  "radius": 7.5,
+                  "hp": 300,
+                  "maxHp": 300,
+                  "stock": {
+                    "vine": 126,
+                    "ore": 65
+                  }
+                }
+              ],
+              "enemies": [],
+              "nodes": [
+                560,
+                5,
+                655,
+                5,
+                656,
+                5,
+                657,
+                5,
+                669,
+                4,
+                750,
+                5,
+                751,
+                5,
+                752,
+                5,
+                753,
+                5,
+                754,
+                5,
+                764,
+                4,
+                765,
+                4,
+                766,
+                4,
+                847,
+                5,
+                848,
+                5,
+                849,
+                5,
+                861,
+                4,
+                933,
+                2,
+                944,
+                5,
+                1028,
+                4,
+                1123,
+                4,
+                1148,
+                4,
+                1224,
+                4,
+                1243,
+                4,
+                1244,
+                4,
+                1245,
+                4,
+                1319,
+                4,
+                1320,
+                4,
+                1321,
+                4,
+                1338,
+                4,
+                1339,
+                4,
+                1340,
+                4,
+                1341,
+                4,
+                1342,
+                4,
+                1414,
+                4,
+                1415,
+                4,
+                1416,
+                4,
+                1417,
+                4,
+                1418,
+                4,
+                1435,
+                4,
+                1436,
+                4,
+                1437,
+                4,
+                1511,
+                4,
+                1512,
+                4,
+                1513,
+                4,
+                1528,
+                4,
+                1532,
+                4,
+                1608,
+                4,
+                1623,
+                4,
+                1624,
+                4,
+                1625,
+                4,
+                1718,
+                4,
+                1719,
+                4,
+                1720,
+                4,
+                1721,
+                4,
+                1722,
+                4,
+                1815,
+                4,
+                1816,
+                4,
+                1817,
+                4,
+                1912,
+                4,
+                2486,
+                5,
+                2581,
+                5,
+                2582,
+                5,
+                2583,
+                5,
+                2678,
+                5,
+                2767,
+                4,
+                2862,
+                4,
+                2863,
+                4,
+                2864,
+                4,
+                2957,
+                4,
+                2958,
+                4,
+                2959,
+                4,
+                2960,
+                4,
+                2961,
+                4,
+                3054,
+                4,
+                3055,
+                4,
+                3056,
+                4,
+                4103,
+                3,
+                4696,
+                3,
+                5512,
+                3,
+                6532,
+                5,
+                6627,
+                5,
+                6628,
+                5,
+                6629,
+                5,
+                6724,
+                5
+              ],
+              "tileDiffs": [
+                739,
+                0,
+                834,
+                0,
+                835,
+                0,
+                836,
+                0,
+                929,
+                0,
+                930,
+                0,
+                931,
+                0,
+                932,
+                0,
+                1026,
+                0,
+                1027,
+                0,
+                2080,
+                0,
+                2175,
+                0,
+                2176,
+                0,
+                2177,
+                0,
+                2270,
+                0,
+                2271,
+                0,
+                2272,
+                0,
+                2273,
+                0,
+                2274,
+                0,
+                2367,
+                0,
+                2368,
+                0,
+                2369,
+                0,
+                2464,
+                0,
+                3151,
+                0,
+                4076,
+                0,
+                4077,
+                0,
+                4078,
+                0,
+                4079,
+                0,
+                4080,
+                0,
+                4173,
+                0,
+                4174,
+                0,
+                4175,
+                0,
+                4270,
+                0,
+                4288,
+                0,
+                4383,
+                0,
+                4384,
+                0,
+                4385,
+                0,
+                4480,
+                0,
+                4653,
+                0,
+                4748,
+                0,
+                4749,
+                0,
+                4750,
+                0,
+                4843,
+                0,
+                4844,
+                0,
+                4845,
+                0,
+                4846,
+                0,
+                4847,
+                0,
+                4940,
+                0,
+                4941,
+                0,
+                4942,
+                0,
+                5037,
+                0,
+                5643,
+                0,
+                5738,
+                0,
+                5739,
+                0,
+                5740,
+                0,
+                5833,
+                0,
+                5834,
+                0,
+                5835,
+                0,
+                5836,
+                0,
+                5837,
+                0,
+                5930,
+                0,
+                5931,
+                0,
+                5932,
+                0,
+                6027,
+                0
+              ],
+              "blight": [],
+              "fronts": [],
+              "patches": [
+                {
+                  "x": 80,
+                  "y": 6,
+                  "kind": "ore",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 8.616666666666498
+                },
+                {
+                  "x": 78,
+                  "y": 7,
+                  "kind": "ore",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 8.616666666666498
+                },
+                {
+                  "x": 80,
+                  "y": 7,
+                  "kind": "ore",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 8.616666666666498
+                },
+                {
+                  "x": 82,
+                  "y": 7,
+                  "kind": "ore",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 8.616666666666498
+                },
+                {
+                  "x": 64,
+                  "y": 23,
+                  "kind": "ore",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 8.616666666666498
+                },
+                {
+                  "x": 47,
+                  "y": 42,
+                  "kind": "ore",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 8.616666666666498
+                },
+                {
+                  "x": 48,
+                  "y": 42,
+                  "kind": "ore",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 8.616666666666498
+                },
+                {
+                  "x": 46,
+                  "y": 44,
+                  "kind": "ore",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 8.616666666666498
+                },
+                {
+                  "x": 44,
+                  "y": 50,
+                  "kind": "ore",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 8.616666666666498
+                }
+              ],
+              "creatures": [
+                {
+                  "kind": "moth",
+                  "x": 80.5,
+                  "y": 6.5,
+                  "state": "forage",
+                  "t": 0.8000000000000008,
+                  "alive": true
+                },
+                {
+                  "kind": "moth",
+                  "x": 78.5,
+                  "y": 7.5,
+                  "state": "forage",
+                  "t": 0.8000000000000008,
+                  "alive": true
+                }
+              ],
+              "outpost": {
+                "nextT": 12,
+                "ticks": 0,
+                "lightPressure": 0,
+                "frontDebt": 0,
+                "lastEcology": {},
+                "alerts": [],
+                "lastYield": {},
+                "lastNeeds": {},
+                "lastReason": "等待有人驻守"
+              },
+              "nightops": {
+                "day": 0,
+                "tideOn": false,
+                "blooms": [
+                  {
+                    "x": 45,
+                    "y": 12,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 49,
+                    "y": 26,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 59,
+                    "y": 19,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 32,
+                    "y": 22,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 42,
+                    "y": 48,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 58,
+                    "y": 39,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  }
+                ],
+                "vents": [
+                  {
+                    "x": 58,
+                    "y": 46,
+                    "t": 12,
+                    "burst": 0
+                  },
+                  {
+                    "x": 47,
+                    "y": 22,
+                    "t": 23,
+                    "burst": 0
+                  }
+                ]
+              }
+            },
+            {
+              "x": 1,
+              "y": 0,
+              "biome": "vineMist",
+              "buildings": [
+                {
+                  "type": "store",
+                  "x": 4,
+                  "y": 37,
+                  "hp": 60,
+                  "fuel": 0,
+                  "burnT": 0,
+                  "growth": 0,
+                  "level": 1,
+                  "site": 0,
+                  "work": 0,
+                  "stock": {
+                    "food": 3,
+                    "fuel": 1,
+                    "pick": 0
+                  },
+                  "craft": null,
+                  "prog": 0,
+                  "made": 0,
+                  "off": 0,
+                  "open": null,
+                  "recipe": null,
+                  "fireMat": null,
+                  "mods": null,
+                  "natural": 0,
+                  "entry": 0,
+                  "mounted": null,
+                  "resonanceSiteId": null
+                },
+                {
+                  "type": "lamp",
+                  "x": 4,
+                  "y": 35,
+                  "hp": null,
+                  "fuel": 23,
+                  "burnT": 17.40000000000211,
+                  "growth": 0,
+                  "level": 1,
+                  "site": 0,
+                  "work": 0,
+                  "stock": null,
+                  "craft": null,
+                  "prog": 0,
+                  "made": 0,
+                  "off": 0,
+                  "open": null,
+                  "recipe": null,
+                  "fireMat": null,
+                  "mods": null,
+                  "natural": 0,
+                  "entry": 0,
+                  "mounted": null,
+                  "resonanceSiteId": null
+                }
+              ],
+              "beacons": [],
+              "enemies": [],
+              "nodes": [
+                1068,
+                4,
+                1163,
+                4,
+                1164,
+                4,
+                1165,
+                4,
+                1260,
+                4,
+                1473,
+                4,
+                1568,
+                4,
+                1569,
+                4,
+                1570,
+                4,
+                1657,
+                5,
+                1663,
+                4,
+                1664,
+                4,
+                1665,
+                4,
+                1666,
+                4,
+                1667,
+                4,
+                1752,
+                5,
+                1753,
+                5,
+                1754,
+                5,
+                1760,
+                4,
+                1761,
+                4,
+                1762,
+                4,
+                1849,
+                5,
+                1857,
+                4,
+                2343,
+                5,
+                2424,
+                4,
+                2438,
+                5,
+                2439,
+                5,
+                2440,
+                5,
+                2460,
+                4,
+                2519,
+                4,
+                2520,
+                4,
+                2521,
+                4,
+                2533,
+                5,
+                2534,
+                5,
+                2535,
+                5,
+                2536,
+                5,
+                2537,
+                5,
+                2555,
+                4,
+                2556,
+                4,
+                2557,
+                4,
+                2614,
+                4,
+                2615,
+                4,
+                2616,
+                4,
+                2617,
+                4,
+                2618,
+                4,
+                2630,
+                5,
+                2631,
+                5,
+                2632,
+                5,
+                2652,
+                4,
+                2678,
+                3,
+                2711,
+                4,
+                2712,
+                4,
+                2713,
+                4,
+                2727,
+                5,
+                2808,
+                4,
+                2913,
+                4,
+                3008,
+                4,
+                3009,
+                4,
+                3010,
+                4,
+                3103,
+                4,
+                3104,
+                4,
+                3105,
+                4,
+                3106,
+                4,
+                3107,
+                4,
+                3200,
+                4,
+                3201,
+                4,
+                3202,
+                4,
+                3297,
+                4,
+                3402,
+                5,
+                3423,
+                4,
+                3518,
+                4,
+                3519,
+                4,
+                3520,
+                4,
+                3615,
+                4,
+                3893,
+                5,
+                3980,
+                4,
+                3988,
+                5,
+                3989,
+                5,
+                3990,
+                5,
+                4077,
+                4,
+                4078,
+                4,
+                4079,
+                4,
+                4083,
+                5,
+                4084,
+                5,
+                4085,
+                5,
+                4086,
+                5,
+                4087,
+                5,
+                4174,
+                4,
+                4180,
+                5,
+                4181,
+                5,
+                4182,
+                5,
+                4277,
+                5,
+                4441,
+                4,
+                4536,
+                4,
+                4537,
+                4,
+                4538,
+                4,
+                4570,
+                4,
+                4601,
+                4,
+                4633,
+                4,
+                4665,
+                4,
+                4666,
+                4,
+                4667,
+                4,
+                4672,
+                4,
+                4696,
+                4,
+                4697,
+                4,
+                4698,
+                4,
+                4762,
+                4,
+                4767,
+                4,
+                4768,
+                4,
+                4769,
+                4,
+                4793,
+                4,
+                4864,
+                4,
+                5010,
+                3,
+                5059,
+                4,
+                5154,
+                4,
+                5155,
+                4,
+                5156,
+                4,
+                5251,
+                4,
+                5324,
+                4,
+                5419,
+                4,
+                5420,
+                4,
+                5421,
+                4,
+                5514,
+                4,
+                5515,
+                4,
+                5516,
+                4,
+                5517,
+                4,
+                5518,
+                4,
+                5611,
+                4,
+                5612,
+                4,
+                5613,
+                4,
+                5708,
+                4,
+                5798,
+                3,
+                6211,
+                5,
+                6306,
+                5,
+                6307,
+                5,
+                6308,
+                5,
+                6401,
+                5,
+                6402,
+                5,
+                6403,
+                5,
+                6404,
+                5,
+                6405,
+                5,
+                6445,
+                4,
+                6498,
+                5,
+                6499,
+                5,
+                6500,
+                5,
+                6540,
+                4,
+                6541,
+                4,
+                6542,
+                4,
+                6595,
+                5,
+                6637,
+                4
+              ],
+              "tileDiffs": [],
+              "blight": [],
+              "fronts": [],
+              "patches": [
+                {
+                  "x": 33,
+                  "y": 19,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 9.099999999999856
+                },
+                {
+                  "x": 24,
+                  "y": 25,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 9.099999999999856
+                },
+                {
+                  "x": 60,
+                  "y": 25,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 9.099999999999856
+                },
+                {
+                  "x": 25,
+                  "y": 27,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 9.099999999999856
+                },
+                {
+                  "x": 26,
+                  "y": 27,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 9.099999999999856
+                },
+                {
+                  "x": 60,
+                  "y": 27,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 9.099999999999856
+                },
+                {
+                  "x": 34,
+                  "y": 31,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 9.099999999999856
+                },
+                {
+                  "x": 33,
+                  "y": 34,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 9.099999999999856
+                },
+                {
+                  "x": 47,
+                  "y": 42,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 9.099999999999856
+                },
+                {
+                  "x": 43,
+                  "y": 56,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 9.099999999999856
+                },
+                {
+                  "x": 44,
+                  "y": 56,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 9.099999999999856
+                },
+                {
+                  "x": 45,
+                  "y": 58,
+                  "kind": "vine",
+                  "amount": 3,
+                  "cap": 3,
+                  "stage": 1,
+                  "nextT": 9.099999999999856
+                }
+              ],
+              "creatures": [
+                {
+                  "kind": "moth",
+                  "x": 33.5,
+                  "y": 19.5,
+                  "state": "forage",
+                  "t": 1.3166666666666669,
+                  "alive": true
+                },
+                {
+                  "kind": "moth",
+                  "x": 24.5,
+                  "y": 25.5,
+                  "state": "forage",
+                  "t": 1.3166666666666669,
+                  "alive": true
+                }
+              ],
+              "outpost": {
+                "nextT": 9.183333333333193,
+                "ticks": 0,
+                "lightPressure": 0,
+                "frontDebt": 0,
+                "lastEcology": {},
+                "alerts": [
+                  {
+                    "id": "l4-controlled-rescue",
+                    "kind": "blight",
+                    "day": 1,
+                    "t": 189.00000000004255,
+                    "workerId": "crew-c630s4",
+                    "workerName": "拓荒者 A",
+                    "message": "受控验收险情",
+                    "status": "resolved",
+                    "rescuePending": false
+                  }
+                ],
+                "lastYield": {},
+                "lastNeeds": {},
+                "lastReason": "等待有人驻守"
+              },
+              "nightops": {
+                "day": 0,
+                "tideOn": false,
+                "blooms": [
+                  {
+                    "x": 35,
+                    "y": 31,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 29,
+                    "y": 27,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 49,
+                    "y": 47,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 66,
+                    "y": 49,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 58,
+                    "y": 26,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  },
+                  {
+                    "x": 50,
+                    "y": 52,
+                    "charges": 0,
+                    "alive": false,
+                    "born": -1
+                  }
+                ],
+                "vents": [
+                  {
+                    "x": 35,
+                    "y": 43,
+                    "t": 12,
+                    "burst": 0
+                  },
+                  {
+                    "x": 54,
+                    "y": 50,
+                    "t": 23,
+                    "burst": 0
+                  }
+                ]
+              }
+            }
+          ],
+          "activeEnemies": null,
+          "stores": {
+            "beacons": [],
+            "pack": {
+              "ore": 0,
+              "vine": 0,
+              "fuel": 0,
+              "food": 0
+            }
+          },
+          "blight": [],
+          "fronts": [],
+          "patches": [
+            {
+              "x": 33,
+              "y": 19,
+              "kind": "vine",
+              "amount": 3,
+              "cap": 3,
+              "stage": 1,
+              "nextT": 9.099999999999856
+            },
+            {
+              "x": 24,
+              "y": 25,
+              "kind": "vine",
+              "amount": 3,
+              "cap": 3,
+              "stage": 1,
+              "nextT": 9.099999999999856
+            },
+            {
+              "x": 60,
+              "y": 25,
+              "kind": "vine",
+              "amount": 3,
+              "cap": 3,
+              "stage": 1,
+              "nextT": 9.099999999999856
+            },
+            {
+              "x": 25,
+              "y": 27,
+              "kind": "vine",
+              "amount": 3,
+              "cap": 3,
+              "stage": 1,
+              "nextT": 9.099999999999856
+            },
+            {
+              "x": 26,
+              "y": 27,
+              "kind": "vine",
+              "amount": 3,
+              "cap": 3,
+              "stage": 1,
+              "nextT": 9.099999999999856
+            },
+            {
+              "x": 60,
+              "y": 27,
+              "kind": "vine",
+              "amount": 3,
+              "cap": 3,
+              "stage": 1,
+              "nextT": 9.099999999999856
+            },
+            {
+              "x": 34,
+              "y": 31,
+              "kind": "vine",
+              "amount": 3,
+              "cap": 3,
+              "stage": 1,
+              "nextT": 9.099999999999856
+            },
+            {
+              "x": 33,
+              "y": 34,
+              "kind": "vine",
+              "amount": 3,
+              "cap": 3,
+              "stage": 1,
+              "nextT": 9.099999999999856
+            },
+            {
+              "x": 47,
+              "y": 42,
+              "kind": "vine",
+              "amount": 3,
+              "cap": 3,
+              "stage": 1,
+              "nextT": 9.099999999999856
+            },
+            {
+              "x": 43,
+              "y": 56,
+              "kind": "vine",
+              "amount": 3,
+              "cap": 3,
+              "stage": 1,
+              "nextT": 9.099999999999856
+            },
+            {
+              "x": 44,
+              "y": 56,
+              "kind": "vine",
+              "amount": 3,
+              "cap": 3,
+              "stage": 1,
+              "nextT": 9.099999999999856
+            },
+            {
+              "x": 45,
+              "y": 58,
+              "kind": "vine",
+              "amount": 3,
+              "cap": 3,
+              "stage": 1,
+              "nextT": 9.099999999999856
+            }
+          ],
+          "creatures": [
+            {
+              "kind": "moth",
+              "x": 33.5,
+              "y": 19.5,
+              "state": "forage",
+              "t": 1.3166666666666669,
+              "alive": true
+            },
+            {
+              "kind": "moth",
+              "x": 24.5,
+              "y": 25.5,
+              "state": "forage",
+              "t": 1.3166666666666669,
+              "alive": true
+            }
+          ],
+          "relics": {},
+          "relicTiles": {},
+          "observed": {
+            "seep": 0
+          },
+          "body": {
+            "lava": 0
+          },
+          "graves": [],
+          "memorial": [],
+          "deathPack": null,
+          "mind": {
+            "day": 1,
+            "hollowed": 0,
+            "soothed": 0,
+            "bossSeen": -1
+          },
+          "seen": {
+            "fuelEmpty": true,
+            "noFood": true
+          },
+          "workers": [
+            {
+              "name": "拓荒者 A",
+              "hp": 90,
+              "hunger": 36.66399999997452,
+              "morale": 100,
+              "x": 2.8280668197151417,
+              "y": 36.5,
+              "layerId": "surface",
+              "chunkX": 1,
+              "chunkY": 0,
+              "outpostTravel": null,
+              "crew": {
+                "id": "crew-c630s4",
+                "role": "scholar",
+                "personality": "glutton",
+                "origin": "营地拓荒者",
+                "joinedDay": 1,
+                "palette": "violet",
+                "portrait": "colonist_scholar",
+                "events": [
+                  {
+                    "day": 1,
+                    "kind": "join",
+                    "text": "加入拓荒队"
+                  },
+                  {
+                    "day": 1,
+                    "kind": "outpostArrival",
+                    "text": "抵达前哨",
+                    "chunkX": 1,
+                    "chunkY": 0,
+                    "command": 1
+                  },
+                  {
+                    "day": 1,
+                    "kind": "down",
+                    "text": "倒地待救"
+                  },
+                  {
+                    "day": 1,
+                    "kind": "rescue",
+                    "text": "热食救回"
+                  }
+                ],
+                "dispatchMemory": {
+                  "command": 1,
+                  "recorded": [
+                    "outpostArrival"
+                  ],
+                  "stopDay": 0,
+                  "stopKeys": []
+                }
+              },
+              "task": {
+                "id": "eat:crew-c630s4",
+                "job": "eat",
+                "label": "进食",
+                "priority": 88,
+                "status": "blocked",
+                "reason": "附近没有可执行资源",
+                "target": null,
+                "reservation": null
+              },
+              "directive": {
+                "version": 1,
+                "mode": "auto",
+                "area": null,
+                "outpost": {
+                  "x": 1,
+                  "y": 0
+                },
+                "outpostMode": "gather",
+                "returnHome": false,
+                "noNight": false,
+                "rescue": "normal",
+                "care": "neutral"
+              },
+              "traits": {
+                "good": "scholar",
+                "bad": "glutton"
+              },
+              "sanity": 100,
+              "bonds": {
+                "拓荒者 B": 107.89999999999516
+              },
+              "grief": 0,
+              "hollow": false,
+              "grave": null,
+              "deathRecord": null,
+              "alive": true,
+              "downed": false,
+              "downT": 0,
+              "rescueWound": 0,
+              "rescueWoundT": 0,
+              "rescueState": "none",
+              "rescueBed": null,
+              "rescueRestT": 0,
+              "medicalState": "none",
+              "medicalClinic": null,
+              "medicalT": 0,
+              "tool": "pick",
+              "overwork": 0,
+              "shiftDay": 1
+            },
+            {
+              "name": "拓荒者 B",
+              "hp": 90,
+              "hunger": 70.88399999997421,
+              "morale": 100,
+              "x": 68.3506258477713,
+              "y": 8.992349510345422,
+              "layerId": "surface",
+              "chunkX": 0,
+              "chunkY": 0,
+              "outpostTravel": null,
+              "crew": {
+                "id": "crew-d01tv1",
+                "role": "farmer",
+                "personality": "glutton",
+                "origin": "营地拓荒者",
+                "joinedDay": 1,
+                "palette": "moss",
+                "portrait": "colonist_farmer",
+                "events": [
+                  {
+                    "day": 1,
+                    "kind": "join",
+                    "text": "加入拓荒队"
+                  }
+                ]
+              },
+              "task": {
+                "id": "gather:resource:0,0:69,9",
+                "job": "gather",
+                "label": "采集",
+                "priority": 35,
+                "status": "active",
+                "reason": "目标已选，等待或重新规划路径",
+                "target": {
+                  "x": 69,
+                  "y": 9,
+                  "kind": "resource",
+                  "res": "vine",
+                  "chunkX": 0,
+                  "chunkY": 0
+                },
+                "reservation": "gather:resource:0,0:69,9"
+              },
+              "directive": {
+                "version": 1,
+                "mode": "auto",
+                "area": null,
+                "outpost": null,
+                "outpostMode": null,
+                "returnHome": false,
+                "noNight": false,
+                "rescue": "normal",
+                "care": "neutral"
+              },
+              "traits": {
+                "good": "farmer",
+                "bad": "glutton"
+              },
+              "sanity": 100,
+              "bonds": {
+                "拓荒者 A": 107.89999999999516
+              },
+              "grief": 0,
+              "hollow": false,
+              "grave": null,
+              "deathRecord": null,
+              "alive": true,
+              "downed": false,
+              "downT": 0,
+              "rescueWound": 0,
+              "rescueWoundT": 0,
+              "rescueState": "none",
+              "rescueBed": null,
+              "rescueRestT": 0,
+              "medicalState": "none",
+              "medicalClinic": null,
+              "medicalT": 0,
+              "tool": null,
+              "overwork": 0,
+              "shiftDay": 1
+            }
+          ]
+        }
+      }
+    ],
+    "notOriginalInputLog": true
+  },
+  "fix": {
+    "fingerprint": "cf354bf8",
+    "fresh": {
+      "beforeHash": "9b410cf7",
+      "afterHash": "9b410cf7",
+      "differences": []
+    },
+    "legacy": {
+      "controlledFields": [
+        "chunk.outpost.alerts (one old-format blight alert)"
+      ],
+      "workerBefore": {
+        "id": "crew-c630s4",
+        "hp": 90,
+        "downed": false
+      },
+      "workerAfter": {
+        "id": "crew-c630s4",
+        "hp": 0,
+        "downed": true
+      },
+      "first": {
+        "alerts": [
+          {
+            "id": "l4-legacy-diagnostic",
+            "kind": "blight",
+            "day": 1,
+            "t": 0,
+            "workerId": "crew-c630s4",
+            "workerName": "",
+            "message": "受控旧告警",
+            "status": "resolved",
+            "rescuePending": false
+          }
+        ],
+        "nextT": 12,
+        "ticks": 0,
+        "lastYield": {},
+        "lastNeeds": {},
+        "lightPressure": 0,
+        "frontDebt": 0,
+        "lastEcology": {},
+        "lastReason": "等待有人驻守"
+      },
+      "second": {
+        "alerts": [
+          {
+            "id": "l4-legacy-diagnostic",
+            "kind": "blight",
+            "day": 1,
+            "t": 0,
+            "workerId": "crew-c630s4",
+            "workerName": "",
+            "message": "受控旧告警",
+            "status": "resolved",
+            "rescuePending": false
+          }
+        ],
+        "nextT": 12,
+        "ticks": 0,
+        "lastYield": {},
+        "lastNeeds": {},
+        "lightPressure": 0,
+        "frontDebt": 0,
+        "lastEcology": {},
+        "lastReason": "等待有人驻守"
+      },
+      "secondBindUnchanged": true
+    },
+    "checks": [
+      {
+        "ok": true,
+        "ran": 86,
+        "ms": 113,
+        "fails": [],
+        "knownCount": 0,
+        "baselineSize": 0
+      },
+      {
+        "ok": true,
+        "ran": 86,
+        "ms": 91.1,
+        "fails": [],
+        "knownCount": 0,
+        "baselineSize": 0
+      },
+      {
+        "label": "new",
+        "ok": true,
+        "ran": 86,
+        "ms": 67.8,
+        "fails": [],
+        "knownCount": 0,
+        "baselineSize": 0
+      },
+      {
+        "label": "loaded",
+        "ok": true,
+        "ran": 86,
+        "ms": 63.4,
+        "fails": [],
+        "knownCount": 0,
+        "baselineSize": 0
+      },
+      {
+        "label": "replay",
+        "ok": true,
+        "ran": 86,
+        "ms": 81.6,
+        "fails": [],
+        "knownCount": 0,
+        "baselineSize": 0
+      }
+    ],
+    "source": {
+      "ok": true,
+      "files": 95,
+      "fails": [],
+      "handles": [
+        "js/dev/selftest.js: __checkpoint __restoreCheckpoint",
+        "js/main.js: __abilities __ambient __ambientBeds __assets __audio __blight __blightDbg __bodies __body __camPan __carry __checkpoint __chunk __click __combat __cost __crew __cycleCat __demolish __descend __dps __eat __eco __endgameCheckpoint __ending __equip __expedition __finish __fire __focus __forecast __give __goto __grantRelic __graves __held __hint __hot __hoverInfo __keys __knowSeen __knowledge __lab __lamp __load __loadSlot __mind __move __music __musicDir __musicTick __newGame __observe __outposts __overlap __path __patrolHit __pause __perf __perfTable __place __prep __quick __rclick __recovery __recruit __refineCheck __relics __reload __replay __rescue __research __resolve __resonance __restoreCheckpoint __revive __saveSlot __screenOf __screens __seal __sect __seen __selectHot __series __settings __sfx __sfxBank __showEnding __sites __slice __soothe __spawn __state __step __steps __store __stress __survival __take __tasks __toast __undo __undoInfo __unequip __upgrade __visual __wave __wipe __zoom"
+      ],
+      "handleFiles": 2
+    },
+    "watch": {
+      "steps": 1200,
+      "interval": 20,
+      "log": [
+        "共 0 类"
+      ]
+    },
+    "replay": {
+      "seed": 4242,
+      "diff": "normal",
+      "policy": "home",
+      "days": 3,
+      "ranDays": 4,
+      "steps": 72001,
+      "secs": 1200,
+      "ms": 3206,
+      "deaths": 0,
+      "minHp": 54,
+      "minHpDay": 3,
+      "workersStart": 2,
+      "workersEnd": 2,
+      "gravesEnd": 0,
+      "blightEnd": 2,
+      "blightL3End": 0,
+      "litEnd": 2,
+      "towersEnd": 1,
+      "fuelEnd": 58,
+      "foodEnd": 45,
+      "kills": 118,
+      "sealDay": 0,
+      "lightPressureMax": 18,
+      "challengeMulMax": 1.48,
+      "chunksVisited": [
+        "0,0"
+      ],
+      "nights": [
+        {
+          "day": 1,
+          "tide": 1,
+          "bossNight": false,
+          "themeId": "swarm",
+          "trialStatus": "idle",
+          "trialSiteId": "first",
+          "spawnCap": 26,
+          "forecastIntervals": 22,
+          "lightPressure": 18,
+          "challengeMul": 1.48,
+          "spawned": 29,
+          "waveSpawned": 20,
+          "ventSpawned": 9,
+          "nonWaveSpawned": 9,
+          "bossSpawns": 0,
+          "sourceCounts": {
+            "wave": 20,
+            "vent": 9
+          },
+          "kindCounts": {
+            "bud": 29
+          },
+          "waveKindCounts": {
+            "bud": 20
+          },
+          "birthFrameCounts": {
+            "wave": {
+              "1": 16,
+              "2": 2
+            },
+            "vent": {
+              "4": 1,
+              "5": 1
+            }
+          },
+          "waveBatchCounts": {
+            "1": 16,
+            "2": 2
+          },
+          "peakAlive": 6,
+          "spawnBudget": 29,
+          "budgetUsed": 29,
+          "ended": "dawn",
+          "endAt": {
+            "day": 1,
+            "t": 380.02
+          }
+        },
+        {
+          "day": 2,
+          "tide": 2,
+          "bossNight": false,
+          "themeId": "moth",
+          "trialStatus": "idle",
+          "trialSiteId": "first",
+          "spawnCap": 32,
+          "forecastIntervals": 24,
+          "lightPressure": 18,
+          "challengeMul": 1.48,
+          "spawned": 32,
+          "waveSpawned": 20,
+          "ventSpawned": 12,
+          "nonWaveSpawned": 12,
+          "bossSpawns": 0,
+          "sourceCounts": {
+            "wave": 20,
+            "vent": 12
+          },
+          "kindCounts": {
+            "bud": 21,
+            "spitter": 4,
+            "moth": 7
+          },
+          "waveKindCounts": {
+            "bud": 9,
+            "spitter": 4,
+            "moth": 7
+          },
+          "birthFrameCounts": {
+            "wave": {
+              "1": 16,
+              "2": 2
+            },
+            "vent": {
+              "4": 3
+            }
+          },
+          "waveBatchCounts": {
+            "1": 16,
+            "2": 2
+          },
+          "peakAlive": 8,
+          "spawnBudget": 32,
+          "budgetUsed": 32,
+          "ended": "dawn",
+          "endAt": {
+            "day": 2,
+            "t": 380.02
+          }
+        },
+        {
+          "day": 3,
+          "tide": 3,
+          "bossNight": false,
+          "themeId": "shell",
+          "trialStatus": "idle",
+          "trialSiteId": "first",
+          "spawnCap": 38,
+          "forecastIntervals": 25,
+          "lightPressure": 18,
+          "challengeMul": 1.48,
+          "spawned": 58,
+          "waveSpawned": 50,
+          "ventSpawned": 8,
+          "nonWaveSpawned": 8,
+          "bossSpawns": 0,
+          "sourceCounts": {
+            "wave": 50,
+            "vent": 8
+          },
+          "kindCounts": {
+            "shell": 22,
+            "moth": 6,
+            "bud": 23,
+            "charger": 7
+          },
+          "waveKindCounts": {
+            "shell": 22,
+            "moth": 6,
+            "bud": 15,
+            "charger": 7
+          },
+          "birthFrameCounts": {
+            "wave": {
+              "2": 16,
+              "3": 6
+            },
+            "vent": {
+              "3": 1,
+              "5": 1
+            }
+          },
+          "waveBatchCounts": {
+            "2": 16,
+            "3": 6
+          },
+          "peakAlive": 10,
+          "spawnBudget": 58,
+          "budgetUsed": 58,
+          "ended": "dawn",
+          "endAt": {
+            "day": 3,
+            "t": 380.02
+          }
+        }
+      ],
+      "expedition": null,
+      "stats": {
+        "tryFurnace": 1,
+        "okFurnace": 1,
+        "tryLamp": 3,
+        "addFire": 175,
+        "craft": 180,
+        "craftFail": 3427,
+        "tryTower": 6,
+        "noTowerSpot": 5,
+        "okLamp": 2,
+        "okTower": 1,
+        "tryFarm": 2,
+        "okFarm": 2,
+        "harvest": 21,
+        "refuel": 254,
+        "pulse": 77
+      },
+      "rows": [
+        {
+          "day": 1,
+          "hp": 100,
+          "maxHp": 100,
+          "kills": 0,
+          "ore": 4,
+          "vine": 4,
+          "fuel": 2,
+          "food": 6,
+          "lamps": 0,
+          "lit": 0,
+          "towers": 0,
+          "farms": 0,
+          "workers": 2,
+          "hollow": 0,
+          "graves": 0,
+          "blight": 0,
+          "blightL3": 0,
+          "enemies": 0,
+          "sealUsed": 0,
+          "lightPressure": 0,
+          "challengeMul": 1,
+          "chunkX": 0,
+          "chunkY": 0
+        },
+        {
+          "day": 2,
+          "hp": 100,
+          "maxHp": 100,
+          "kills": 28,
+          "ore": 0,
+          "vine": 135,
+          "fuel": 311,
+          "food": 12,
+          "lamps": 2,
+          "lit": 2,
+          "towers": 1,
+          "farms": 2,
+          "workers": 2,
+          "hollow": 0,
+          "graves": 0,
+          "blight": 1,
+          "blightL3": 0,
+          "enemies": 0,
+          "sealUsed": 0,
+          "lightPressure": 18,
+          "challengeMul": 1.48,
+          "chunkX": 0,
+          "chunkY": 0,
+          "deaths": 0,
+          "atSecs": 400
+        },
+        {
+          "day": 3,
+          "hp": 84,
+          "maxHp": 100,
+          "kills": 60,
+          "ore": 0,
+          "vine": 91,
+          "fuel": 207,
+          "food": 30,
+          "lamps": 2,
+          "lit": 2,
+          "towers": 1,
+          "farms": 2,
+          "workers": 2,
+          "hollow": 0,
+          "graves": 0,
+          "blight": 2,
+          "blightL3": 0,
+          "enemies": 0,
+          "sealUsed": 0,
+          "lightPressure": 18,
+          "challengeMul": 1.48,
+          "chunkX": 0,
+          "chunkY": 0,
+          "deaths": 0,
+          "atSecs": 800
+        },
+        {
+          "day": 4,
+          "hp": 54,
+          "maxHp": 100,
+          "kills": 118,
+          "ore": 0,
+          "vine": 47,
+          "fuel": 58,
+          "food": 45,
+          "lamps": 2,
+          "lit": 2,
+          "towers": 1,
+          "farms": 2,
+          "workers": 2,
+          "hollow": 0,
+          "graves": 0,
+          "blight": 2,
+          "blightL3": 0,
+          "enemies": 0,
+          "sealUsed": 0,
+          "lightPressure": 18,
+          "challengeMul": 1.48,
+          "chunkX": 0,
+          "chunkY": 0,
+          "deaths": 0,
+          "atSecs": 1200
+        }
+      ]
+    },
+    "storage": {
+      "deep-light-saves-v2": true,
+      "deep-light-settings-v1": true,
+      "deep-light-ui-v1": true
+    }
+  },
+  "ui": {
+    "layouts": [
+      {
+        "width": 1280,
+        "height": 720,
+        "panel": {
+          "left": 426.66668701171875,
+          "top": 184,
+          "right": 988.0000610351562,
+          "bottom": 488
+        },
+        "histories": 2,
+        "eventsEach": 12,
+        "scrollTop": 1190.6666259765625,
+        "scrollHeight": 1463,
+        "clientHeight": 273,
+        "focus": "采掘",
+        "focusPreserved": true,
+        "scrollPreserved": true,
+        "noHorizontalClip": true,
+        "inputs": 6
+      },
+      {
+        "width": 1920,
+        "height": 1080,
+        "panel": {
+          "left": 1106.666748046875,
+          "top": 124,
+          "right": 1668.0001220703125,
+          "bottom": 908
+        },
+        "histories": 2,
+        "eventsEach": 12,
+        "scrollTop": 710.6666870117188,
+        "scrollHeight": 1463,
+        "clientHeight": 753,
+        "focus": "采掘",
+        "focusPreserved": true,
+        "scrollPreserved": true,
+        "noHorizontalClip": true,
+        "inputs": 9
+      }
+    ],
+    "inputs": [
+      {
+        "type": "click",
+        "text": "查看补给",
+        "select": "crew-c630s4"
+      },
+      {
+        "type": "click",
+        "text": "查看全部经历 · 12/12",
+        "history": "crew-d01tv1"
+      },
+      {
+        "type": "click",
+        "text": "查看全部经历 · 12/12",
+        "history": "crew-c630s4"
+      },
+      {
+        "type": "key",
+        "key": "End",
+        "text": "查看全部经历 · 12/12"
+      },
+      {
+        "type": "key",
+        "key": "Tab",
+        "text": "查看全部经历 · 12/12"
+      },
+      {
+        "type": "key",
+        "key": "F8",
+        "text": "采掘"
+      },
+      {
+        "type": "key",
+        "key": "End",
+        "text": "查看全部经历 · 12/12"
+      },
+      {
+        "type": "key",
+        "key": "Tab",
+        "text": "查看全部经历 · 12/12"
+      },
+      {
+        "type": "key",
+        "key": "F8",
+        "text": "采掘"
+      },
+      {
+        "type": "key",
+        "key": "Home",
+        "text": "查看全部经历 · 12/12"
+      },
+      {
+        "type": "key",
+        "key": "Home",
+        "text": "查看全部经历 · 12/12"
+      }
+    ],
+    "scope": "controlled UI fixture; seeded 12-event histories are not natural expedition evidence",
+    "workerIds": [
+      "crew-d01tv1",
+      "crew-c630s4"
+    ],
+    "storage": {
+      "deep-light-saves-v2": true,
+      "deep-light-settings-v1": true,
+      "deep-light-ui-v1": true
+    }
+  },
+  "pressure": {
+    "events": [
+      {
+        "label": "production-fingerprint",
+        "data": {
+          "files": 95,
+          "hash": "cf354bf8"
+        }
+      },
+      {
+        "label": "menu",
+        "data": {
+          "ok": true,
+          "ran": 86,
+          "ms": 102.1,
+          "fails": [],
+          "knownCount": 0,
+          "baselineSize": 0
+        }
+      },
+      {
+        "label": "new-game",
+        "data": {
+          "ok": true,
+          "ran": 86,
+          "ms": 77.1,
+          "fails": [],
+          "knownCount": 0,
+          "baselineSize": 0
+        }
+      },
+      {
+        "label": "initial-dispatch",
+        "data": {
+          "capacity": 3,
+          "active": [
+            {
+              "x": 0,
+              "y": 0,
+              "id": "0,0",
+              "residents": 1
+            },
+            {
+              "x": 1,
+              "y": 0,
+              "id": "1,0",
+              "residents": 1
+            },
+            {
+              "x": 0,
+              "y": 1,
+              "id": "0,1",
+              "residents": 1
+            }
+          ],
+          "assignments": [
+            {
+              "id": "crew-b24m08",
+              "name": "拓荒者 E",
+              "current": {
+                "x": 0,
+                "y": 0
+              },
+              "target": {
+                "x": 2,
+                "y": 0
+              },
+              "mode": "gather",
+              "modeLabel": "采掘",
+              "returnHome": false,
+              "reason": "",
+              "status": "capacity",
+              "travelSec": 8,
+              "settlement": null
+            },
+            {
+              "id": "crew-c630s4",
+              "name": "拓荒者 A",
+              "current": {
+                "x": 1,
+                "y": 0
+              },
+              "target": {
+                "x": 1,
+                "y": 0
+              },
+              "mode": "gather",
+              "modeLabel": "采掘",
+              "returnHome": false,
+              "reason": "",
+              "status": "stationed",
+              "travelSec": 0,
+              "settlement": {
+                "ticks": 0,
+                "nextSec": 10,
+                "yield": {},
+                "needs": {},
+                "ecology": {},
+                "alerts": [],
+                "reason": "等待有人驻守"
+              }
+            },
+            {
+              "id": "crew-d01tv1",
+              "name": "拓荒者 B",
+              "current": {
+                "x": 0,
+                "y": 1
+              },
+              "target": {
+                "x": 0,
+                "y": 1
+              },
+              "mode": "gather",
+              "modeLabel": "采掘",
+              "returnHome": false,
+              "reason": "",
+              "status": "stationed",
+              "travelSec": 0,
+              "settlement": {
+                "ticks": 0,
+                "nextSec": 10,
+                "yield": {},
+                "needs": {},
+                "ecology": {},
+                "alerts": [],
+                "reason": "等待有人驻守"
+              }
+            }
+          ],
+          "counts": {
+            "assigned": 3,
+            "stationed": 2,
+            "traveling": 0,
+            "capacity": 1,
+            "pending": 0
+          }
+        }
+      },
+      {
+        "label": "three-active",
+        "data": {
+          "ok": true,
+          "ran": 86,
+          "ms": 82.3,
+          "fails": [],
+          "knownCount": 0,
+          "baselineSize": 0
+        }
+      },
+      {
+        "label": "roundtrip-after-load",
+        "data": {
+          "ok": true,
+          "ran": 86,
+          "ms": 93.1,
+          "fails": [],
+          "knownCount": 0,
+          "baselineSize": 0
+        }
+      },
+      {
+        "label": "capacity-freeze-resume",
+        "data": {
+          "initialActive": [
+            "0,0",
+            "1,0",
+            "0,1"
+          ],
+          "blockedFourth": true,
+          "ticksBefore": [
+            0,
+            0
+          ],
+          "ticksAfter": [
+            5,
+            5
+          ],
+          "frozenTicks": 5,
+          "noOfflineOutput": true,
+          "noCatchup": true,
+          "saveEqual": true,
+          "resumedPatchAmount": 1,
+          "initialPlayer": [
+            49,
+            36
+          ]
+        }
+      },
+      {
+        "label": "save-growth",
+        "data": [
+          {
+            "chunks": 1,
+            "bytes": 7948,
+            "snapshotMs": 0.8,
+            "chunkPayloadBytes": 2806
+          },
+          {
+            "chunks": 4,
+            "bytes": 15715,
+            "snapshotMs": 2.8,
+            "chunkPayloadBytes": 10573
+          },
+          {
+            "chunks": 8,
+            "bytes": 24824,
+            "snapshotMs": 0.6,
+            "chunkPayloadBytes": 19682
+          },
+          {
+            "chunks": 12,
+            "bytes": 34559,
+            "snapshotMs": 1.5,
+            "chunkPayloadBytes": 29417
+          },
+          {
+            "chunks": 24,
+            "bytes": 64943,
+            "snapshotMs": 1.8,
+            "chunkPayloadBytes": 59801
+          }
+        ]
+      },
+      {
+        "label": "single-chunk-night",
+        "data": {
+          "initial": {
+            "lamps": 40,
+            "enemies": 72,
+            "active": [
+              "0,0"
+            ],
+            "experiencesOpen": 2,
+            "eventsPerWorker": 12,
+            "supplyPanelOpen": true
+          },
+          "finalEnemies": 72,
+          "finalLamps": 40,
+          "measuredRaf": 241,
+          "elapsedMs": 1464.9000000357628,
+          "fps": 164.51634923483954,
+          "remoteTickBefore": 0,
+          "remoteTickAfter": 0,
+          "perf": {
+            "secs": 1.5,
+            "frames": 241,
+            "fps": 165,
+            "frameMs": 6.06,
+            "budget": {
+              "pctOf16ms": 12
+            },
+            "rows": [
+              {
+                "stage": "frame.total",
+                "calls": 241,
+                "perSec": 165,
+                "avgMs": 2.114,
+                "maxMs": 6.3,
+                "totalMs": 509.5,
+                "msPerFrame": 2.114
+              },
+              {
+                "stage": "draw",
+                "calls": 241,
+                "perSec": 165,
+                "avgMs": 1.445,
+                "maxMs": 2.8,
+                "totalMs": 348.3,
+                "msPerFrame": 1.445
+              },
+              {
+                "stage": "draw.total",
+                "calls": 241,
+                "perSec": 165,
+                "avgMs": 1.444,
+                "maxMs": 2.8,
+                "totalMs": 348.1,
+                "msPerFrame": 1.444
+              },
+              {
+                "stage": "frame.update",
+                "calls": 241,
+                "perSec": 165,
+                "avgMs": 0.632,
+                "maxMs": 4,
+                "totalMs": 152.2,
+                "msPerFrame": 0.632
+              },
+              {
+                "stage": "draw.tiles",
+                "calls": 241,
+                "perSec": 165,
+                "avgMs": 0.52,
+                "maxMs": 1.4,
+                "totalMs": 125.3,
+                "msPerFrame": 0.52
+              },
+              {
+                "stage": "draw.units",
+                "calls": 241,
+                "perSec": 165,
+                "avgMs": 0.387,
+                "maxMs": 0.9,
+                "totalMs": 93.3,
+                "msPerFrame": 0.387
+              },
+              {
+                "stage": "draw.minimap",
+                "calls": 241,
+                "perSec": 165,
+                "avgMs": 0.249,
+                "maxMs": 1.2,
+                "totalMs": 60,
+                "msPerFrame": 0.249
+              },
+              {
+                "stage": "sim.systems",
+                "calls": 88,
+                "perSec": 60.3,
+                "avgMs": 0.535,
+                "maxMs": 1.5,
+                "totalMs": 47.1,
+                "msPerFrame": 0.195
+              },
+              {
+                "stage": "sys.updateWorkers",
+                "calls": 88,
+                "perSec": 60.3,
+                "avgMs": 0.288,
+                "maxMs": 0.8,
+                "totalMs": 25.3,
+                "msPerFrame": 0.105
+              },
+              {
+                "stage": "draw.glow",
+                "calls": 241,
+                "perSec": 165,
+                "avgMs": 0.095,
+                "maxMs": 0.3,
+                "totalMs": 22.8,
+                "msPerFrame": 0.095
+              },
+              {
+                "stage": "draw.buildings",
+                "calls": 241,
+                "perSec": 165,
+                "avgMs": 0.085,
+                "maxMs": 0.5,
+                "totalMs": 20.6,
+                "msPerFrame": 0.085
+              },
+              {
+                "stage": "path.findPath",
+                "calls": 91,
+                "perSec": 62.3,
+                "avgMs": 0.19,
+                "maxMs": 0.5,
+                "totalMs": 17.3,
+                "msPerFrame": 0.072
+              },
+              {
+                "stage": "sys.updateEnemies",
+                "calls": 88,
+                "perSec": 60.3,
+                "avgMs": 0.193,
+                "maxMs": 0.7,
+                "totalMs": 17,
+                "msPerFrame": 0.071
+              },
+              {
+                "stage": "sim.collide",
+                "calls": 88,
+                "perSec": 60.3,
+                "avgMs": 0.163,
+                "maxMs": 0.9,
+                "totalMs": 14.3,
+                "msPerFrame": 0.059
+              },
+              {
+                "stage": "draw.beacons",
+                "calls": 241,
+                "perSec": 165,
+                "avgMs": 0.059,
+                "maxMs": 0.3,
+                "totalMs": 14.3,
+                "msPerFrame": 0.059
+              },
+              {
+                "stage": "frame.hover",
+                "calls": 241,
+                "perSec": 165,
+                "avgMs": 0.035,
+                "maxMs": 0.2,
+                "totalMs": 8.5,
+                "msPerFrame": 0.035
+              },
+              {
+                "stage": "sim.pre",
+                "calls": 88,
+                "perSec": 60.3,
+                "avgMs": 0.052,
+                "maxMs": 0.2,
+                "totalMs": 4.6,
+                "msPerFrame": 0.019
+              },
+              {
+                "stage": "sim.light",
+                "calls": 88,
+                "perSec": 60.3,
+                "avgMs": 0.033,
+                "maxMs": 0.2,
+                "totalMs": 2.9,
+                "msPerFrame": 0.012
+              },
+              {
+                "stage": "draw.vignette",
+                "calls": 241,
+                "perSec": 165,
+                "avgMs": 0.004,
+                "maxMs": 0.1,
+                "totalMs": 1,
+                "msPerFrame": 0.004
+              },
+              {
+                "stage": "sys.updateTowers",
+                "calls": 88,
+                "perSec": 60.3,
+                "avgMs": 0.009,
+                "maxMs": 0.1,
+                "totalMs": 0.8,
+                "msPerFrame": 0.003
+              },
+              {
+                "stage": "sys.updateHazard",
+                "calls": 88,
+                "perSec": 60.3,
+                "avgMs": 0.008,
+                "maxMs": 0.1,
+                "totalMs": 0.7,
+                "msPerFrame": 0.003
+              },
+              {
+                "stage": "sys.updateMind",
+                "calls": 88,
+                "perSec": 60.3,
+                "avgMs": 0.008,
+                "maxMs": 0.1,
+                "totalMs": 0.7,
+                "msPerFrame": 0.003
+              },
+              {
+                "stage": "sys.updateWaves",
+                "calls": 88,
+                "perSec": 60.3,
+                "avgMs": 0.007,
+                "maxMs": 0.1,
+                "totalMs": 0.6,
+                "msPerFrame": 0.002
+              },
+              {
+                "stage": "sys.updateLogistics",
+                "calls": 88,
+                "perSec": 60.3,
+                "avgMs": 0.007,
+                "maxMs": 0.1,
+                "totalMs": 0.6,
+                "msPerFrame": 0.002
+              },
+              {
+                "stage": "sys.updatePlayerSurvival",
+                "calls": 88,
+                "perSec": 60.3,
+                "avgMs": 0.005,
+                "maxMs": 0.1,
+                "totalMs": 0.4,
+                "msPerFrame": 0.002
+              },
+              {
+                "stage": "sys.updateEcology",
+                "calls": 88,
+                "perSec": 60.3,
+                "avgMs": 0.002,
+                "maxMs": 0.1,
+                "totalMs": 0.2,
+                "msPerFrame": 0.001
+              },
+              {
+                "stage": "sys.updateCarry",
+                "calls": 88,
+                "perSec": 60.3,
+                "avgMs": 0,
+                "maxMs": 0,
+                "totalMs": 0,
+                "msPerFrame": 0
+              },
+              {
+                "stage": "sys.updateFarm",
+                "calls": 88,
+                "perSec": 60.3,
+                "avgMs": 0.001,
+                "maxMs": 0.1,
+                "totalMs": 0.1,
+                "msPerFrame": 0
+              },
+              {
+                "stage": "sys.updatePurifiers",
+                "calls": 88,
+                "perSec": 60.3,
+                "avgMs": 0.001,
+                "maxMs": 0.1,
+                "totalMs": 0.1,
+                "msPerFrame": 0
+              },
+              {
+                "stage": "sys.updateNightOps",
+                "calls": 88,
+                "perSec": 60.3,
+                "avgMs": 0,
+                "maxMs": 0,
+                "totalMs": 0,
+                "msPerFrame": 0
+              },
+              {
+                "stage": "sys.updateCraft",
+                "calls": 88,
+                "perSec": 60.3,
+                "avgMs": 0,
+                "maxMs": 0,
+                "totalMs": 0,
+                "msPerFrame": 0
+              },
+              {
+                "stage": "sys.updateSmelt",
+                "calls": 88,
+                "perSec": 60.3,
+                "avgMs": 0,
+                "maxMs": 0,
+                "totalMs": 0,
+                "msPerFrame": 0
+              },
+              {
+                "stage": "sys.updatePlayerSkill",
+                "calls": 88,
+                "perSec": 60.3,
+                "avgMs": 0,
+                "maxMs": 0,
+                "totalMs": 0,
+                "msPerFrame": 0
+              },
+              {
+                "stage": "sys.updateHand",
+                "calls": 88,
+                "perSec": 60.3,
+                "avgMs": 0.001,
+                "maxMs": 0.1,
+                "totalMs": 0.1,
+                "msPerFrame": 0
+              },
+              {
+                "stage": "frame.music",
+                "calls": 241,
+                "perSec": 165,
+                "avgMs": 0,
+                "maxMs": 0.1,
+                "totalMs": 0.1,
+                "msPerFrame": 0
+              },
+              {
+                "stage": "draw.overlay",
+                "calls": 241,
+                "perSec": 165,
+                "avgMs": 0,
+                "maxMs": 0.1,
+                "totalMs": 0.1,
+                "msPerFrame": 0
+              },
+              {
+                "stage": "sys.updateBlight",
+                "calls": 5,
+                "perSec": 3.4,
+                "avgMs": 0,
+                "maxMs": 0,
+                "totalMs": 0,
+                "msPerFrame": 0
+              }
+            ],
+            "slowFrames": [
+              {
+                "frame": 37,
+                "totalMs": 6.3,
+                "stages": {
+                  "sim.pre": 0.1,
+                  "sys.updateEnemies": 0.4,
+                  "sys.updateLogistics": 0.1,
+                  "path.findPath": 0.2,
+                  "sys.updateWorkers": 0.3,
+                  "sim.systems": 0.8,
+                  "sim.collide": 0.1,
+                  "frame.update": 4,
+                  "frame.hover": 0.1,
+                  "draw.tiles": 0.5,
+                  "draw.beacons": 0.1,
+                  "draw.buildings": 0.1,
+                  "draw.glow": 0.1,
+                  "draw.units": 0.3,
+                  "draw.minimap": 1.1,
+                  "draw.total": 2.2,
+                  "draw": 2.2,
+                  "frame.total": 6.3
+                }
+              },
+              {
+                "frame": 174,
+                "totalMs": 6,
+                "stages": {
+                  "sim.pre": 0.1,
+                  "sys.updateEnemies": 0.2,
+                  "sys.updateTowers": 0.1,
+                  "path.findPath": 0.3,
+                  "sys.updateWorkers": 0.6,
+                  "sim.systems": 0.9,
+                  "sim.collide": 0.1,
+                  "frame.update": 3.9,
+                  "draw.tiles": 0.5,
+                  "draw.beacons": 0.1,
+                  "draw.buildings": 0.1,
+                  "draw.units": 0.3,
+                  "draw.minimap": 1.1,
+                  "draw.total": 2.1,
+                  "draw": 2.1,
+                  "frame.total": 6
+                }
+              },
+              {
+                "frame": 114,
+                "totalMs": 5.9,
+                "stages": {
+                  "sim.pre": 0.1,
+                  "sys.updateEnemies": 0.4,
+                  "path.findPath": 0.2,
+                  "sys.updateWorkers": 0.3,
+                  "sim.systems": 0.7,
+                  "sim.collide": 0.1,
+                  "frame.update": 3.8,
+                  "draw.tiles": 0.5,
+                  "draw.beacons": 0.1,
+                  "draw.glow": 0.2,
+                  "draw.units": 0.3,
+                  "draw.minimap": 1,
+                  "draw.total": 2.1,
+                  "draw": 2.1,
+                  "frame.total": 5.9
+                }
+              },
+              {
+                "frame": 141,
+                "totalMs": 5.8,
+                "stages": {
+                  "sys.updateEnemies": 0.2,
+                  "sys.updateLogistics": 0.1,
+                  "path.findPath": 0.2,
+                  "sys.updateWorkers": 0.2,
+                  "sim.systems": 0.5,
+                  "sim.collide": 0.1,
+                  "frame.update": 3.4,
+                  "frame.hover": 0.1,
+                  "draw.tiles": 0.5,
+                  "draw.glow": 0.2,
+                  "draw.units": 0.3,
+                  "draw.minimap": 1.2,
+                  "draw.total": 2.3,
+                  "draw": 2.3,
+                  "frame.total": 5.8
+                }
+              },
+              {
+                "frame": 119,
+                "totalMs": 4.3,
+                "stages": {
+                  "sim.pre": 0.1,
+                  "sys.updateEnemies": 0.7,
+                  "path.findPath": 0.5,
+                  "sys.updateWorkers": 0.8,
+                  "sim.systems": 1.5,
+                  "sim.collide": 0.6,
+                  "frame.update": 2.7,
+                  "frame.hover": 0.1,
+                  "draw.tiles": 0.5,
+                  "draw.beacons": 0.1,
+                  "draw.glow": 0.1,
+                  "draw.units": 0.5,
+                  "draw.minimap": 0.3,
+                  "draw.total": 1.5,
+                  "draw": 1.5,
+                  "frame.total": 4.3
+                }
+              },
+              {
+                "frame": 18,
+                "totalMs": 4.2,
+                "stages": {
+                  "sys.updateEnemies": 0.4,
+                  "path.findPath": 0.1,
+                  "sys.updateWorkers": 0.2,
+                  "sys.updatePlayerSurvival": 0.1,
+                  "sim.systems": 0.7,
+                  "sim.collide": 0.1,
+                  "frame.update": 1.4,
+                  "draw.tiles": 1,
+                  "draw.beacons": 0.3,
+                  "draw.buildings": 0.5,
+                  "draw.glow": 0.1,
+                  "draw.units": 0.6,
+                  "draw.minimap": 0.3,
+                  "draw.total": 2.8,
+                  "draw": 2.8,
+                  "frame.total": 4.2
+                }
+              },
+              {
+                "frame": 117,
+                "totalMs": 4.2,
+                "stages": {
+                  "sim.pre": 0.1,
+                  "sys.updateEnemies": 0.5,
+                  "sys.updateWorkers": 0.3,
+                  "sim.systems": 0.8,
+                  "sim.collide": 0.9,
+                  "sim.light": 0.1,
+                  "frame.update": 2.2,
+                  "frame.hover": 0.1,
+                  "draw.tiles": 0.6,
+                  "draw.beacons": 0.1,
+                  "draw.buildings": 0.2,
+                  "draw.glow": 0.1,
+                  "draw.units": 0.5,
+                  "draw.minimap": 0.3,
+                  "draw.total": 1.9,
+                  "draw": 1.9,
+                  "frame.total": 4.2
+                }
+              },
+              {
+                "frame": 73,
+                "totalMs": 4,
+                "stages": {
+                  "sim.pre": 0.1,
+                  "sys.updateEnemies": 0.3,
+                  "path.findPath": 0.2,
+                  "sys.updateWorkers": 0.4,
+                  "sim.systems": 0.7,
+                  "sim.collide": 0.7,
+                  "sim.light": 0.1,
+                  "frame.update": 2,
+                  "draw.tiles": 0.8,
+                  "draw.beacons": 0.1,
+                  "draw.glow": 0.2,
+                  "draw.units": 0.5,
+                  "draw.minimap": 0.3,
+                  "draw.total": 2,
+                  "draw": 2,
+                  "frame.total": 4
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "label": "three-chunk-night",
+        "data": {
+          "initial": {
+            "lamps": 40,
+            "enemies": 72,
+            "active": [
+              "0,0",
+              "1,0",
+              "2,0"
+            ],
+            "experiencesOpen": 2,
+            "eventsPerWorker": 12,
+            "supplyPanelOpen": true
+          },
+          "finalEnemies": 72,
+          "finalLamps": 40,
+          "measuredRaf": 241,
+          "elapsedMs": 1466.7999999523163,
+          "fps": 164.30324516487224,
+          "remoteTickBefore": 1,
+          "remoteTickAfter": 2,
+          "perf": {
+            "secs": 1.5,
+            "frames": 241,
+            "fps": 164.3,
+            "frameMs": 6.09,
+            "budget": {
+              "pctOf16ms": 11
+            },
+            "rows": [
+              {
+                "stage": "frame.total",
+                "calls": 241,
+                "perSec": 164.3,
+                "avgMs": 1.826,
+                "maxMs": 6,
+                "totalMs": 440.1,
+                "msPerFrame": 1.826
+              },
+              {
+                "stage": "draw",
+                "calls": 241,
+                "perSec": 164.3,
+                "avgMs": 1.359,
+                "maxMs": 3.6,
+                "totalMs": 327.5,
+                "msPerFrame": 1.359
+              },
+              {
+                "stage": "draw.total",
+                "calls": 241,
+                "perSec": 164.3,
+                "avgMs": 1.356,
+                "maxMs": 3.6,
+                "totalMs": 326.9,
+                "msPerFrame": 1.356
+              },
+              {
+                "stage": "draw.tiles",
+                "calls": 241,
+                "perSec": 164.3,
+                "avgMs": 0.537,
+                "maxMs": 1.9,
+                "totalMs": 129.4,
+                "msPerFrame": 0.537
+              },
+              {
+                "stage": "frame.update",
+                "calls": 241,
+                "perSec": 164.3,
+                "avgMs": 0.435,
+                "maxMs": 3.3,
+                "totalMs": 104.9,
+                "msPerFrame": 0.435
+              },
+              {
+                "stage": "draw.units",
+                "calls": 241,
+                "perSec": 164.3,
+                "avgMs": 0.315,
+                "maxMs": 0.9,
+                "totalMs": 76,
+                "msPerFrame": 0.315
+              },
+              {
+                "stage": "draw.minimap",
+                "calls": 241,
+                "perSec": 164.3,
+                "avgMs": 0.256,
+                "maxMs": 0.7,
+                "totalMs": 61.8,
+                "msPerFrame": 0.256
+              },
+              {
+                "stage": "draw.glow",
+                "calls": 241,
+                "perSec": 164.3,
+                "avgMs": 0.092,
+                "maxMs": 0.3,
+                "totalMs": 22.1,
+                "msPerFrame": 0.092
+              },
+              {
+                "stage": "sim.systems",
+                "calls": 88,
+                "perSec": 60,
+                "avgMs": 0.203,
+                "maxMs": 0.9,
+                "totalMs": 17.9,
+                "msPerFrame": 0.074
+              },
+              {
+                "stage": "draw.buildings",
+                "calls": 241,
+                "perSec": 164.3,
+                "avgMs": 0.063,
+                "maxMs": 0.3,
+                "totalMs": 15.2,
+                "msPerFrame": 0.063
+              },
+              {
+                "stage": "draw.beacons",
+                "calls": 241,
+                "perSec": 164.3,
+                "avgMs": 0.051,
+                "maxMs": 0.2,
+                "totalMs": 12.3,
+                "msPerFrame": 0.051
+              },
+              {
+                "stage": "sys.updateEnemies",
+                "calls": 88,
+                "perSec": 60,
+                "avgMs": 0.12,
+                "maxMs": 0.5,
+                "totalMs": 10.6,
+                "msPerFrame": 0.044
+              },
+              {
+                "stage": "sim.collide",
+                "calls": 88,
+                "perSec": 60,
+                "avgMs": 0.117,
+                "maxMs": 0.5,
+                "totalMs": 10.3,
+                "msPerFrame": 0.043
+              },
+              {
+                "stage": "frame.hover",
+                "calls": 241,
+                "perSec": 164.3,
+                "avgMs": 0.03,
+                "maxMs": 0.1,
+                "totalMs": 7.3,
+                "msPerFrame": 0.03
+              },
+              {
+                "stage": "sim.pre",
+                "calls": 88,
+                "perSec": 60,
+                "avgMs": 0.042,
+                "maxMs": 0.2,
+                "totalMs": 3.7,
+                "msPerFrame": 0.015
+              },
+              {
+                "stage": "sys.updateWorkers",
+                "calls": 88,
+                "perSec": 60,
+                "avgMs": 0.012,
+                "maxMs": 0.1,
+                "totalMs": 1.1,
+                "msPerFrame": 0.005
+              },
+              {
+                "stage": "draw.vignette",
+                "calls": 241,
+                "perSec": 164.3,
+                "avgMs": 0.003,
+                "maxMs": 0.1,
+                "totalMs": 0.8,
+                "msPerFrame": 0.003
+              },
+              {
+                "stage": "sys.updateWaves",
+                "calls": 88,
+                "perSec": 60,
+                "avgMs": 0.009,
+                "maxMs": 0.1,
+                "totalMs": 0.8,
+                "msPerFrame": 0.003
+              },
+              {
+                "stage": "sys.updateHazard",
+                "calls": 88,
+                "perSec": 60,
+                "avgMs": 0.005,
+                "maxMs": 0.1,
+                "totalMs": 0.4,
+                "msPerFrame": 0.002
+              },
+              {
+                "stage": "sys.updateNightOps",
+                "calls": 88,
+                "perSec": 60,
+                "avgMs": 0.006,
+                "maxMs": 0.1,
+                "totalMs": 0.5,
+                "msPerFrame": 0.002
+              },
+              {
+                "stage": "sys.updateEcology",
+                "calls": 88,
+                "perSec": 60,
+                "avgMs": 0.006,
+                "maxMs": 0.1,
+                "totalMs": 0.5,
+                "msPerFrame": 0.002
+              },
+              {
+                "stage": "sys.updateCarry",
+                "calls": 88,
+                "perSec": 60,
+                "avgMs": 0.002,
+                "maxMs": 0.1,
+                "totalMs": 0.2,
+                "msPerFrame": 0.001
+              },
+              {
+                "stage": "sys.updatePurifiers",
+                "calls": 88,
+                "perSec": 60,
+                "avgMs": 0.002,
+                "maxMs": 0.1,
+                "totalMs": 0.2,
+                "msPerFrame": 0.001
+              },
+              {
+                "stage": "sys.updateMind",
+                "calls": 88,
+                "perSec": 60,
+                "avgMs": 0.002,
+                "maxMs": 0.1,
+                "totalMs": 0.2,
+                "msPerFrame": 0.001
+              },
+              {
+                "stage": "sys.updateSmelt",
+                "calls": 88,
+                "perSec": 60,
+                "avgMs": 0.002,
+                "maxMs": 0.1,
+                "totalMs": 0.2,
+                "msPerFrame": 0.001
+              },
+              {
+                "stage": "sim.light",
+                "calls": 88,
+                "perSec": 60,
+                "avgMs": 0.002,
+                "maxMs": 0.1,
+                "totalMs": 0.2,
+                "msPerFrame": 0.001
+              },
+              {
+                "stage": "frame.music",
+                "calls": 241,
+                "perSec": 164.3,
+                "avgMs": 0,
+                "maxMs": 0.1,
+                "totalMs": 0.1,
+                "msPerFrame": 0
+              },
+              {
+                "stage": "draw.overlay",
+                "calls": 241,
+                "perSec": 164.3,
+                "avgMs": 0,
+                "maxMs": 0.1,
+                "totalMs": 0.1,
+                "msPerFrame": 0
+              },
+              {
+                "stage": "sys.updateTowers",
+                "calls": 88,
+                "perSec": 60,
+                "avgMs": 0.001,
+                "maxMs": 0.1,
+                "totalMs": 0.1,
+                "msPerFrame": 0
+              },
+              {
+                "stage": "sys.updateFarm",
+                "calls": 88,
+                "perSec": 60,
+                "avgMs": 0.001,
+                "maxMs": 0.1,
+                "totalMs": 0.1,
+                "msPerFrame": 0
+              },
+              {
+                "stage": "sys.updateLogistics",
+                "calls": 88,
+                "perSec": 60,
+                "avgMs": 0,
+                "maxMs": 0,
+                "totalMs": 0,
+                "msPerFrame": 0
+              },
+              {
+                "stage": "sys.updateCraft",
+                "calls": 88,
+                "perSec": 60,
+                "avgMs": 0,
+                "maxMs": 0,
+                "totalMs": 0,
+                "msPerFrame": 0
+              },
+              {
+                "stage": "sys.updatePlayerSurvival",
+                "calls": 88,
+                "perSec": 60,
+                "avgMs": 0.001,
+                "maxMs": 0.1,
+                "totalMs": 0.1,
+                "msPerFrame": 0
+              },
+              {
+                "stage": "sys.updatePlayerSkill",
+                "calls": 88,
+                "perSec": 60,
+                "avgMs": 0,
+                "maxMs": 0,
+                "totalMs": 0,
+                "msPerFrame": 0
+              },
+              {
+                "stage": "sys.updateHand",
+                "calls": 88,
+                "perSec": 60,
+                "avgMs": 0,
+                "maxMs": 0,
+                "totalMs": 0,
+                "msPerFrame": 0
+              },
+              {
+                "stage": "storage.syncRes",
+                "calls": 2,
+                "perSec": 1.4,
+                "avgMs": 0,
+                "maxMs": 0,
+                "totalMs": 0,
+                "msPerFrame": 0
+              },
+              {
+                "stage": "sys.updateBlight",
+                "calls": 5,
+                "perSec": 3.4,
+                "avgMs": 0,
+                "maxMs": 0,
+                "totalMs": 0,
+                "msPerFrame": 0
+              }
+            ],
+            "slowFrames": [
+              {
+                "frame": 52,
+                "totalMs": 6,
+                "stages": {
+                  "frame.update": 2.5,
+                  "frame.hover": 0.1,
+                  "draw.tiles": 1.9,
+                  "draw.beacons": 0.1,
+                  "draw.buildings": 0.2,
+                  "draw.glow": 0.1,
+                  "draw.units": 0.5,
+                  "draw.minimap": 0.4,
+                  "draw.total": 3.4,
+                  "draw": 3.4,
+                  "frame.total": 6,
+                  "sim.pre": 0.2,
+                  "sys.updateEnemies": 0.5,
+                  "sim.systems": 0.9,
+                  "sim.collide": 0.5
+                }
+              },
+              {
+                "frame": 44,
+                "totalMs": 5,
+                "stages": {
+                  "frame.update": 1.4,
+                  "draw.tiles": 1.4,
+                  "draw.beacons": 0.2,
+                  "draw.buildings": 0.2,
+                  "draw.glow": 0.2,
+                  "draw.units": 0.7,
+                  "draw.minimap": 0.7,
+                  "draw.total": 3.6,
+                  "draw": 3.6,
+                  "frame.total": 5,
+                  "sim.pre": 0.1,
+                  "sys.updateEnemies": 0.3,
+                  "sys.updateWorkers": 0.1,
+                  "sim.systems": 0.4,
+                  "sim.collide": 0.3
+                }
+              },
+              {
+                "frame": 3,
+                "totalMs": 4.7,
+                "stages": {
+                  "frame.update": 3.3,
+                  "draw.tiles": 0.5,
+                  "draw.buildings": 0.1,
+                  "draw.glow": 0.1,
+                  "draw.units": 0.3,
+                  "draw.minimap": 0.3,
+                  "draw.total": 1.4,
+                  "draw": 1.4,
+                  "frame.total": 4.7,
+                  "sys.updateEnemies": 0.2,
+                  "sim.systems": 0.3,
+                  "sim.collide": 0.1
+                }
+              },
+              {
+                "frame": 167,
+                "totalMs": 4.6,
+                "stages": {
+                  "frame.update": 3.3,
+                  "draw.tiles": 0.4,
+                  "draw.beacons": 0.1,
+                  "draw.glow": 0.1,
+                  "draw.units": 0.2,
+                  "draw.minimap": 0.4,
+                  "draw.total": 1.3,
+                  "draw": 1.3,
+                  "frame.total": 4.6,
+                  "sim.pre": 0.1,
+                  "sys.updateEnemies": 0.1,
+                  "sys.updateEcology": 0.1,
+                  "sim.systems": 0.2
+                }
+              },
+              {
+                "frame": 1,
+                "totalMs": 4,
+                "stages": {
+                  "frame.update": 2.6,
+                  "frame.hover": 0.1,
+                  "draw.tiles": 0.5,
+                  "draw.buildings": 0.1,
+                  "draw.glow": 0.1,
+                  "draw.units": 0.3,
+                  "draw.minimap": 0.3,
+                  "draw.total": 1.3,
+                  "draw": 1.3,
+                  "frame.total": 4
+                }
+              },
+              {
+                "frame": 51,
+                "totalMs": 3.9,
+                "stages": {
+                  "frame.update": 0.8,
+                  "draw.tiles": 1.3,
+                  "draw.beacons": 0.1,
+                  "draw.buildings": 0.2,
+                  "draw.glow": 0.2,
+                  "draw.units": 0.7,
+                  "draw.minimap": 0.5,
+                  "draw.total": 3.1,
+                  "draw": 3.1,
+                  "frame.total": 3.9
+                }
+              },
+              {
+                "frame": 215,
+                "totalMs": 3.7,
+                "stages": {
+                  "frame.update": 0.6,
+                  "frame.hover": 0.1,
+                  "draw.tiles": 1.3,
+                  "draw.beacons": 0.1,
+                  "draw.buildings": 0.1,
+                  "draw.glow": 0.3,
+                  "draw.units": 0.5,
+                  "draw.minimap": 0.7,
+                  "draw.total": 3,
+                  "draw": 3,
+                  "frame.total": 3.7
+                }
+              },
+              {
+                "frame": 65,
+                "totalMs": 3.6,
+                "stages": {
+                  "frame.update": 0.9,
+                  "draw.tiles": 1.1,
+                  "draw.beacons": 0.1,
+                  "draw.buildings": 0.1,
+                  "draw.glow": 0.1,
+                  "draw.units": 0.7,
+                  "draw.minimap": 0.5,
+                  "draw.total": 2.7,
+                  "draw": 2.7,
+                  "frame.total": 3.6,
+                  "sys.updateEnemies": 0.2,
+                  "sys.updateMind": 0.1,
+                  "sim.systems": 0.3,
+                  "sim.collide": 0.1
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "label": "chunk-switch-first-frames",
+        "data": [
+          {
+            "from": [
+              0,
+              0
+            ],
+            "to": [
+              1,
+              0
+            ],
+            "cold": true,
+            "total": {
+              "stage": "frame.total",
+              "calls": 3,
+              "perSec": 165.7,
+              "avgMs": 3.167,
+              "maxMs": 6.9,
+              "totalMs": 9.5,
+              "msPerFrame": 3.167
+            },
+            "draw": {
+              "stage": "draw.total",
+              "calls": 3,
+              "perSec": 165.7,
+              "avgMs": 2.367,
+              "maxMs": 5,
+              "totalMs": 7.1,
+              "msPerFrame": 2.367
+            }
+          },
+          {
+            "from": [
+              1,
+              0
+            ],
+            "to": [
+              0,
+              0
+            ],
+            "cold": false,
+            "total": {
+              "stage": "frame.total",
+              "calls": 2,
+              "perSec": 166.7,
+              "avgMs": 3.5,
+              "maxMs": 5.8,
+              "totalMs": 7,
+              "msPerFrame": 3.5
+            },
+            "draw": {
+              "stage": "draw.total",
+              "calls": 2,
+              "perSec": 166.7,
+              "avgMs": 2.75,
+              "maxMs": 4.7,
+              "totalMs": 5.5,
+              "msPerFrame": 2.75
+            }
+          },
+          {
+            "from": [
+              0,
+              0
+            ],
+            "to": [
+              1,
+              0
+            ],
+            "cold": false,
+            "total": {
+              "stage": "frame.total",
+              "calls": 3,
+              "perSec": 165.7,
+              "avgMs": 1.767,
+              "maxMs": 4,
+              "totalMs": 5.3,
+              "msPerFrame": 1.767
+            },
+            "draw": {
+              "stage": "draw.total",
+              "calls": 3,
+              "perSec": 165.7,
+              "avgMs": 1.5,
+              "maxMs": 3.5,
+              "totalMs": 4.5,
+              "msPerFrame": 1.5
+            }
+          },
+          {
+            "from": [
+              1,
+              0
+            ],
+            "to": [
+              2,
+              0
+            ],
+            "cold": true,
+            "total": {
+              "stage": "frame.total",
+              "calls": 3,
+              "perSec": 164.8,
+              "avgMs": 2.1,
+              "maxMs": 4.4,
+              "totalMs": 6.3,
+              "msPerFrame": 2.1
+            },
+            "draw": {
+              "stage": "draw.total",
+              "calls": 3,
+              "perSec": 164.8,
+              "avgMs": 1.833,
+              "maxMs": 3.9,
+              "totalMs": 5.5,
+              "msPerFrame": 1.833
+            }
+          },
+          {
+            "from": [
+              2,
+              0
+            ],
+            "to": [
+              3,
+              0
+            ],
+            "cold": true,
+            "total": {
+              "stage": "frame.total",
+              "calls": 3,
+              "perSec": 165.7,
+              "avgMs": 2.3,
+              "maxMs": 4.5,
+              "totalMs": 6.9,
+              "msPerFrame": 2.3
+            },
+            "draw": {
+              "stage": "draw.total",
+              "calls": 3,
+              "perSec": 165.7,
+              "avgMs": 1.967,
+              "maxMs": 3.9,
+              "totalMs": 5.9,
+              "msPerFrame": 1.967
+            }
+          },
+          {
+            "from": [
+              3,
+              0
+            ],
+            "to": [
+              2,
+              0
+            ],
+            "cold": false,
+            "total": {
+              "stage": "frame.total",
+              "calls": 2,
+              "perSec": 163.9,
+              "avgMs": 1.9,
+              "maxMs": 2.9,
+              "totalMs": 3.8,
+              "msPerFrame": 1.9
+            },
+            "draw": {
+              "stage": "draw.total",
+              "calls": 2,
+              "perSec": 163.9,
+              "avgMs": 1.7,
+              "maxMs": 2.6,
+              "totalMs": 3.4,
+              "msPerFrame": 1.7
+            }
+          },
+          {
+            "from": [
+              2,
+              0
+            ],
+            "to": [
+              1,
+              0
+            ],
+            "cold": false,
+            "total": {
+              "stage": "frame.total",
+              "calls": 3,
+              "perSec": 163.9,
+              "avgMs": 1.6,
+              "maxMs": 3,
+              "totalMs": 4.8,
+              "msPerFrame": 1.6
+            },
+            "draw": {
+              "stage": "draw.total",
+              "calls": 3,
+              "perSec": 163.9,
+              "avgMs": 1.433,
+              "maxMs": 2.8,
+              "totalMs": 4.3,
+              "msPerFrame": 1.433
+            }
+          },
+          {
+            "from": [
+              1,
+              0
+            ],
+            "to": [
+              0,
+              0
+            ],
+            "cold": false,
+            "total": {
+              "stage": "frame.total",
+              "calls": 3,
+              "perSec": 165.7,
+              "avgMs": 2.833,
+              "maxMs": 6.4,
+              "totalMs": 8.5,
+              "msPerFrame": 2.833
+            },
+            "draw": {
+              "stage": "draw.total",
+              "calls": 3,
+              "perSec": 165.7,
+              "avgMs": 2.4,
+              "maxMs": 5.3,
+              "totalMs": 7.2,
+              "msPerFrame": 2.4
+            }
+          }
+        ]
+      },
+      {
+        "label": "replay-after-3days",
+        "data": {
+          "ok": true,
+          "ran": 86,
+          "ms": 84.4,
+          "fails": [],
+          "knownCount": 0,
+          "baselineSize": 0
+        }
+      },
+      {
+        "label": "replay-roundtrip",
+        "data": {
+          "ok": true,
+          "ran": 86,
+          "ms": 68.7,
+          "fails": [],
+          "knownCount": 0,
+          "baselineSize": 0
+        }
+      },
+      {
+        "label": "replay",
+        "data": {
+          "ranDays": 4,
+          "steps": 72001,
+          "deaths": 0,
+          "minHp": 54,
+          "kills": 118
+        }
+      },
+      {
+        "label": "source",
+        "data": {
+          "ok": true,
+          "files": 95,
+          "fails": [],
+          "handles": [
+            "js/dev/selftest.js: __checkpoint __restoreCheckpoint",
+            "js/main.js: __abilities __ambient __ambientBeds __assets __audio __blight __blightDbg __bodies __body __camPan __carry __checkpoint __chunk __click __combat __cost __crew __cycleCat __demolish __descend __dps __eat __eco __endgameCheckpoint __ending __equip __expedition __finish __fire __focus __forecast __give __goto __grantRelic __graves __held __hint __hot __hoverInfo __keys __knowSeen __knowledge __lab __lamp __load __loadSlot __mind __move __music __musicDir __musicTick __newGame __observe __outposts __overlap __path __patrolHit __pause __perf __perfTable __place __prep __quick __rclick __recovery __recruit __refineCheck __relics __reload __replay __rescue __research __resolve __resonance __restoreCheckpoint __revive __saveSlot __screenOf __screens __seal __sect __seen __selectHot __series __settings __sfx __sfxBank __showEnding __sites __slice __soothe __spawn __state __step __steps __store __stress __survival __take __tasks __toast __undo __undoInfo __unequip __upgrade __visual __wave __wipe __zoom"
+          ],
+          "handleFiles": 2
+        }
+      },
+      {
+        "label": "watch",
+        "data": [
+          "共 0 类"
+        ]
+      },
+      {
+        "label": "budget-failures",
+        "data": []
+      },
+      {
+        "label": "official-storage-restored",
+        "data": {
+          "deep-light-saves-v2": true,
+          "deep-light-settings-v1": true,
+          "deep-light-ui-v1": true
+        }
+      }
+    ],
+    "ok": true
+  },
+  "currentFormalKeysUnchanged": {
+    "deep-light-saves-v2": true,
+    "deep-light-settings-v1": true,
+    "deep-light-ui-v1": true
+  },
+  "ok": true
+}

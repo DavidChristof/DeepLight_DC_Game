@@ -1,0 +1,41 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>L4 收口证据审计</title>
+<body style="background:#101923;color:#e5edf5;font:14px monospace;margin:24px">
+<h1>L4 · 收口证据审计</h1><p>只读仓库报告和已导出的历史检查点；不启动游戏、不写正式存储。历史矩阵不冒充当前版本六轮复放。</p>
+<button id="audit">读取并核对收口证据</button><p id="status">未执行</p><pre id="out" style="white-space:pre-wrap"></pre>
+<script type="module">
+import { auditArtifact, digest, FORMAL_KEYS } from './tools/l4_matrix_artifact.mjs';
+import { auditInputArtifact } from './tools/l4_input_artifact.mjs';
+import { auditLedgerArtifact, auditCategoryArtifact } from './tools/l4_ledger_rules.mjs';
+import { SRC_FILES } from './js/dev/filelist.js';
+const out=document.querySelector('#out'),status=document.querySelector('#status');
+async function packed(file){const response=await fetch('/docs/fixtures/'+file,{cache:'no-store'});if(!response.ok)throw Error(file+' HTTP '+response.status);const b=Uint8Array.from(atob((await response.text()).trim()),c=>c.charCodeAt(0));const raw=await new Response(new Blob([b]).stream().pipeThrough(new DecompressionStream('deflate'))).text();return{value:JSON.parse(raw),raw};}
+async function json(file){const r=await fetch('/docs/fixtures/'+file,{cache:'no-store'});if(!r.ok)throw Error(file+' HTTP '+r.status);return r.json();}
+document.querySelector('#audit').onclick=async()=>{
+const before=FORMAL_KEYS.map(k=>localStorage.getItem(k)),report={gates:[],historicalLimits:['旧来源完整inputLog未记录，由独立83条输入补证覆盖必要操作；不伪造原日志','旧83输入矿物差额22仍未知；当前新连续链432事件未知0，不倒写旧历史','六轮含死亡跳黎明，不是连续无伤守完三夜','矩阵为4b01428d历史版本；不声称cf354bf8六轮复放'],scope:'artifact and evidence audit; not a new gameplay replay'};
+const need=(id,ok,evidence)=>{report.gates.push({id,status:ok?'通过':'未验收',evidence});};
+try{
+const raw=JSON.stringify(await Promise.all(SRC_FILES.map(async f=>[f,await(await fetch('/'+f,{cache:'no-store'})).text()])));report.currentFingerprint=digest(raw);
+const matrix=await packed('l4-matrix-results.deflate.b64');report.matrix=auditArtifact(matrix.value);need('R1.six-runs-file',report.matrix.ok,'l4-matrix-results.deflate.b64 / 701ba65c');
+const input=await packed('l4-independent-input.deflate.b64');report.input=auditInputArtifact(input.value,input.raw);need('R2.trusted-input',report.input.ok,'l4-independent-input.deflate.b64 / dcbacf56 / 83条');
+const ledger=await packed('l4-ledger-full.deflate.b64');report.ledger=auditLedgerArtifact(ledger.value,ledger.raw);need('R2.continuous-ledger',report.ledger.ok,'l4-ledger-full.deflate.b64 / 81ba6178');
+const category=await packed('l4-ledger-categories.deflate.b64');report.category=auditCategoryArtifact(category.value,category.raw);need('R2.missing-categories',report.category.ok,'l4-ledger-categories.deflate.b64 / c3f20557');
+// D332 is retained as historical evidence, not recreated from later branches.
+report.historicalCheckpoints=await json('l4-d332-checkpoints.json');
+for(const hash of ['639ab452','4f2d0bc0']){const e=report.historicalCheckpoints.entries.find(e=>e.hash===hash);need('R2.historical-checkpoint.'+hash,!!e&&digest(JSON.stringify(e.snapshot))===hash,'l4-d332-checkpoints.json / original D332 checkpoint, no original inputLog');}
+const reg=await json('l4-outpost-after-regression.json');report.fix={fingerprint:reg.codeFingerprint,fresh:reg.freshRoundtrip,legacy:reg.legacyAlert,checks:[reg.menu,reg.after,...reg.regression.checks],source:reg.regression.source,watch:reg.regression.watch,replay:reg.regression.replay,storage:reg.storage};
+need('fix.current-version',reg.codeFingerprint===report.currentFingerprint,'l4-outpost-after-regression.json');
+need('fix.snapshot-and-legacy',reg.freshRoundtrip.differences.length===0&&reg.noAlertBind.after===null&&reg.legacyAlert.secondBindUnchanged&&reg.legacyAlert.workerAfter.downed,'full snapshot, no-alert bind and old-alert idempotence');
+need('R3.four-states-and-roundtrip',report.fix.checks.every(c=>c.ok&&c.ran===86)&&reg.regression.roundtripDifferences.length===0,'menu / new / loaded / replay plus controlled legacy end');
+need('R3.source-watch-baseline',reg.regression.source.ok&&reg.regression.source.files===95&&reg.regression.watch.steps===1200&&reg.regression.watch.log[0]==='共 0 类'&&reg.regression.replay.steps===72001&&reg.regression.replay.deaths===0&&reg.regression.replay.minHp===54&&reg.regression.replay.kills===118,'l4-outpost-after-regression.json');
+const layout=await json('l4-ui-results.json');report.ui=layout;need('R3.two-actual-viewports',[[1280,720],[1920,1080]].every(([w,h])=>layout.layouts.some(r=>r.width===w&&r.height===h&&r.histories===2&&r.eventsEach===12&&r.focusPreserved&&r.scrollPreserved&&r.noHorizontalClip))&&!layout.error,'l4-ui-results.json; summary and history screenshots');
+const pressure=await json('l4-pressure-results.json'),event=id=>pressure.events.find(e=>e.label===id)?.data;report.pressure=pressure;
+need('R3.pressure-version',event('production-fingerprint')?.hash===report.currentFingerprint,'l4-pressure-results.json');
+for(const [id,limit,active] of [['single-chunk-night',8,1],['three-chunk-night',12,3]]){const r=event(id),total=r?.perf.rows.find(v=>v.stage==='frame.total');need('R3.'+id,!!r&&r.initial.active.length===active&&r.initial.enemies===72&&r.initial.lamps===40&&r.finalEnemies===72&&r.finalLamps===40&&r.initial.experiencesOpen===2&&r.initial.eventsPerWorker===12&&r.initial.supplyPanelOpen&&r.measuredRaf>=240&&total.calls>=240&&total.maxMs<=limit&&(active===1||r.remoteTickAfter>r.remoteTickBefore),{file:'l4-pressure-results.json',peakMs:total?.maxMs,budgetMs:limit});}
+const switches=event('chunk-switch-first-frames');need('R3.eight-switches',switches?.length===8&&switches.every(r=>r.total?.calls>0&&r.total.maxMs<=16.6),'l4-pressure-results.json / 3 cold + 5 warm');
+need('R3.all-pressure-failures-retained',pressure.ok&&event('budget-failures')?.length===0&&!pressure.events.some(e=>e.label==='FAIL'),'first complete pressure run, no discarded budget failure');
+need('R3.formal-storage', [reg.storage,layout.storage,event('official-storage-restored')].every(r=>FORMAL_KEYS.every(k=>r?.[k]===true)),'all three test reports');
+}catch(e){report.error=String(e.stack||e);}
+report.currentFormalKeysUnchanged=Object.fromEntries(FORMAL_KEYS.map((k,i)=>[k,localStorage.getItem(k)===before[i]]));report.ok=!report.error&&report.gates.every(g=>g.status==='通过')&&Object.values(report.currentFormalKeysUnchanged).every(Boolean);
+status.textContent=report.ok?'文件与必需动态证据通过；仍须完成版本影响及文档审计':'存在未验收项，不得关闭L4';out.textContent=JSON.stringify(report,null,2);
+};
+</script></body></html>

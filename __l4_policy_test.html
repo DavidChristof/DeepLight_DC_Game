@@ -1,0 +1,38 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>L4 检查点策略校准</title>
+<body style="background:#101923;color:#e5edf5;font:13px monospace;margin:8px">
+<h2>L4-B · 同来源续跑校准</h2>
+<p>从真实健康检查点790a3093开始；两个新实例使用同一随机源、固定步长和相同返营命令。此页当前只验证20秒短续跑，不冒称三日六轮已完成。</p>
+<button id="run">运行两个独立实例</button><p id="status">未开始</p><pre id="out" style="white-space:pre-wrap;max-height:330px;overflow:auto"></pre>
+<iframe id="game" title="L4策略校准游戏" style="width:1280px;max-width:98vw;height:720px"></iframe>
+<script type="module">
+const keys=['deep-light-saves-v2','deep-light-settings-v1','deep-light-ui-v1'];
+const backupKey='__deep_light_l4_policy_backup_v1',evidenceKey='__deep_light_l4_policy_evidence_v1';
+const frame=document.querySelector('#game'),out=document.querySelector('#out'),status=document.querySelector('#status');
+let active=false,report,g,originalRandom,source;
+const assert=(v,m)=>{if(!v)throw Error(m);};
+function canonical(v){if(Array.isArray(v))return v.map(canonical);if(v&&typeof v==='object')return Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])]));return v;}
+function digest(v){let h=2166136261;for(let i=0;i<v.length;i++)h=Math.imul(h^v.charCodeAt(i),16777619);return(h>>>0).toString(16);}
+function publish(){out.textContent=JSON.stringify(report,null,2);localStorage.setItem(evidenceKey,out.textContent);}
+function restore(){const b=JSON.parse(localStorage.getItem(backupKey)||'null');if(!b)return null;for(const k of keys)b[k]==null?localStorage.removeItem(k):localStorage.setItem(k,b[k]);const r=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)===b[k]]));if(Object.values(r).every(Boolean))localStorage.removeItem(backupKey);return r;}
+function closeInstance(){if(g?.Math&&originalRandom)g.Math.random=originalRandom;if(g?.__settings){g.__settings.autosave=false;g.__quick(true);}frame.src='about:blank';g=null;originalRandom=null;}
+function finish(error){if(error)report.error=String(error.stack||error);active=false;closeInstance();report.storage=restore();publish();status.textContent=error?'校准失败 · 证据保留，正式三键恢复':'两次短续跑相同 · 正式三键恢复；六轮尚未运行';}
+window.addEventListener('beforeunload',()=>{if(active)restore();});
+document.querySelector('#run').onclick=async()=>{if(active)return;restore();report={scope:'20秒短续跑，非三日策略矩阵',sourceHash:'790a3093',sourceFile:'docs/fixtures/l4-healthy-checkpoint.deflate.b64',runs:[],same:null};try{const response=await fetch('/'+report.sourceFile);assert(response.ok,'来源文件读取失败');const encoded=(await response.text()).trim(),binary=atob(encoded),bytes=Uint8Array.from(binary,c=>c.charCodeAt(0));const data=JSON.parse(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'))).text());assert(data.format==='l4-checkpoint-v1','来源格式错误');source=data.entry;report.inputHistory=data.inputHistory;assert(source?.hash==='790a3093','共同来源不匹配');assert(digest(JSON.stringify(source.snapshot))===source.hash,'来源校验失败');const b=Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)]));localStorage.setItem(backupKey,JSON.stringify(b));localStorage.setItem(keys[1],JSON.stringify({...JSON.parse(b[keys[1]]||'{}'),autosave:false}));active=true;frame.src='/?l4-calibration='+Date.now();}catch(e){finish(e);}};
+frame.onload=async()=>{if(!active||frame.getAttribute('src')==='about:blank')return;g=frame.contentWindow;try{
+ g.__settings.autosave=false;g.__quick(true);
+ const [save,replay,tasks,storage]=await g.eval("Promise.all([import('/js/core/save.js'),import('/js/dev/replay.js'),import('/js/systems/taskBoard.js'),import('/js/systems/storage.js')])");
+ const menu=g.__check();assert(menu.ok,'menu自检失败');originalRandom=g.Math.random;g.Math.random=replay.makeRng(4242);
+ const {SRC_FILES}=await import('/js/dev/filelist.js');const texts=await Promise.all(SRC_FILES.map(async f=>[f,await(await fetch('/'+f)).text()]));report.codeFingerprint=digest(JSON.stringify(texts));report.sourceFiles=SRC_FILES.length;assert(report.codeFingerprint==='4b01428d','生产源码变化，需核对来源兼容');report.sourceCompatibility='a50829fe→4b01428d：完成work及当前区块夜行节点恢复、往返断言增补；来源文件不改';
+ assert(digest(JSON.stringify(source.snapshot))===source.hash,'共同来源被上一轮改写');assert(g.__restoreCheckpoint(JSON.parse(JSON.stringify(source.snapshot))),'来源加载失败');g.__settings.autosave=false;g.__quick(true);let s=g.__state;
+ const snap=()=>{const v=save.snapshot(s);delete v.at;return canonical(v);};
+ const initial=snap(),w=tasks.allCrewWorkers(s).find(w=>w.crew.id==='crew-c630s4');assert(w?.alive&&!w.downed,'成员非健康');
+ assert(tasks.requestReturnHome(s,w)===null,'返营命令失败');
+ for(let n=0;n<10;n++){g.__steps(120);status.textContent=`独立实例${report.runs.length+1} · ${(n+1)*120}/1200步`;await new Promise(r=>setTimeout(r,0));}
+ const end=snap(),crew=tasks.allCrewWorkers(s);assert(crew.filter(x=>x.crew.id===w.crew.id).length===1,'人物重复归属');assert((w.chunkX|0)===0&&(w.chunkY|0)===0&&!w.directive.returnHome&&!w.directive.outpost,'未实际返营');
+ const after=g.__check();assert(after.ok,'续跑体检失败');
+ const row={initialHash:digest(JSON.stringify(initial)),endHash:digest(JSON.stringify(end)),initial,end,steps:1200,menu,after,crew:crew.map(w=>({id:w.crew.id,chunk:[w.chunkX|0,w.chunkY|0],alive:w.alive,hp:w.hp,hunger:w.hunger,events:w.crew.events})),res:storage.spendableOf(s)};
+ report.runs.push(row);publish();closeInstance();
+ if(report.runs.length<2){frame.src='/?l4-calibration='+Date.now();return;}
+ report.same=JSON.stringify(report.runs[0].initial)===JSON.stringify(report.runs[1].initial)&&JSON.stringify(report.runs[0].end)===JSON.stringify(report.runs[1].end);assert(report.same,'两个独立实例全字段分歧');finish();
+ }catch(e){finish(e);}};
+</script></body></html>

@@ -31,8 +31,8 @@ import { MODS, MOD_ORDER, SHAPE_MODS, FUEL_PER_MOD, MAX_SLOTS, SLOT_TECHS, loadE
 import { slotsOf, req2Text } from '../systems/research.js';
 import { pulseMul, pulseRangeMul, towerDmgMul, towerRateMul, owlDmgMul } from '../systems/research.js';
 import { blightStats, BLIGHT, BLIGHT_MAX, ensureBlight } from '../systems/blight.js';
-import { STARVE } from '../data/traits.js';
-import { makeRng, curveRow, POLICIES } from './replay.js';
+import { STARVE, SOOTHE } from '../data/traits.js';
+import { makeRng, curveRow, POLICIES, runReplay } from './replay.js';
 import { overlapStats } from '../systems/collide.js';
 import { RES_ORDER, RES_NAME, CAMP_CAP, PACK_CAP, STORE_CAP, STORE_ORDER } from '../data/storage.js';
 import { BUILD, LIGHT_LEVELS, CATEGORIES, CATEGORY_OF, TOWER_LV, TOWER_LV_MAX, towerHp, upgradeCostFor, PRISM_LIT, PRISM_MAX_HOPS } from '../data/buildings.js';
@@ -41,12 +41,16 @@ import { RESEARCH, RESEARCH_ORDER, SECTS } from '../data/research.js';
 import { RECIPES, TOOLS, TOOL_ORDER, recipesOf, canFire } from '../data/tools.js';
 import { canMineRock, mineTimeMul } from '../systems/tools.js';
 import { advanceBuild, buildCostOf, lockedByResearch, placeError, removeBuilding, tryPlace, undoPlace } from '../systems/building.js';
-import { resolveInteract, resolveInteractAt, E_REACH } from '../systems/interact.js';
+import { resolveInteract, resolveInteractAt, E_REACH, tick as interactTick } from '../systems/interact.js';
 import { CODEX, weakTextOf } from '../data/codex.js';
 import { VISUAL, visualSpec } from '../data/visual.js';
 import { SPRITES, CODEX_ART } from '../data/sprites.js';
 import { HINTS } from '../systems/hints.js';
 import { SRC_FILES } from './filelist.js';
+import { preparationOf } from '../systems/preparation.js';
+import { crewSupplyOf } from '../systems/expedition.js';
+import { recoveryOf } from '../systems/recovery.js';
+import { buildingBurnSec } from '../systems/logistics.js';
 import { KEY_ACTIONS } from '../data/keymap.js';
 import { SFX_DEFS } from '../data/sfx.js';
 import { FUELS, FUEL_ORDER, burnSecOf } from '../data/fire.js';
@@ -63,15 +67,17 @@ import { NODE_AMT, NODE_DEEP, nodeMax, nodeStart, nodeFallback, ROCK_START } fro
 import { LAYER_ORDER, LAYER_NAMES, LAYER_META } from '../data/layers.js';
 import { snapshot } from '../core/save.js';
 import { ECOLOGY, BIOMES, biomeIdAt, frontStageOf } from '../data/ecology.js';
-import { COLONISTS, crewCardOf, roleTaskMul, roleInfluence, assignRole } from '../data/colonists.js';
+import { COLONISTS, CREW_EVENT_KINDS, crewCardOf, roleTaskMul, roleInfluence, assignRole, beginCrewDispatch, recordOutpostEvent, recordCrewEvent, ensureCrewCard, dispatchMemoryOf } from '../data/colonists.js';
 import { TASKS, DIRECTIVES, taskFromSave, directiveFromSave } from '../data/tasks.js';
-import { taskBoardStats } from '../systems/taskBoard.js';
+import { taskBoardStats, returnHomeError, requestReturnHome, setDirective } from '../systems/taskBoard.js';
 import { FIRST_SLICE, createFirstSlice, normalizeFirstSlice } from '../data/firstSlice.js';
 import { EXPEDITION } from '../data/expedition.js';
 import { ENDGAME } from '../data/endgame.js';
+import { createNightOutcomes, normalizeNightOutcomes, recordNightOutcome } from '../systems/nightOutcome.js';
+import { hurtPlayer, resolvePlayerDeath } from '../systems/survival.js';
 import { createRunStats, normalizeEndingRecord, normalizeRunStats, recordRunCount, recordRunMaximum, restoreLegacyEnding, settleResonanceEnding } from '../systems/ending.js';
 import { genDepth, genMap, surfaceChunkMapSeed, surfaceChunkNightOpsSeed, surfaceChunkSeed } from '../world/gen.js';
-import { ensureSurfaceChunk, restoreSurfaceTerrain } from '../world/chunks.js';
+import { bindSurfaceChunk, ensureSurfaceChunk, restoreSurfaceTerrain } from '../world/chunks.js';
 import { ensureNightOps } from '../systems/nightops.js';
 import { siteAnchorAudit, resonanceLightReport, resonanceReport, resonanceSitePrepBudget } from './observe.js';
 import { beginStandardTrial, initResonance, lockStandardTrialAtTide, retryPendingResonanceSite, resonancePlaceError, resonanceSiteForBuild, settleStandardTrialAtDawn, updateStandardTrial } from '../systems/resonance.js';
@@ -109,6 +115,26 @@ const bad = (id, msg, data) => ({ id, msg, data });
 // A. 运行时不变量（需要已开局）
 // =====================================================================
 const RUNTIME_CHECKS = [
+  {
+    id: 'crew.return-home',
+    run() {
+      const out = [], fake = { layerId: 'surface', chunkStore: {} };
+      const w = { alive: true, chunkX: 1, chunkY: 0, crew: { id: 'return-fixture' }, directive: { care: 'medical', noNight: true }, path: [] };
+      if (requestReturnHome(fake, w) !== null || !w.directive.returnHome || w.directive.outpost.x !== EXPEDITION.HOME_CHUNK.x) out.push('返营意图未生成');
+      w.outpostTravel = { from: { x: 1, y: 0 }, to: { ...EXPEDITION.HOME_CHUNK }, t: 5 };
+      if (requestReturnHome(fake, w) !== null || w.outpostTravel.t !== 5) out.push('重复返营重设计时');
+      setDirective(w, { outpost: null, outpostMode: null });
+      if (w.directive.returnHome || w.outpostTravel || !w.directive.noNight || w.directive.care !== 'medical') out.push('取消返营未清迁移或损失偏好');
+      if (directiveFromSave({ outpost: { ...EXPEDITION.HOME_CHUNK } }).returnHome) out.push('旧原点驻守变返营');
+      if (directiveFromSave({ outpost: { x: 1, y: 0 }, returnHome: true }).returnHome) out.push('非法返营目标保留');
+      for (const patch of [{ alive: false }, { downed: true }, { hollow: true }, { chunkX: 2 }])
+        if (returnHomeError(fake, { ...w, ...patch }) === null) out.push('非法成员可返营');
+      if (returnHomeError({ ...fake, layerId: 'depth1' }, w) === null) out.push('深潜可新发返营');
+      fake.chunkStore['1,0'] = { outpost: { alerts: [{ status: 'open', rescuePending: true, workerId: w.crew.id }] } };
+      if (returnHomeError(fake, w) === null) out.push('待兑现救援可返营');
+      return out.length ? bad('crew.return-home', '返营契约异常', out) : null;
+    },
+  },
   // A1 账本守恒：state.res 必须恒等于「所有容器 + 背包」之和
   {
     id: 'res.ledger',
@@ -392,6 +418,7 @@ const RUNTIME_CHECKS = [
         if (a.x != null) return { x: a.x, y: a.y };
         if (a.b) return { x: a.b.x, y: a.b.y };
         if (a.c) return { x: a.c.x, y: a.c.y };
+        if (a.g) return { x: a.g.x, y: a.g.y };
         if (a.w) return { x: a.w.x, y: a.w.y };
         if (a.pack) return { x: a.pack.x, y: a.pack.y };
         return null;
@@ -427,8 +454,11 @@ const RUNTIME_CHECKS = [
         }
         const g = posOf(got);
         if (g) {
-          const d = Math.max(Math.abs(g.x + 0.5 - p.x), Math.abs(g.y + 0.5 - p.y));
-          if (d > E_REACH + 1e-6) out.push(`光标(${tx},${ty}) 解析到 ${got.kind}@(${g.x},${g.y})，距玩家 ${+d.toFixed(2)} > E_REACH ${E_REACH}`);
+          const raw = !!(got.w || got.pack);
+          const x = g.x + (raw ? 0 : 0.5), y = g.y + (raw ? 0 : 0.5);
+          const range = got.kind === 'revive' ? SURVIVAL.REVIVE.RANGE : got.kind === 'rescue' ? SURVIVAL.RESCUE.PLAYER_RANGE : got.kind === 'deathPack' ? 1.4 : got.kind === 'soothe' ? SOOTHE.radius : E_REACH;
+          const d = got.g || raw ? Math.hypot(x - p.x, y - p.y) : Math.max(Math.abs(x - p.x), Math.abs(y - p.y));
+          if (d > range + 1e-6) out.push(`光标(${tx},${ty}) 解析到 ${got.kind}@(${g.x},${g.y})，距玩家 ${+d.toFixed(2)} > 范围 ${range}`);
         }
         if (out.length >= MAX_DETAIL) break;
       }
@@ -525,11 +555,10 @@ const RUNTIME_CHECKS = [
       if (!state.started) return null;
       const out = [];
       const names = new Set();
-      const JOBS = ['idle', 'gather', 'eat', 'flee', 'guard', 'rest', 'forage', 'patrol', 'mourn', 'wander', 'hollow', 'build', 'refine', 'stoke', 'rescue', 'medical'];
       for (const w of state.workers || []) {
         if (names.has(w.name)) out.push(`重名拓荒者：${w.name}`);
         names.add(w.name);
-        if (!JOBS.includes(w.job)) out.push(`${w.name}.job="${w.job}" 不是已知任务`);
+        if (!Object.prototype.hasOwnProperty.call(TASKS.JOBS, w.job)) out.push(`${w.name}.job="${w.job}" 不是已知任务`);
         if (!LAYER_IDS.includes(w.layerId)) out.push(`${w.name}.layerId="${w.layerId}" 不是已知层`);
         if (w.hollow && w.job !== 'hollow') out.push(`${w.name} 已蚀化但 job=${w.job}`);
         if (w.downed && w.job !== 'rescue') out.push(`${w.name} 倒地但 job=${w.job}`);
@@ -1051,6 +1080,39 @@ const RUNTIME_CHECKS = [
       return out.length ? bad('workers.ref', `${out.length} 处工人目标悬空`, out.slice(0, MAX_DETAIL)) : null;
     },
   },
+  // L3：每种局面都有非空纯数据探针，不依赖恰好发生一次远端停工。
+  {
+    id: 'crew.experiences',
+    run() {
+      const out = [], w = { name: '经历探针', traits: { good: 'miner', bad: 'slowhand' } }, p = { x: 1, y: 0 };
+      ensureCrewCard(w);
+      if ('dispatchMemory' in w.crew || w.crew.events.length) out.push('旧身份卡被补猜前哨经历');
+      beginCrewDispatch(w);
+      for (const kind of ['outpostArrival', 'outpostReturn', 'outpostCancel']) {
+        if (!recordOutpostEvent(w, kind, p, 1)) out.push(`${kind} 非空写入失败`);
+        recordCrewEvent(w, 'role', '测试改岗', 1);
+        if (recordOutpostEvent(w, kind, p, 1)) out.push(`${kind} 同命令重复写入`);
+      }
+      recordOutpostEvent(w, 'outpostStop', p, 1, 'food', 'gather');
+      for (let i = 0; i < COLONISTS.MAX_EVENTS + 1; i++) recordCrewEvent(w, 'role', `改岗${i}`, 1);
+      if (w.crew.events.length !== COLONISTS.MAX_EVENTS || recordOutpostEvent(w, 'outpostStop', p, 1, 'food')) out.push('历史满额后同日重复停工');
+      if (!recordOutpostEvent(w, 'outpostStop', p, 2, 'food') || !recordOutpostEvent(w, 'outpostStop', p, 2, 'fuel')) out.push('跨日或不同原因未记录');
+      const loaded = { name: w.name, traits: w.traits };
+      ensureCrewCard(loaded, 0, 1, JSON.parse(JSON.stringify(w.crew)));
+      if (recordOutpostEvent(loaded, 'outpostStop', p, 2, 'food') || recordOutpostEvent(loaded, 'outpostReturn', p, 2)) out.push('身份卡往返丢失去重');
+      beginCrewDispatch(loaded);
+      if (!recordOutpostEvent(loaded, 'outpostArrival', p, 2)) out.push('新命令未重置到达去重');
+      for (let i = 0; i < COLONISTS.MAX_STOP_KEYS + 2; i++) recordOutpostEvent(loaded, 'outpostStop', { x: i, y: 0 }, 2, 'storage');
+      if (loaded.crew.dispatchMemory.stopKeys.length !== COLONISTS.MAX_STOP_KEYS || recordOutpostEvent(loaded, 'outpostStop', p, 2, 'food')) out.push('停工索引超限或淘汰去重');
+      const before = JSON.stringify(loaded);
+      crewCardOf(loaded);
+      if (JSON.stringify(loaded) !== before) out.push('读取身份卡写入状态');
+      if (recordOutpostEvent(loaded, 'outpostStop', p, 2, 'toString') || recordOutpostEvent(loaded, 'outpostArrival', {}, 2)) out.push('异常原因或坐标被接受');
+      const m = dispatchMemoryOf({ command: Infinity, recorded: CREW_EVENT_KINDS.concat(CREW_EVENT_KINDS), stopDay: -1, stopKeys: Array(COLONISTS.MAX_STOP_KEYS + 2).fill('1,0:food').concat('bad') });
+      if (m.command !== 0 || m.stopDay !== 0 || m.recorded.length !== 3 || m.stopKeys.length !== 1) out.push('异常去重字段未归一化');
+      return out.length ? bad('crew.experiences', '真实经历契约异常', out) : null;
+    },
+  },
   // N0：身份卡、任务投影与区块驻守引用必须同时存在且唯一。
   {
     id: 'crew.bounds',
@@ -1073,7 +1135,8 @@ const RUNTIME_CHECKS = [
         if (rels.length > COLONISTS.MAX_RELATIONS) out.push(`${w.name} 关系边 ${rels.length} > 上限 ${COLONISTS.MAX_RELATIONS}`);
         const events = Array.isArray(w.crew && w.crew.events) ? w.crew.events : [];
         if (events.length > COLONISTS.MAX_EVENTS) out.push(`${w.name} 经历 ${events.length} > 上限 ${COLONISTS.MAX_EVENTS}`);
-        for (const e of events) if (!e || !Number.isInteger(e.day) || e.day < 1 || !['join', 'role', 'down', 'rescue', 'death', 'revive'].includes(e.kind) || !e.text || String(e.text).length > 48) out.push(`${w.name} 经历记录字段异常`);
+        for (const e of events) if (!e || !Number.isInteger(e.day) || e.day < 1 || !CREW_EVENT_KINDS.includes(e.kind) || !e.text || String(e.text).length > 48) out.push(`${w.name} 经历记录字段异常`);
+        if (w.crew && w.crew.dispatchMemory && JSON.stringify(w.crew.dispatchMemory) !== JSON.stringify(dispatchMemoryOf(w.crew.dispatchMemory))) out.push(`${w.name} 经历去重字段异常或超限`);
         if (!(w.job || 'idle')) out.push(`${w.name} 没有任务字段`);
         const d = directiveFromSave(w.directive);
         if (!['auto', 'rest', 'guard', 'forage', 'patrol'].includes(d.mode)) out.push(`${w.name} 调度模式未知：${d.mode}`);
@@ -1120,6 +1183,7 @@ const RUNTIME_CHECKS = [
         const id = w.crew && w.crew.id;
         if (!id || !saved.has(id)) out.push(`${w.name} 的身份卡没有进入 snapshot.workers`);
         else if (saved.get(id).crew.role !== w.crew.role || saved.get(id).crew.personality !== w.crew.personality || JSON.stringify(saved.get(id).crew.events || []) !== JSON.stringify(w.crew.events || [])) out.push(`${w.name} 读写投影丢失身份/经历`);
+        else if (JSON.stringify(saved.get(id).crew.dispatchMemory) !== JSON.stringify(w.crew.dispatchMemory)) out.push(`${w.name} 经历去重未随存档保存`);
         else {
           const a = directiveFromSave(w.directive), b = directiveFromSave(saved.get(id).directive);
           if (JSON.stringify(a) !== JSON.stringify(b)) out.push(`${w.name} 调度指令未随存档保存`);
@@ -1137,6 +1201,8 @@ const RUNTIME_CHECKS = [
       if (!state.started) return null;
       const out = [];
       const slice = normalizeFirstSlice(state.firstSlice, false, state.day, state.t);
+      if (normalizeFirstSlice({ startedT: 0 }, false, 1, 110).startedT !== 0) out.push('首局合法零时刻被读档当前时刻覆盖');
+      if (normalizeFirstSlice({}, false, 1, 110).startedT !== 110) out.push('旧首局缺失时间未采用载入时刻');
       if (!state.firstSlice || state.firstSlice.version !== FIRST_SLICE.VERSION) out.push(`运行时版本 ${state.firstSlice && state.firstSlice.version} ≠ ${FIRST_SLICE.VERSION}`);
       if (slice.active && !FIRST_SLICE.PHASES.includes(slice.phase)) out.push(`阶段未知：${slice.phase}`);
       if (slice.history.length > FIRST_SLICE.MAX_HISTORY) out.push(`历史 ${slice.history.length} > 上限 ${FIRST_SLICE.MAX_HISTORY}`);
@@ -1162,8 +1228,16 @@ const RUNTIME_CHECKS = [
   {
     id: 'outpost.ecology',
     run() {
-      if (!state.started) return null;
       const out = [];
+      // Independent probes also run in the menu: binding must not manufacture
+      // persisted outpost state when no outpost has ever been initialized.
+      for (const initial of [undefined, null]) {
+        const c = { id: '0,0', cx: 0, cy: 0, map: createMap(2, 2), buildings: [], beacons: [], enemies: [], workers: [], outpost: initial };
+        const probe = { layerId: 'surface', layers: {}, chunkStore: {}, pack: { stock: {} } };
+        bindSurfaceChunk(probe, c);
+        if (c.outpost !== initial) out.push('无前哨区块绑定后创建了持久化前哨状态');
+      }
+      if (!state.started) return out.length ? bad('outpost.ecology', '前哨绑定副作用', out) : null;
       const terrain = createMap(3, 2);
       terrain.set(0, 0, T.ORE); terrain.nodeAmt[0] = NODE_AMT[T.ORE];
       terrain.set(1, 0, T.VINE); terrain.nodeAmt[1] = NODE_AMT[T.VINE];
@@ -1427,6 +1501,15 @@ const DATA_CHECKS = [
       if (ENDGAME.REPORT_SCHEMA.join(',') !== 'version,milestone,sites,resourceAudit,stock,costs,status') out.push('终局报告 schema 不一致');
       const fixture = { seed: 4242, milestone: { bossDefeated: true }, chunkStore: {} };
       initResonance(fixture);
+      const freshTrial = { seed: 4242, chunkStore: {} };
+      initResonance(freshTrial);
+      const freshTrialJson = JSON.stringify(freshTrial.resonance);
+      initResonance(freshTrial, JSON.parse(freshTrialJson));
+      if (JSON.stringify(freshTrial.resonance) !== freshTrialJson) out.push('新三站未开始试炼存读后凭空生成首站试炼');
+      const legacyTrialFixture = { seed: 4242, chunkStore: {} };
+      initResonance(legacyTrialFixture, { trial: { status: 'active', attempts: 2, activeDay: 3 } });
+      if (legacyTrialFixture.resonance.sites.first.trial?.status !== 'active'
+        || legacyTrialFixture.resonance.sites.first.trial?.attempts !== 2) out.push('旧单站全局试炼未迁移首站');
       for (let ix = 0; ix < probes.length; ix++) {
         const probe = probes[ix], costFixture = { ...fixture, resonance: JSON.parse(JSON.stringify(fixture.resonance)) };
         for (let prev = 0; prev < ix; prev++) costFixture.resonance.sites[probes[prev].id].status = 'complete';
@@ -1750,6 +1833,27 @@ const DATA_CHECKS = [
       if (!(replay.DEPART_T > 0 && replay.DEPART_T < replay.RETURN_T && replay.RETURN_T < 400)) out.push('远征回放日程边界异常');
       if (!(replay.FOOD_FLOOR >= 0 && replay.FUEL_FLOOR >= 0 && replay.MAX_REMOTE_CHUNKS === 1)) out.push('远征回放补给/区块上限异常');
       return out.length ? bad('expedition.spec', '远征观测契约异常', out) : null;
+    },
+  },
+  {
+    id: 'crew.supply',
+    run() {
+      const out = [];
+      const w = { name: '补给探针', alive: true, chunkX: 1, chunkY: 0, hunger: 0,
+        traits: { bad: 'glutton' }, directive: { outpost: { x: 1, y: 0 }, outpostMode: 'silent' } };
+      const chunk = { id: '1,0', cx: 1, cy: 0, workers: [w], beacons: [],
+        buildings: [{ type: 'lamp', x: 2, y: 2, fuel: 2, level: 1, burnT: 3 },
+          { type: 'store', stock: { food: 4, fuel: 10 } }] };
+      const probe = { layerId: 'surface', chunkX: 0, chunkY: 0, chunkStore: { '1,0': chunk }, research: { unlocked: {} }, pack: { stock: { food: 99 } } };
+      const before = JSON.stringify(probe), r = crewSupplyOf(probe, w);
+      if (r.supply.food !== 4 || r.supply.fuel !== 10 || r.food.conditionalMax !== 1 || r.guardFuelMax !== 0) out.push('库存/静默取食口径异常');
+      if (r.devices[0].seconds !== 2 * buildingBurnSec(chunk.buildings[0], probe) - 3) out.push('灯槽续航不同源');
+      w.directive.outpost = { x: 8, y: 8 };
+      const unknownBefore = JSON.stringify(probe), unknown = crewSupplyOf(probe, w);
+      if (unknown.known || unknown.supply || JSON.stringify(probe) !== unknownBefore) out.push('未知目标生成或改写');
+      w.directive.outpost = { x: 1, y: 0 };
+      if (JSON.stringify(probe) !== before) out.push('报告修改状态');
+      return out.length ? bad('crew.supply', '人员补给只读投影异常', out) : null;
     },
   },
   {
@@ -2189,6 +2293,22 @@ const DATA_CHECKS = [
       const offLamp = { type: 'lamp', fuel: 2, level: 1, burnT: 0, off: true };
       burnBuildingFuel([offLamp], burnState, burnPeriod * 2);
       if (offLamp.fuel !== 2 || offLamp.burnT !== 0) out.push('关闭的灯具不应消耗燃料');
+      for (const type of ['lamp', 'purifier', 'decoy']) {
+        for (const fireMat of FUEL_ORDER) {
+          if (burnSecOf({type,fireMat}, BUILD[type]) !== BUILD[type].burnSec) out.push(`${type} 被炉火材料覆盖耗率`);
+        }
+      }
+      for (const type of ['furnace','smelter']) for (const fireMat of FUEL_ORDER) {
+        if (burnSecOf({type,fireMat},BUILD[type]) !== FUELS[fireMat].burnSec) out.push(`${type}/${fireMat} 火种耐烧度失效`);
+      }
+      const siteLamp = {type:'lamp',site:true,fuel:2,burnT:1};
+      burnBuildingFuel([siteLamp],burnState,burnPeriod*2);
+      if (siteLamp.fuel!==2||siteLamp.burnT!==1) out.push('施工中灯具消耗了燃料');
+      const emptyLamp = {type:'lamp',fuel:1,level:1,burnT:0};
+      burnBuildingFuel([emptyLamp],burnState,burnPeriod*3);
+      if (emptyLamp.fuel!==0||emptyLamp.burnT!==0) out.push('燃尽灯具留下燃烧欠账');
+      emptyLamp.fuel=1;burnBuildingFuel([emptyLamp],burnState,burnPeriod/2);
+      if (emptyLamp.fuel!==1) out.push('重新添燃料立即支付了熄灭期间欠账');
       if (state.started && isTide(state) && state.nightSpawnDay === (state.day | 0)
         && (!(state.nightSpawnBudget >= 0) || state.nightSpawnUsed < 0 || state.nightSpawnUsed > state.nightSpawnBudget)) {
         out.push(`第 ${state.day} 天刷怪账本越界：${state.nightSpawnUsed}/${state.nightSpawnBudget}`);
@@ -2599,6 +2719,18 @@ const DATA_CHECKS = [
       if (nodeStart(T.ROCK, true) !== 0) out.push('深层岩壁生成期被给了初值');
       if (nodeFallback(T.ROCK) !== ROCK_START) out.push(`岩壁懒初始化值 ${nodeFallback(T.ROCK)} ≠ ROCK_START ${ROCK_START}`);
       for (const t in NODE_DEEP) if (!(nodeStart(+t, true) > 0)) out.push(`NODE_DEEP 里的地形 ${t} 取不到深层初值`);
+      // Always exercise the stale-action guard, including on the main menu.
+      const map = createMap(3, 3), probe = { map, layerId: 'surface',
+        player: { x: 1.5, y: 1.5 }, pack: { stock: {}, cap: PACK_CAP },
+        beacons: [], buildings: [], workers: [], res: {}, floaties: [], research: {}, equip: {} };
+      const cached = { kind: 'mine', i: 4, x: 1, y: 1, res: 'ore' };
+      for (let n = 0; n < 20; n++) interactTick(probe, cached);
+      if (usedOf(packContainer(probe)) || map.nodeAmt[4] || map.tiles[4] !== T.FLOOR) out.push('耗尽矿点的缓存目标仍可产出资源');
+      map.set(1, 1, T.VINE); map.nodeAmt[4] = NODE_AMT[T.VINE];
+      interactTick(probe, cached);
+      if (usedOf(packContainer(probe)) || map.nodeAmt[4] !== NODE_AMT[T.VINE]) out.push('旧矿点目标能开采已变成藤木的格');
+      for (const i of [-1, map.tiles.length, undefined]) interactTick(probe, { ...cached, i });
+      if (usedOf(packContainer(probe))) out.push('无效采集索引仍能产出资源');
       return out.length ? bad('data.nodeamt', '节点量表自身不自洽', out.slice(0, MAX_DETAIL)) : null;
     },
   },
@@ -2832,6 +2964,95 @@ const DATA_CHECKS = [
     },
   },
   {
+    id: 'night.outcome',
+    run() {
+      const out = [];
+      const fixture = () => ({ day: 2, t: TIDE_START + 1, playerHp: 1, playerMaxHp: 100,
+        playerDead: false, player: { x: 2, y: 2 }, layerId: 'surface', chunkX: 0, chunkY: 0,
+        floaties: [], resonance: { sites: { first: { id: 'first', status: 'built' } },
+          trial: { siteId: 'first', status: 'active', activeDay: 2, attempts: 1 } } });
+      const f = fixture(); hurtPlayer(f, 2);
+      if (!f.playerDead || f.resonance.trial.status !== 'failed' || f.resonance.trial.attempts !== 1
+          || f.nightOutcomes?.history[0]?.result !== 'retreat') out.push('致死须立即中断共鸣、记录溃退，不增加尝试');
+      const once = JSON.stringify(f); resolvePlayerDeath(f);
+      if (JSON.stringify(f) !== once) out.push('重复致死处理不幂等');
+      const boundary = fixture(); boundary.t = TIDE_END; boundary.playerHp = 0;
+      settleStandardTrialAtDawn(boundary);
+      if (boundary.resonance.trial.status !== 'failed' || boundary.ending) out.push('零HP黎明必须失败，不授结局');
+      const complete = fixture(); complete.resonance.trial.status = 'complete';
+      hurtPlayer(complete, 2);
+      if (complete.resonance.trial.status !== 'complete') out.push('死亡不得撤销既有完成');
+      const records = { day: 1, nightOutcomes: createNightOutcomes() };
+      for (let day = 1; day <= ENDGAME.NIGHT_OUTCOME.HISTORY_LIMIT + 2; day++) {
+        records.day = day; recordNightOutcome(records, 'seal'); recordNightOutcome(records, 'dawn');
+      }
+      if (records.nightOutcomes.history.length !== ENDGAME.NIGHT_OUTCOME.HISTORY_LIMIT
+        || records.nightOutcomes.history.some(row => row.result !== 'retreat')) out.push('夜结果必须有界且溃退不能改为胜利');
+      if (JSON.stringify(normalizeNightOutcomes(records.nightOutcomes)) !== JSON.stringify(records.nightOutcomes)
+        || normalizeNightOutcomes(null) !== null) out.push('夜结果存读/旧档未知契约错误');
+      const old = { day: 17, nightOutcomes: null }; recordNightOutcome(old, 'death');
+      if (old.nightOutcomes.knownSinceDay !== 17 || old.nightOutcomes.history.length !== 1) out.push('旧档首次新事件不得补造过去的夜晚');
+      if (state.nightOutcomes && JSON.stringify(normalizeNightOutcomes(state.nightOutcomes)) !== JSON.stringify(state.nightOutcomes)) out.push('当前夜结果字段非法');
+      return out.length ? bad('night.outcome', '胜负与致死顺序错误', out) : null;
+    },
+  },
+  {
+    id: 'preparation.readonly',
+    run() {
+      const out = [];
+      const f = { seed: 4242, day: 1, t: 100, layerId: 'surface', chunkX: 0, chunkY: 0,
+        map: { w: 4, h: 4 }, light: new Float32Array(16).fill(TOWER.LIGHT_MIN),
+        player: { x: 1, y: 1, lamp: { power: 4 } }, beacons: [], layers: {},
+        pack: { stock: { fuel: 2, coal: 3 } }, research: { unlocked: {} },
+        buildings: [{ type: 'lamp', x: 1, y: 1, level: 1, fuel: 2, burnT: 1 },
+          { type: 'furnace', x: 2, y: 1, fireMat: 'coal', fuel: 2, off: true },
+          { type: 'towerGlow', x: 1, y: 2, mods: [], level: 1 },
+          { type: 'lamp', x: 3, y: 1, site: true, fuel: 2 }] };
+      for (const [day, kind, actionId] of [[1, 'bud', 'swarm'], [2, 'moth', 'lamp'], [3, 'shell', 'wall'], [5, 'owl', 'air']]) {
+        f.day = day;
+        const before = JSON.stringify(f), r = preparationOf(f);
+        if (JSON.stringify(f) !== before) out.push('报告修改模拟状态');
+        if (r.kind !== kind || r.actionId !== actionId || !r.candidates.includes(kind)) out.push(`第${day}夜威胁/行动不同源`);
+        const lamp = r.devices[0];
+        if (lamp.seconds !== 2 * buildingBurnSec(f.buildings[0], f) - 1 || !lamp.refill) out.push('逐灯续航/补给错误');
+        if (r.devices[1].seconds !== null || r.devices[1].light || r.devices[2].light
+          || r.devices[2].burning || r.devices[2].seconds !== null) out.push('熄火/施工不得报作点亮或燃烧');
+        if (r.defense.total !== (actionId === 'lamp' ? 0 : 1)) out.push('克制火力读取错误');
+      }
+      f.day = 1;
+      const r = preparationOf(f);
+      if (!r.candidates.includes(r.kind)) out.push('把未进入真实兵种表的主题当成必出');
+      return out.length ? bad('preparation.readonly', '备战投影与运行规则不一致', out) : null;
+    },
+  },
+  {
+    id: 'recovery.readonly',
+    run() {
+      const f = { seed: 4242, day: 2, layerId: 'surface', chunkX: 0, chunkY: 0,
+        map: { w: 4, h: 4 }, light: new Float32Array(16).fill(SURVIVAL.RESCUE.LIGHT_MIN),
+        layers: {}, pack: { stock: {} }, buildings: [], workers: [], enemies: [] };
+      const out = [];
+      if (recoveryOf(f).issues.length) out.push('无事仍催恢复');
+      f.workers.push({ id: 'test', name: '测试队员', alive: true, downed: true, downT: 20, x: 1, y: 1, layerId: 'surface' });
+      f.buildings.push({ type: 'lamp', x: 2, y: 1, fuel: 0 }, { type: 'wall', x: 2, y: 2, hp: BUILD.wall.hp - 1 });
+      let before = JSON.stringify(f), r = recoveryOf(f);
+      if (JSON.stringify(f) !== before) out.push('报告写入状态');
+      if (r.issues.length !== 3 || r.urgent.length !== 3 || r.issues[0].kind !== 'rescue') out.push('清单遗漏或优先级错误');
+      if (!r.issues[0].blockers.includes('缺食物')) out.push('断粮未显示');
+      f.workers[0].alive = false; f.buildings[0].fuel = 1; f.buildings[1].hp = BUILD.wall.hp;
+      if (recoveryOf(f).issues.length) out.push('解决后问题未移除');
+      f.workers[0].alive = true; f.workers[0].chunkX = 1;
+      if (recoveryOf(f).issues.length) out.push('远端队员混入本区');
+      f.player = { x: 1, y: 1 }; f.playerHp = 50; f.playerMaxHp = 100; f.playerInjury = 1; f.playerHunger = 10;
+      f.enemies.push({ alive: true, x: 1, y: 1 });
+      before = JSON.stringify(f); r = recoveryOf(f);
+      if (!r.issues.find(i => i.id === 'player:hunger')?.blockers.some(x => x.includes('蚀兽太近'))) out.push('进食危险条件遗漏');
+      if (!r.issues.find(i => i.id === 'player:injury')?.detail.includes('休整只回血')) out.push('误称休整能清伤');
+      if (JSON.stringify(f) !== before) out.push('玩家条件投影写状态');
+      return out.length ? bad('recovery.readonly', '恢复投影不一致', out) : null;
+    },
+  },
+  {
     id: 'boss.phases',
     // W14-A 第 7 步：Boss 二阶段。
     // 【守什么】① 数值合法 ② 二阶段真的更快更多（不能只加个名字）
@@ -2913,7 +3134,8 @@ const DATA_CHECKS = [
       // 运行时：不饿的时候缓冲计时必须归零（否则“攒够一次就永久扣血”）
       for (const w of state.workers || []) {
         if (w.hunger > 0 && w.starveT) out.push(`${w.name} 不饿却带着 starveT=${(w.starveT || 0).toFixed(1)}`);
-        if (w.starveT > STARVE.graceSecs + 1) out.push(`${w.name} starveT=${w.starveT} 异常`);
+        // graceSecs是开始掉血的时刻，不是计时器上限；生产AI在缓冲后继续累计。
+        if (w.starveT != null && (!Number.isFinite(w.starveT) || w.starveT < 0)) out.push(`${w.name} starveT=${w.starveT} 异常`);
       }
       return out.length ? bad('starve.buffer', '饥饿缓冲配置/状态不一致', out.slice(0, MAX_DETAIL)) : null;
     },
@@ -2936,6 +3158,16 @@ const DATA_CHECKS = [
       // ② 打法表：至少要有"守家"与"挂机"两条（难度曲线靠它俩对质）
       for (const k of ['home', 'idle', 'rest', 'expedition', 'panic']) if (typeof POLICIES[k] !== 'function') out.push(`POLICIES.${k} 不是函数（难度曲线少了一条腿）`);
       if (POLICIES.home === POLICIES.idle) out.push('守家与挂机是同一个策略（那就没有对照）');
+      let rejected = false;
+      try { runReplay({ policy: '__unknown__' }, {}); } catch (e) { rejected = String(e.message).includes('未知回放策略'); }
+      if (!rejected) out.push('未知策略静默回退守家');
+      const deathProbe = { day: 1, playerHp: 20, playerMaxHp: 100, res: {}, workers: [], buildings: [], enemies: [] };
+      let probeSteps = 0;
+      const counted = runReplay({ days: 1, policy: 'idle', maxSteps: 3 }, {
+        newGame() {}, state: () => deathProbe, deathCount: () => probeSteps ? 1 : 0,
+        step() { probeSteps++; deathProbe.playerHp = probeSteps === 1 ? 45 : 100; if (probeSteps === 3) deathProbe.day = 2; },
+      });
+      if (counted.deaths !== 1) out.push('复归45HP漏计，或普通回血被误算阵亡');
       // ③ 曲线字段：齐全且都是有限数（NaN 会静静地把整条曲线变成垃圾）
       //    ⚠️ 这里不能只在 state.started 时才跑 —— 否则新局/主菜单下这条又变成空跑（D48）
       {
@@ -2985,15 +3217,27 @@ const DATA_CHECKS = [
         chunks: Object.entries(state.chunkStore || {}).map(([k, c]) => [k, (c.buildings || []).map((b) => [b.type, b.x, b.y, +b.burnT || 0])]),
       });
       const terrainFingerprint = () => JSON.stringify(Object.entries(state.chunkStore || {}).map(([k, c]) => [k, Array.from(c.map.tiles), Array.from(c.map.nodeAmt)]));
+      const buildWorkFingerprint = () => JSON.stringify({
+        active: (state.buildings || []).map((b) => [b.type, b.x, b.y, !!b.site, Math.round(b.work || 0)]),
+        chunks: Object.entries(state.chunkStore || {}).map(([k, c]) => [k, (c.buildings || []).map((b) => [b.type, b.x, b.y, !!b.site, Math.round(b.work || 0)])]),
+      });
+      const nightOpsFingerprint = () => JSON.stringify(Object.entries(state.chunkStore || {}).map(([k, c]) => [k, c.nightops ? {
+        day: c.nightops.day || 0, tideOn: !!c.nightops.tideOn,
+        blooms: c.nightops.blooms || [], vents: c.nightops.vents || [],
+      } : null]));
       const before = {
         n: (state.buildings || []).length, layer: state.layerId, w: state.map.w, h: state.map.h,
         hp: state.playerHp, hunger: state.playerHunger, injury: state.playerInjury,
         overwork: (state.workers || []).map((w) => w.overwork || 0),
         deathPack: JSON.stringify(state.deathPack || null),
-        firstSlice: JSON.stringify(normalizeFirstSlice(state.firstSlice, false, state.day, state.t)),
+        nightOutcomes: JSON.stringify(state.nightOutcomes || null),
+        firstSlice: JSON.stringify(state.firstSlice),
+        resonance: JSON.stringify(state.resonance),
         enemies: enemyFingerprint(),
         spawnLedger: `${state.nightSpawnDay | 0}/${state.nightSpawnBudget | 0}/${state.nightSpawnUsed | 0}`,
         burnTimers: burnTimerFingerprint(),
+        buildWork: buildWorkFingerprint(),
+        nightOps: nightOpsFingerprint(),
         terrain: terrainFingerprint(),
       };
       try {
@@ -3004,10 +3248,14 @@ const DATA_CHECKS = [
         hp: state.playerHp, hunger: state.playerHunger, injury: state.playerInjury,
         overwork: (state.workers || []).map((w) => w.overwork || 0),
         deathPack: JSON.stringify(state.deathPack || null),
-        firstSlice: JSON.stringify(normalizeFirstSlice(state.firstSlice, false, state.day, state.t)),
+        nightOutcomes: JSON.stringify(state.nightOutcomes || null),
+        firstSlice: JSON.stringify(state.firstSlice),
+        resonance: JSON.stringify(state.resonance),
         enemies: enemyFingerprint(),
         spawnLedger: `${state.nightSpawnDay | 0}/${state.nightSpawnBudget | 0}/${state.nightSpawnUsed | 0}`,
         burnTimers: burnTimerFingerprint(),
+        buildWork: buildWorkFingerprint(),
+        nightOps: nightOpsFingerprint(),
         terrain: terrainFingerprint(),
       };
       if (after.n !== before.n) out.push(`读档往返后建筑数 ${after.n} ≠ ${before.n}`);
@@ -3018,10 +3266,14 @@ const DATA_CHECKS = [
       }
       if (after.overwork.join(',') !== before.overwork.join(',')) out.push(`读档往返后透支=${after.overwork} ≠ ${before.overwork}`);
       if (after.deathPack !== before.deathPack) out.push('读档往返后遗落包内容不一致');
+      if (after.nightOutcomes !== before.nightOutcomes) out.push('读档往返后夜结果不一致');
       if (after.firstSlice !== before.firstSlice) out.push('读档往返后首局切片状态不一致');
+      if (after.resonance !== before.resonance) out.push('读档往返后三站试炼状态不一致');
       if (after.enemies !== before.enemies) out.push('读档往返后当前层/地表区块的存活蚀兽状态不一致');
       if (after.spawnLedger !== before.spawnLedger) out.push(`读档往返后夜潮普通刷怪账本 ${after.spawnLedger} ≠ ${before.spawnLedger}`);
       if (after.burnTimers !== before.burnTimers) out.push('读档往返后活动区/休眠区灯具燃烧进度不一致');
+      if (after.buildWork !== before.buildWork) out.push('读档往返后活动区/休眠区建筑施工状态或进度不一致');
+      if (after.nightOps !== before.nightOps) out.push('读档往返后地表夜辉草或潮穴状态不一致');
       if (after.terrain !== before.terrain) out.push('读档往返后地表节点余量/开凿地形不一致');
       return out.length ? bad('save.roundtrip', '读档往返路径有问题（loadFromData/restoreBuildings）', out.slice(0, MAX_DETAIL)) : null;
     },

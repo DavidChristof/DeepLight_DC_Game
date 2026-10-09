@@ -18,7 +18,7 @@
           <span class="stat meter r-food" title="饱食度会随时间下降"><span class="meter-label">饱食</span><span class="meter-track"><i id="sat-meter"></i></span><b id="sat">80</b></span>
           <span class="stat r-kill">蚀灭 <b id="kills">0</b></span>
           <span class="stat" id="layer">地表</span>
-          <span class="stat" id="nighttheme">今晚 混合夜</span>
+          <button type="button" class="stat prep-entry" id="nighttheme" title="查看备战">今晚 混合夜</button>
           <span class="stat" id="waveleft">今夜 ≈12 波</span>
           <span class="stat" id="tide">潮位 1</span>
           <span class="stat hidden" id="expedition-status"></span>
@@ -33,6 +33,11 @@
       <div id="keyhelp" class="hidden"></div>
       <div id="buildhint">夜晚蚀潮会涌出蚀兽（噬光虫啃灯·夜枭越墙）—— 在灯照范围内布塔迎战！</div>
       <div id="firstnote" class="hidden"></div>
+      <div id="recovery-note" class="hidden" aria-label="潮后恢复">
+        <span data-recovery-summary></span>
+        <button type="button" data-recovery-open>查看待处理</button>
+        <button type="button" data-recovery-dismiss aria-label="关闭恢复提示">×</button>
+      </div>
       <div id="quickpause" class="hidden">
         <div class="qptitle">已暂停</div>
         <div class="qprow"><button id="qp-resume">继续（P）</button><button id="qp-menu">菜单（Esc）</button></div>
